@@ -1,0 +1,11 @@
+{
+  "version": "sprite.cal.v1",
+  "bands": {
+    "vqa": { "high": 0.80, "low": 0.40 },
+    "siglip2": { "high": 0.10, "low": 0.01 },
+    "palette": { "high": 0.85, "low": 0.50 }
+  },
+  "default": { "high": 0.70, "low": 0.40 },
+  "calibrated_on": "GENERIC SEED - not a real human-labelled holdout. Recalibrate against ~50-100 labelled sprites per check_type before any canon bind.",
+  "notes": "siglip2 sigmoid is uncalibrated/pixel-art-tuned: >0.10 strong match, <0.01 absent, between = UNCERTAIN (ai-eyes doctrine). vqa/palette bands are placeholders. Recalibrate when the generator or verifier checkpoint changes (both pinned)."
+}

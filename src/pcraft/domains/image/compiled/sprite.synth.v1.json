@@ -1,0 +1,9 @@
+{
+  "_warning": "PINNED COMPILED ARTIFACT - DO NOT HAND-EDIT. This is a scaffold SEED (generated_by='scaffold-seed'); replace it with the output of an offline GEPA compile via `pcraft compile`, then pin a new version.",
+  "program_id": "sprite.synth",
+  "version": "v1-scaffold-seed",
+  "generated_by": "scaffold-seed",
+  "source_hash": "",
+  "instruction": "Convert the resolved contract's depictable atoms into a single SDXL prompt. Front-load by front_load_rank. Emit ONLY tokens that trace to an atom marked depictable=true. Identity (face/insignia) is bound by conditioning (IP-Adapter/LoRA on the reference plate), never described in tokens. Append render/style boilerplate (view, framing, background) last; it is not an identity atom.",
+  "demos": []
+}

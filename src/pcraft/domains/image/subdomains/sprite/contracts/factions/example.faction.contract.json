@@ -1,0 +1,49 @@
+{
+  "$schema": "prompt-craft/contract.v1",
+  "id": "faction:ashen-pact",
+  "level": "faction",
+  "_note": "GENERIC EXAMPLE — invented for the scaffold, NOT real game canon. The shared, inheritable identity layer a character subclass extends.",
+  "must_have": [
+    {
+      "id": "tabard",
+      "claim": "a grey-ash tabard worn over the torso",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": { "kind": "region", "ref": "torso" }
+    },
+    {
+      "id": "sigil",
+      "claim": "a white triple-bar sigil on the tabard",
+      "check_type": "vqa",
+      "severity": "required",
+      "depends_on": "tabard",
+      "spatial": { "kind": "region", "ref": "chest-center" }
+    },
+    {
+      "id": "palette",
+      "claim": "an ash-grey, bone-white and blood-red colour scheme",
+      "check_type": "palette",
+      "severity": "required",
+      "enum": ["#3a3a3a", "#d9d4c8", "#7a1f1f"]
+    }
+  ],
+  "must_not": [
+    {
+      "id": "no_rival_colours",
+      "claim": "gold or royal-blue heraldry",
+      "check_type": "siglip2",
+      "enum": ["gold heraldry", "royal-blue heraldry"]
+    },
+    {
+      "id": "no_modern_gear",
+      "claim": "a firearm or any modern technology",
+      "check_type": "vqa"
+    }
+  ],
+  "identity_ref": {
+    "plate": "plates/ashen-pact-costume.png",
+    "method": "lora",
+    "weight": 0.8,
+    "scope": "costume"
+  }
+}

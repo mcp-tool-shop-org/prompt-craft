@@ -1,0 +1,47 @@
+{
+  "$schema": "prompt-craft/contract.v1",
+  "id": "char:ashen-reaver",
+  "level": "character",
+  "extends": "faction:ashen-pact",
+  "_note": "GENERIC EXAMPLE — NOT real canon. Every atom traces to a phrase that was inert prose in the superseded test_characters.json: 'green skin' -> skin, 'war axe in right hand' -> weapon (spatial pose), 'tusks' -> face. The face atom + no_human_face must_not are exactly what the old weapon-only gate could not catch (the faceless-generic-hero failure).",
+  "must_have": [
+    {
+      "id": "skin",
+      "claim": "grey-green orcish skin",
+      "check_type": "vqa",
+      "severity": "required"
+    },
+    {
+      "id": "weapon",
+      "claim": "a two-handed battle-axe held in both hands",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": { "kind": "pose", "ref": "poses/two-hand-weapon.openpose.png" }
+    },
+    {
+      "id": "face",
+      "claim": "a visible orcish face with tusks",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": { "kind": "region", "ref": "head" }
+    }
+  ],
+  "must_not": [
+    {
+      "id": "no_human_face",
+      "claim": "a smooth human face",
+      "check_type": "vqa"
+    },
+    {
+      "id": "no_shield",
+      "claim": "a shield",
+      "check_type": "vqa"
+    }
+  ],
+  "identity_ref": {
+    "plate": "plates/ashen-reaver-front.png",
+    "method": "ip_adapter",
+    "weight": 0.6,
+    "scope": "face"
+  }
+}
