@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# DSPy / optimizer caches
+.dspy_cache/
+cache/
+
+# Per-asset receipts & generated outputs (provenance lives in records/, regenerable / large)
+records/
+outputs/
+*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
