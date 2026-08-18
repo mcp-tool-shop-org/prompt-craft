@@ -61,7 +61,10 @@ El núcleo es **independiente de la GPU y funciona en cualquier lugar**: toda la
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft list              # contract ids in the store
+pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
+pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -97,23 +100,24 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v0.2.1: el núcleo es real; el bloqueo de pose y la vinculación de identidad no están implementados.**
+**v0.2.1: el núcleo es real. El condicionamiento de SDXL se ha implementado en el código. La generación local con GPU aún no se ha probado. Se ha ejecutado una receta en la nube.**
 
 | | |
 |---|---|
-| Núcleo | **205 pruebas superadas**, independiente de la GPU, determinista. `verify` ejecuta la suite, la suite nuevamente bajo `-O` y una construcción del paquete. |
+| Núcleo | **318 pruebas superadas** (contadas el 2026-08-18 en `d36aa28`), sin GPU, determinista. `verify` ejecuta la suite, la suite de nuevo bajo `-O` y se crea un paquete. |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
-| Cobertura | los adaptadores del generador y verificador dependientes de la GPU siguen siendo el resto no probado. |
-| La ruta `[image]` | **nunca se ha ejecutado en esta máquina.** `bind --no-mock` se niega con un error de dependencia faltante. |
-| Condicionamiento | el ciclo ensambla `pose_refs` y `identity_refs` y los escribe en el recibo. Ninguno de los generadores enviados lee una clave de ese diccionario. Si esas referencias están presentes, `generate()` **se niega**. El bloqueo de pose y la vinculación de identidad no están implementados, sino simplemente no se han utilizado. |
-| Umbrales | los límites inferior y de varianza de la sub-puerta sprite son **valores predeterminados codificados con una calibración no registrada**: sin datos de reserva, sin citas. Trátalos como marcadores de posición. |
+| Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) y el retoque regional están **conectados y cubiertos por pruebas con fake-torch**. No se ha ejecutado la prueba local `generate()` en una 5090. Flux sigue rechazando las poses/identidades/el retoque (familia no medida). |
+| Receta de la nube | `pcraft recipe` emite el ajuste de Kontext + recorte izquierdo dentro del gráfico + relleno solo con puños de Flux. `method=reference` es esa ruta. Una ejecución en vivo en la nube (trabajo `06668d4c`, 2026-08-18) produjo un recorte de un solo panel y conservó el soporte. |
+| Puerta | El nivel 2 es una expansión DSG real (entidad/atributo/relación). La escalada es un punto de control contrastivo. Los registros almacenan la historia del intento, no solo el recuento de reintentos. |
+| Síntesis fuera de línea | `compile_synthesizer` se basa en una métrica de puerta **externa** (`dspy.GEPA` cuando `[synth]` está instalado). `DSPySynthesizer` ejecuta la prueba. No se ha ejecutado ninguna compilación en vivo de 600B. El bucle por activo sigue utilizando `TemplateSynthesizer`. |
+| Subpuerta de identidad | Las puntuaciones de CLIP-I no están **conectadas** a `orchestrate`. Los umbrales 0,55/0,05 no tienen ningún valor de reserva. Marcadores de posición. |
 | Canon real | el contrato de ejemplo enviado es una **invención genérica**, no el canon de ningún proyecto real. Vincular un canon real es una decisión humana deliberada. |
 
 Tres afirmaciones que las versiones anteriores de este documento hicieron y que la medición no respaldó, corregidas aquí en lugar de eliminadas silenciosamente:
 
-- Los umbrales de las tres zonas se describieron como *calibrados en relación con un conjunto de datos etiquetado por humanos*. No lo son. Son valores predeterminados.
-- Se afirmó que la regla de que un modelo generativo nunca puede ser su propio filtro, como si un estudio lo hubiera establecido. La evidencia que lo respalda es **convergente más que directa**: las pruebas discriminativas de sí/no son mediblemente más estables que la generación de subtítulos sin restricciones, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea sesgos de preferencia personal. No hay ningún estudio único que realice una comparación directa. La regla es sólida; se exageró la certeza.
-- Se describió todo lo que está por debajo del límite del complemento como *no probado mediante mediciones*. Esto subestimaba los generadores: el condicionamiento no se ha analizado. La ruta no está implementada, sino que no se ha probado.
+- Se describieron los tres umbrales de zona como *calibrados con un conjunto de datos de referencia etiquetado por humanos*. No lo están. Son valores predeterminados.
+- La regla de que un modelo generativo nunca es su propia puerta se enunció como si un estudio la hubiera establecido. Las pruebas que la respaldan son **más convergentes que directas**: las encuestas discriminativas de sí/no son mediblemente más estables que el etiquetado abierto, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea el sesgo de preferencia propia. No hay ningún estudio único que realice la comparación directa. La regla es sólida; se exageró la certeza.
+- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Lo que aún no se ha probado es una ejecución local en vivo de `generate()` en esta máquina, no la conexión.
 
 ## Requisitos
 
@@ -143,7 +147,7 @@ Tres afirmaciones que las versiones anteriores de este documento hicieron y que 
 ```
 src/pcraft/
   core/          contract · loop · gate · synth · optimize · receipt   (GPU-free)
-  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  cli/           pcraft: synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe | compile | sync-rules
   domains/       ── PLUGIN BOUNDARY ──
     image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```

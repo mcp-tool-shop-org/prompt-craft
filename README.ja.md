@@ -61,7 +61,10 @@ pip install -e ".[dev]"
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft list              # contract ids in the store
+pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
+pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -97,23 +100,24 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## 正直なステータス
 
-**v0.2.1 — コアは実質的ですが、ポーズロックとアイデンティティバインディングは未実装です。**
+**v0.2.1 — コア機能が実装されました。SDXLの条件設定はコードで組み立てられています。ローカルGPUでの生成テストはまだ行われていません。クラウド環境でのレシピ実行が完了しました。**
 
 | | |
 |---|---|
-| コア | **205個のテストが合格し、GPUを使用せず、決定論的です。** `verify`を実行すると、スイートが実行され、次に`-O`の下でスイートが再度実行され、パッケージがビルドされます。 |
+| コア | **318件のテストに合格**（2026-08-18に`d36aa28`上でカウント）、GPU不要、決定論的。`verify`がスイートを実行し、次に`-O`の下でスイートを再度実行し、パッケージをビルドします。 |
 | 述語 | `core/`内の11個の複合的な決定ポイントは**ミューテーションテストされています。** 21個のうち20個のミュータントが排除され、[残りの1つは](scripts/mutate_predicates.py)という名前で、隠されていません。 |
-| カバレッジ | GPUに依存するジェネレーターと検証器のアダプターは、まだテストされていない残りの部分です。 |
-| `[image]`のパス | **このマシンでは実行されたことがありません。** `bind --no-mock`は、依存関係がないというエラーで拒否します。 |
-| 条件付け | ループは、`pose_refs`と`identity_refs`を組み立ててレシートに書き込みます。出荷されるジェネレーターのいずれも、その辞書のキーを読み取りません。これらの参照が存在する場合、`generate()`は**拒否します。** ポーズロックとアイデンティティバインディングは未実装であり、単に実行されていないだけではありません。 |
-| 閾値 | スプライトサブゲートの最小値と分散の制限は、**記録されたキャリブレーションのないハードコード化されたデフォルトです。** ホールドアウトや引用はありません。これらはプレースホルダーとして扱ってください。 |
+| SDXLの条件設定 | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), and regional inpaint are **wired and covered by fake-torch tests**. Local `generate()` on a 5090 has not been run. Flux still refuses pose / identity / inpaint (unmeasured family). |
+| クラウドレシピ | `pcraft recipe`はKontext stitch + グラフ内の左側のクロップ + 手のみのFlux Fillを出力します。`method=reference`はそのパスです。ライブクラウドへの送信（ジョブ`06668d4c`、2026-08-18）により、単一パネルのクロップが生成され、ブレースが保持されました。 |
+| ゲート | Tier-2は実際のDSG拡張です（エンティティ／属性／関係）。エスカレーションはコントラストチェックポイントです。レシートには再試行回数だけでなく、試行の履歴が保存されます。 |
+| オフライン合成 | `compile_synthesizer`は、**外部**ゲートメトリック（`[synth]`がインストールされている場合、`dspy.GEPA`）に対してピン留めします。`DSPySynthesizer`がピン留めを実行します。ライブの600Bコンパイルはまだ行われていません。アセットごとのループでは、依然として`TemplateSynthesizer`を使用しています。 |
+| アイデンティティサブゲート | CLIP-Iのスコアを算出し、**`orchestrate`には接続されていません**。閾値0.55 / 0.05はホールドアウトされていません。プレースホルダーです。 |
 | 実際のカノン | 出荷されるサンプル契約は、**一般的な発明であり、実際のプロジェクトのカノンではありません。** 実際のカノンをバインドすることは、意図的な人間の決定です。 |
 
 このドキュメントの以前のバージョンで述べられており、測定によってサポートされなかった3つの主張について、ここでは修正し、黙って削除するのではなく：
 
-- 3つの閾値は、*人間がラベル付けしたホールドアウトデータに対してキャリブレーションされた*ものとして説明されています。しかし、そうではありません。これらはデフォルト値です。
-- 生成モデルは決して自分自身のゲートにはならないというルールは、研究によってそれが証明されたかのように述べられています。それを裏付ける証拠は、**直接的ではなく収束的**です。つまり、二者択一の識別的なポーリングは、自由形式のキャプション生成よりも測定可能な限り安定しており、モデルは外部からのフィードバックなしでは確実に自己修正できず、自己認識は自己選好バイアスを追跡します。単独の研究で直接比較が行われるわけではありません。このルール自体は妥当ですが、その確実性は誇張されています。
-- プラグイン境界以下のすべての要素は、*測定によって証明されていない*ものとして説明されています。しかし、それはジェネレーターの能力を過小評価しています。コンディション付けは未読です。パスが実装されていないだけで、テストされていないわけではありません。
+- 三つのゾーンの閾値は、*人間がラベル付けしたホールドアウトに対して調整されたもの*として説明されました。しかし、実際にはそうではありません。これらはデフォルトの値です。
+- 生成モデルが自身のゲートになることはないというルールは、研究によって確立されたかのように述べられていました。それを裏付ける証拠は**直接的であるよりもむしろ収束している** — 測定可能な範囲で、オープンエンドのキャプション生成よりも識別的なYes/Noポーリングの方が安定しており、外部からのフィードバックなしにモデルが確実に自己修正することはできず、自己認識は自己選好バイアスを追跡します。単一の研究ですべてを比較するものではありません。このルールは妥当ですが、その確実性は誇張されていました。
+- 条件設定は最初は未読であると説明され、次に実装されていないと説明されました。SDXLは現在、コードで組み立てられた参照を**読み取ります**。まだテストされていないのは、このマシンでのライブローカル`generate()`であり、接続ではありません。
 
 ## 要件
 
@@ -143,7 +147,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 src/pcraft/
   core/          contract · loop · gate · synth · optimize · receipt   (GPU-free)
-  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  cli/           pcraft: synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe | compile | sync-rules
   domains/       ── PLUGIN BOUNDARY ──
     image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```

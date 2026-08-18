@@ -61,7 +61,10 @@ O núcleo é **livre de GPU e funciona em qualquer lugar** — todo o conjunto d
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft list              # contract ids in the store
+pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
+pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -97,23 +100,27 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v0.2.1 — o núcleo é real; o bloqueio de pose e a vinculação de identidade não foram implementados.**
+**v0.2.1 — o núcleo é real. O condicionamento do SDXL está implementado no código. A geração local na GPU ainda não foi testada. Uma receita para a nuvem já foi executada.**
 
 | | |
 |---|---|
-| Núcleo | **205 testes aprovados**, livre de GPU, determinístico. `verify` executa o conjunto de testes, o conjunto novamente sob `-O` e uma construção do pacote |
+| Núcleo | **318 testes aprovados** (contados em 2026-08-18 em `d36aa28`), sem uso da GPU, determinístico. `verify` executa o conjunto de testes, o mesmo conjunto novamente sob `-O` e a construção de um pacote. |
 | Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
-| Cobertura | os adaptadores do gerador e verificador vinculados à GPU permanecem como o restante não testado |
-| O caminho `[image]` | **nunca foi executado nesta máquina.** `bind --no-mock` recusa com um erro de dependência ausente |
-| Condicionamento | o loop monta `pose_refs` e `identity_refs` e os escreve no recibo. Nenhum dos geradores enviados lê uma chave desse dicionário. Se essas referências estiverem presentes, `generate()` **recusa**. O bloqueio de pose e a vinculação de identidade não foram implementados, apenas não estão sendo usados. |
-| Limites | os limites mínimo e de variância do sub-portão sprite são **padrões rígidos sem calibração registrada** — sem retenção, nenhuma citação. Trate-os como espaços reservados |
+| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) e preenchimento regional estão **conectados e cobertos por testes "fake-torch"**. O teste local `generate()` em uma 5090 ainda não foi executado. O Flux ainda se recusa a processar pose/identidade/preenchimento (família não medida). |
+| Receita para a nuvem | `pcraft recipe` gera o "Kontext stitch" + recorte à esquerda no gráfico + preenchimento do Flux apenas na mão. `method=reference` é esse caminho. Um envio ao vivo para a nuvem (tarefa `06668d4c`, 2026-08-18) produziu um recorte de painel único e manteve o suporte. |
+| Portão | O nível 2 é uma expansão DSG real (entidade/atributo/relação). A escalada é um ponto de verificação contrastivo. Os registros armazenam a história da tentativa, não apenas a contagem de tentativas. |
+| Síntese offline | `compile_synthesizer` compara com uma métrica de portão **externa** (`dspy.GEPA` quando `[synth]` está instalado). `DSPySynthesizer` executa a comparação. Nenhuma compilação ao vivo de 600B foi executada. O loop por ativo ainda usa `TemplateSynthesizer`. |
+| Sub-portão de identidade | calcula as pontuações do CLIP-I e **não está conectado** a `orchestrate`. Os limites de 0,55/0,05 não têm retenção. Marcadores de posição. |
 | Canone real | o contrato de exemplo enviado é uma **invenção genérica**, não o canone de nenhum projeto real. Vincular um canone real é uma decisão humana deliberada |
 
 Três afirmações que versões anteriores deste documento fizeram e que a medição não suportou, corrigidas aqui em vez de descartadas silenciosamente:
 
-- Os limites de três zonas foram descritos como *calibrados em relação a um conjunto de dados rotulado por humanos*. Não é o caso. São valores padrão.
-- A regra de que um modelo generativo nunca pode ser seu próprio avaliador foi apresentada como se um estudo tivesse comprovado isso. As evidências de suporte são **convergentes, e não diretas** — a avaliação discriminativa do tipo sim/não é mensuravelmente mais estável do que a geração de legendas abertas; os modelos não podem se autocorrigir de forma confiável sem feedback externo, e o rastreamento do reconhecimento próprio revela um viés de preferência própria. Nenhum estudo único realiza uma comparação direta. A regra é válida; a certeza foi exagerada.
-- Tudo abaixo da fronteira do plugin foi descrito como *não comprovado por meio de medição*. Isso subestimou os geradores: o condicionamento não é lido. O caminho não está implementado, e sim não testado.
+- Os três limites de zona foram descritos como *calibrados em relação a um conjunto de dados de referência rotulado por humanos*. Eles
+não são. São valores padrão.
+- A regra de que um modelo generativo nunca é seu próprio portão foi declarada como se um estudo tivesse
+estabelecido isso. As evidências de suporte são **mais convergentes do que diretas** — a sondagem discriminativa sim/não é mensuravelmente mais estável do que a geração de legendas abertas, os modelos não podem corrigir-se de forma confiável sem feedback externo e o reconhecimento próprio rastreia o viés de preferência própria. Nenhum
+estudo único realiza a comparação direta. A regra é válida; a certeza foi exagerada.
+- O condicionamento foi descrito como não lido, depois como não implementado. O SDXL agora **lê** as referências implementadas no código. O que ainda não foi testado é uma execução local ao vivo de `generate()` nesta máquina, e não a conexão.
 
 ## Requisitos
 
@@ -143,7 +150,7 @@ Três afirmações que versões anteriores deste documento fizeram e que a medi�
 ```
 src/pcraft/
   core/          contract · loop · gate · synth · optimize · receipt   (GPU-free)
-  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  cli/           pcraft: synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe | compile | sync-rules
   domains/       ── PLUGIN BOUNDARY ──
     image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```
