@@ -42,6 +42,14 @@ class GateTranscript(BaseModel):
     def uncertain_required(self) -> list[AtomVerdict]:
         return [v for v in self.verdicts if v.zone in (Zone.UNCERTAIN, Zone.SKIPPED, Zone.NA) and _counts(v)]
 
+    def scored_required(self) -> list[AtomVerdict]:
+        """Required / must_not atoms that produced a numeric score."""
+        return [v for v in self.verdicts if _counts(v) and v.score is not None]
+
+    def could_not_run(self) -> bool:
+        """No required atom produced a score. Distinct from UNCERTAIN-after-a-score."""
+        return not self.scored_required()
+
 
 def _counts(v: AtomVerdict) -> bool:
     """A verdict counts toward the overall roll-up if it is required or a must_not probe."""

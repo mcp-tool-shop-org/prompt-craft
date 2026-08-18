@@ -50,8 +50,8 @@ def gate(
     contract: str = typer.Option("char:ashen-reaver"),
     debug: bool = typer.Option(False),
 ) -> None:
-    """Run the contract gate over an image using the image plugin's real verifiers (which SKIP
-    gracefully if the [image] extra is not installed)."""
+    """Run the contract gate. Missing path, unreadable file, and 'no verifier
+    could score' are refuses (nonzero exit). SKIPPED atoms are not a pass."""
     import pcraft.domains.image  # noqa: F401  (registers the plugin)
     from ..core.contract.compile_questions import compile_questions
     from ..core.gate import harness
@@ -59,12 +59,19 @@ def gate(
     from ..sample import load_sprite_example
 
     try:
+        from ..core.gate.exit_contract import error_from_transcript
+        from ..core.gate.preflight import preflight_image
+
+        preflight_image(image)
         store, _r, thresholds, _c = load_sprite_example()
         resolved = store.resolve(contract)
         dag = compile_questions(resolved)
         verifiers = get("image").verifiers()
         transcript = harness.evaluate(dag, str(image), verifiers, thresholds)
         typer.echo(format_transcript(transcript))
+        err = error_from_transcript(transcript)
+        if err is not None:
+            _emit(err, debug)
     except PromptCraftError as err:
         _emit(err, debug)
 

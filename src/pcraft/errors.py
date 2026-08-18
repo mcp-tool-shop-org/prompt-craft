@@ -45,6 +45,11 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom. "
     "Raise the severity/threshold, or override the atom — never weaken inherited requirements.",
+    "IO_GATE_INPUT": "Pass a readable image file. A missing or unreadable path is not UNCERTAIN.",
+    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score.",
+    "GATE_FAIL": "A required contract atom failed. Identity still gates nothing.",
+    "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band.",
+    "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
 }
 
 

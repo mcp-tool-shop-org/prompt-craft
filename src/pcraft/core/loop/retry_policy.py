@@ -53,9 +53,16 @@ class RetryBudget(BaseModel):
         return self.inpaints <= 0 and self.reprompts <= 0 and self.rerolls <= 0
 
 
-# atom ids whose failure should escalate identity conditioning rather than prompt edits
+# STRENGTHEN_IDENTITY is a repair on the identity_ref plate, not a gate.
+# A presence atom whose id happens to contain "face" or "palette" is not
+# that plate. Substring match was the back door: it treated a garment /
+# species claim as likeness. Only an atom that IS the plate may request
+# the plate-weight bump. None of the scaffold atoms are that object.
+_IDENTITY_REPAIR_IDS = frozenset({"identity", "identity_ref"})
+
+
 def _is_identity_atom(atom_id: str) -> bool:
-    return any(tok in atom_id.lower() for tok in ("face", "sigil", "identity", "insignia", "palette"))
+    return atom_id.lower() in _IDENTITY_REPAIR_IDS
 
 
 def verdict_from_transcript(transcript: GateTranscript) -> Verdict:

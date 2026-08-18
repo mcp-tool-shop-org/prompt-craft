@@ -1,0 +1,90 @@
+"""The gate's process-exit contract.
+
+Nominated chip: a missing image must not exit 0.
+"""
+
+from __future__ import annotations
+
+import pytest
+from typer.testing import CliRunner
+
+from pcraft.cli import app
+from pcraft.core.contract.compile_questions import compile_questions
+from pcraft.core.gate import harness
+from pcraft.core.gate.exit_contract import error_from_transcript
+from pcraft.core.gate.preflight import preflight_image
+from pcraft.core.gate.thresholds import Zone
+from pcraft.errors import PromptCraftError
+from pcraft.testing import ScriptedVerifier, write_solid_png
+
+
+def test_a_missing_image_is_not_exit_zero():
+    """Nominated chip. pcraft gate on a path that does not exist must refuse."""
+    result = CliRunner().invoke(app, ["gate", "E:/nope/does-not-exist.png"])
+    assert result.exit_code != 0
+    assert result.exit_code == 2
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "IO_GATE_INPUT" in text
+    assert "gate overall:" not in text
+
+
+def test_preflight_refuses_a_directory(tmp_path):
+    with pytest.raises(PromptCraftError) as exc:
+        preflight_image(tmp_path)
+    assert exc.value.code == "IO_GATE_INPUT"
+
+
+def test_preflight_accepts_a_readable_file(tmp_path):
+    path = write_solid_png(tmp_path / "ok.png")
+    assert preflight_image(path) == path
+
+
+def test_unavailable_verifiers_on_a_real_file_are_not_exit_zero(tmp_path):
+    """Extras missing is GATE_UNAVAILABLE (2), not UNCERTAIN-as-success (0)."""
+    image = write_solid_png(tmp_path / "present.png")
+    result = CliRunner().invoke(app, ["gate", str(image)])
+    assert result.exit_code == 2
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "GATE_UNAVAILABLE" in text
+    assert "UNCERTAIN" in text  # the transcript line stays honest
+
+
+def test_could_not_run_when_every_required_atom_is_skipped(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    v = ScriptedVerifier(lambda _q: None)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    assert t.could_not_run() is True
+    err = error_from_transcript(t)
+    assert err is not None and err.code == "GATE_UNAVAILABLE"
+
+
+def test_a_required_fail_is_gate_fail_not_uncertain(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    v = ScriptedVerifier({"tabard": 0.05})
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    assert t.overall is Zone.FAIL
+    err = error_from_transcript(t)
+    assert err is not None and err.code == "GATE_FAIL"
+
+
+def test_an_uncertain_score_after_a_real_run_is_partial(sprite_example):
+    """A mid-band score is the human band (exit 3), not 'could not run'."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    v = ScriptedVerifier({"face": 0.60})  # vqa band is 0.40..0.80
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    assert t.could_not_run() is False
+    err = error_from_transcript(t)
+    assert err is not None and err.code == "PARTIAL_UNCONFIRMED"
+    assert err.exit_code == 3
+
+
+def test_a_clean_pass_has_no_error(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    v = ScriptedVerifier()
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    assert t.overall is Zone.PASS
+    assert error_from_transcript(t) is None

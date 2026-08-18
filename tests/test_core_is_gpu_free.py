@@ -20,6 +20,8 @@ CORE_MODULES = [
     "pcraft.core.gate.verifier_iface",
     "pcraft.core.gate.family_guard",
     "pcraft.core.gate.harness",
+    "pcraft.core.gate.preflight",
+    "pcraft.core.gate.exit_contract",
     "pcraft.core.synth.signature",
     "pcraft.core.synth.visual_inventory",
     "pcraft.core.synth.assert_",

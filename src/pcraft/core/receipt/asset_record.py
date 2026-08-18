@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...errors import PromptCraftError
 from ..contract.compile_questions import QuestionDAG, compile_questions
@@ -55,7 +55,14 @@ def load(path: str | Path) -> AssetRecord:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as err:
         raise PromptCraftError("IO_RECORD_READ", f"could not read record {p}", cause=err) from err
-    return AssetRecord.model_validate(data)
+    try:
+        return AssetRecord.model_validate(data)
+    except ValidationError as err:
+        raise PromptCraftError(
+            "IO_RECORD_INVALID",
+            f"record {p} failed schema validation",
+            cause=err,
+        ) from err
 
 
 def replay(record: AssetRecord, resolved: ResolvedContract) -> QuestionDAG:

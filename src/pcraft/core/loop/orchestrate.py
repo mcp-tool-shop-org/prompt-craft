@@ -18,6 +18,7 @@ from ..contract.compile_questions import compile_questions
 from ..contract.hash import contract_hash
 from ..contract.schema import ResolvedContract
 from ..gate import harness
+from ..gate.preflight import preflight_image
 from ..gate.family_guard import assert_distinct_families
 from ..gate.thresholds import ThresholdTable, Zone
 from ..gate.verifier_iface import Verifier, forbid_clipscore
@@ -150,6 +151,7 @@ def _assemble_conditioning(resolved: ResolvedContract, identity_weight_bump: flo
 
 
 def _gate(gen: GenerationResult, verifiers, thresholds, dag):
+    preflight_image(gen.image_path)
     return harness.evaluate(dag, gen.image_path, verifiers, thresholds)
 
 

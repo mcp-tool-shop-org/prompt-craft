@@ -47,14 +47,10 @@ Repository = "https://github.com/mcp-tool-shop-org/prompt-craft"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pcraft"]
-
-# Non-Python plugin assets (generated encoder rules, pinned compiled artifacts,
-# example contracts, calibration thresholds) ship inside the package.
-[tool.hatch.build.targets.wheel.force-include]
-"src/pcraft/domains/image/rules" = "pcraft/domains/image/rules"
-"src/pcraft/domains/image/compiled" = "pcraft/domains/image/compiled"
-"src/pcraft/domains/image/subdomains/sprite/contracts" = "pcraft/domains/image/subdomains/sprite/contracts"
-"src/pcraft/domains/image/subdomains/sprite/thresholds" = "pcraft/domains/image/subdomains/sprite/thresholds"
+# Non-Python plugin assets (rules, compiled synth, contracts, thresholds) live
+# inside those packages. force-include of the same trees is what collided:
+# hatch already ships every file under packages=, and the four mappings
+# added the first file a second time. Do not re-add them.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

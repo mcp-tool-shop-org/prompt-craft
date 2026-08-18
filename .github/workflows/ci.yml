@@ -1,0 +1,43 @@
+# Studio Actions rules: ubuntu-latest only, paths-gated, workflow_dispatch
+# fallback, concurrency with cancel-in-progress. One OS. This is the only
+# workflow this round (release.yml waits on publish, which is on hold).
+name: ci
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "verify.py"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "verify.py"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The documented install path. If this fails, the README's
+      # `pip install -e ".[dev]"` is still a claim the tree cannot support.
+      - name: install (editable, dev extra)
+        run: python -m pip install -e ".[dev]" build
+
+      - name: verify
+        run: python verify.py --installed
