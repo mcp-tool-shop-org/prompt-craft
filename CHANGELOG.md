@@ -48,6 +48,8 @@ every entry below concerns the GPU-free core.
   `method=reference` is this path; SDXL refuses it. Does not submit.
 - **RESYNTH rewrites the prompt.** Failed atoms are front-loaded and the
   synthesizer runs again. A seed bump alone is not a re-synthesize.
+- **Contrastive human checkpoint.** Escalation is "you probably thought X;
+  I chose Y" per flagged atom, not a zone name. STANDARDS #5 is now 3.
 
 ### Fixed
 

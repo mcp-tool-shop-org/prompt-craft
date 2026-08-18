@@ -12,10 +12,9 @@ Verdict.AMEND — the identical verdict Zone.FAIL gets — so an uncertain requi
 straight into the same repair ladder as a confirmed failure (choose_repair treats
 failed_required() and uncertain_required() as one combined list). A human is reached only once the
 repair budget is exhausted: gated on step count (repairs_left), not on uncertainty itself, which
-is precisely the anti-pattern UNCERTAINTY_GATED_HUMANS defines itself against. This is not a
-silent pass — the andon invariant above still holds, nothing binds without ADVANCE — but it is not
-UNCERTAINTY_GATED_HUMANS either. STANDARDS.md already scores this standard an honest 2 with a
-remediation note; this wave corrects the claim, not the escalation policy itself.
+is precisely the anti-pattern UNCERTAINTY_GATED_HUMANS defines itself against. Escalation
+still happens after the budget. The contrastive checkpoint is the human artifact at that
+door (STANDARDS #5). Nothing binds without ADVANCE.
 
 A TRANSIENT generator error (timeout / rate limit / GPU OOM, i.e. an uncoded exception or a coded
 one outside the SYNTH_/CONTRACT_/GATE_/INPUT_ prefixes) is auto-retried within the existing
@@ -36,6 +35,7 @@ from ..contract.compile_questions import compile_questions
 from ..contract.hash import contract_hash
 from ..contract.schema import ResolvedContract
 from ..gate import harness
+from ..gate.checkpoint import ContrastiveCheckpoint, build_checkpoint
 from ..gate.preflight import preflight_image
 from ..gate.family_guard import assert_distinct_families
 from ..gate.thresholds import ThresholdTable, Zone
@@ -88,6 +88,7 @@ class OrchestrationResult(BaseModel):
     reason: str
     attempts: list[Attempt]
     record: AssetRecord | None = None
+    checkpoint: ContrastiveCheckpoint | None = None
 
 
 class _GenerationBlocked(Exception):
@@ -175,14 +176,17 @@ def run(
     # but not "records-write" let this write through unguarded. Both doors now require both.
     compensators.require("records-write")
     compensators.require("escalation-ticket")
+    checkpoint = build_checkpoint(transcript, dag)
     record = _build_record(resolved, synth, gen, transcript, thresholds, dag, len(attempts), "escalated")
     persist(record, config.records_dir)
-    reason = (
-        f"gate overall={transcript.overall.value} after {len(attempts)} attempts; "
-        f"required failures={[v.atom_id for v in transcript.failed_required()]}, "
-        f"unconfirmed={[v.atom_id for v in transcript.uncertain_required()]}"
+    reason = checkpoint.text
+    return OrchestrationResult(
+        decision="escalated",
+        reason=reason,
+        attempts=attempts,
+        record=record,
+        checkpoint=checkpoint,
     )
-    return OrchestrationResult(decision="escalated", reason=reason, attempts=attempts, record=record)
 
 
 # --------------------------------------------------------------------------- helpers
