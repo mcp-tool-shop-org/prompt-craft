@@ -23,7 +23,7 @@ _SPRITE_ROOT = Path(__file__).resolve().parents[1] / "subdomains" / "sprite"
 _IP_ADAPTER = "ip_adapter"
 _REFERENCE = "reference"
 _SKIP_METHODS = frozenset({"none"})
-_UNIMPLEMENTED_METHODS = frozenset()
+_UNIMPLEMENTED_METHODS: frozenset[str] = frozenset()
 # hands/weapon ate the bone-spike bracer on the keeper Fill. fist is the measured box.
 _FIST = (0.62, 0.48, 0.88, 0.65)
 

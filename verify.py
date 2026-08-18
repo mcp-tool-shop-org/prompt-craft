@@ -4,9 +4,17 @@
     python verify.py              # checkout: PYTHONPATH=src
     python verify.py --installed  # after pip install -e ".[dev]"
 
-Legs: the suite, the suite under -O (gates must still raise), the wheel
-and sdist. --basetemp is always set so Windows dead-symlink cleanup does
-not look like a repo failure.
+Legs: lint, typecheck, the suite, the suite under -O (gates must still
+raise), the wheel and sdist. --basetemp is always set so Windows
+dead-symlink cleanup does not look like a repo failure.
+
+Lint and typecheck are legs here because they were configured in
+pyproject and invoked by nothing -- no workflow, no script. That is how
+the typecheck went inert unnoticed: once the [image] extra pulled numpy
+2.5, mypy aborted on its PEP 695 stubs before checking a single pcraft
+file, and still read as a configured gate. It hid 7 real errors. Both
+tools ship in the [dev] extra this script already documents, so running
+them is not a new dependency -- it is the gate finally being reachable.
 """
 
 from __future__ import annotations
@@ -47,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="pcraft-verify-"))
     try:
         py = sys.executable
+        # Static legs first: they are seconds, and a type error should not wait
+        # behind a full suite + two builds to surface.
+        _run("lint", [py, "-m", "ruff", "check", "src", "tests"], env)
+        _run("typecheck", [py, "-m", "mypy", "src"], env)
         pytest = [py, "-m", "pytest", "-q", f"--basetemp={scratch / 't'}"]
         _run("suite", pytest, env)
         env_o = env.copy()

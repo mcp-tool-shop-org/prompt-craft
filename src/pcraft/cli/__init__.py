@@ -29,8 +29,11 @@ try:
     from typer._click.exceptions import Abort as _ClickAbort
     from typer._click.exceptions import ClickException as _ClickException
 except ModuleNotFoundError:  # typer < 0.26
-    from click.exceptions import Abort as _ClickAbort
-    from click.exceptions import ClickException as _ClickException
+    # Same role, different class object under each layout -- binding both to one
+    # name is the whole point of the fallback, so the assignment mismatch is
+    # expected rather than a defect to fix.
+    from click.exceptions import Abort as _ClickAbort  # type: ignore[assignment]
+    from click.exceptions import ClickException as _ClickException  # type: ignore[assignment]
 from typer.core import TyperGroup
 
 from .. import package_version

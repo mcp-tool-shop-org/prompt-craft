@@ -104,9 +104,9 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| コア | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| コア | **337 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
 | 述語 | `core/`内の11個の複合的な決定ポイントは**ミューテーションテストされています。** 21個のうち20個のミュータントが排除され、[残りの1つは](scripts/mutate_predicates.py)という名前で、隠されていません。 |
-| SDXLの条件設定 | ControlNet OpenPose、IP-Adapter、LoRA、「**InstantID**」、および領域ごとのインペイントは、**fake-torchテストによって統合され、検証されています**。「InstantID」と「IP-Adapter」は、同じ生成プロセスを共有できません。2つのIP-Adapterレイヤーは、1つのアダプターに配置されます（すべての画像；スケールが最も重要な要素です）。ローカルの`generate()`は、5090で実行されました（2026年8月18日、シード値`169405236028824`、種類`controlnet_ip`）。フレームはオーク風ですが、グリップ、紋章、および腕当ては適切に表示されませんでした。 |
+| SDXLの条件設定 | ControlNet OpenPose、IP-Adapter、LoRA、「**InstantID**」、および領域ごとのインペイントは、**fake-torchテストによって統合され、その動作が検証されています**。InstantIDとIP-Adapterは、同じ生成プロセスを共有できません。2つのIP-Adapterレイヤーは、1つのアダプターに配置されます（すべての画像；スケールが最も重要な要素です）。ローカルの`generate()`は、5090で実行されました（2026年8月18日、シード値`169405236028824`、種類`controlnet_ip`）。フレームはオーク風ですが、グリップ、紋章、および腕当ては適切に表示されませんでした。 |
 | Fluxエンコーダー | テキストのみと**塗りつぶしインペイント**が接続されました（fake-torch）。ControlNetポーズとIP-Adapterは拒否されたままです（異なるファミリー）。`method=reference`がクラウドレシピグラフを記述し、Kontextがローカルで実行されているかのように装うことを拒否します（`GATE_CLOUD_SUBMIT`）。 |
 | クラウドレシピ | `pcraft recipe`は、Kontextのステッチ + グラフ内の左側のクロップ + 一部のFlux塗りつぶしを生成します。`method=reference`はそのパスです。実際のクラウドへの送信（ジョブ`06668d4c`、2026年8月18日）により、単一パネルのクロップが生成され、ブレースが保持されました。 |
 | ゲート | Tier-2は、実在するDSG拡張（エンティティ/属性/関係）です。エスカレーションはコントラストチェックポイントです。レシートには、再試行回数だけでなく、試行の履歴が保存されます。 |

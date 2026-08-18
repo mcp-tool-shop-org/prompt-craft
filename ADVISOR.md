@@ -6,7 +6,7 @@
 **Executor:** Claude
 **Repo:** `E:\AI\prompt-craft`
 **HEAD at write:** `e42ce2f` on `origin/main`
-**Suite last counted:** **332** (re-count before quoting)
+**Suite last counted:** **337** (re-count before quoting)
 
 Read **`grok.md`**, then this file, then **`HANDOFF.md`**. Measure HEAD
 and the suite. Do not reconstruct from chat.
@@ -73,17 +73,15 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-**Advisor miss, 2026-08-18.** The first dispatch prescribed
-`--basetemp=E:\AI\prompt-craft\.pytest-tmp`. That tree filled with
-pytest `*current` directory symlinks, became unlistable, and the
-Executor's verbatim run was `235 passed, 93 errors`. A fresh
-basetemp confirmed 328. The leftover repo dir has been removed.
-`.pytest-tmp/` is now gitignored. `verify.py` already did this
-right (fresh `mkdtemp`). Do not put `--basetemp` back inside the
-repo.
+Do **not** share a fixed `--basetemp` (repo-local or `%TEMP%\pcraft-pytest`).
+Two seats on one rig: a path one seat writes can deny the other.
+`python verify.py` is the blessed gate (fresh `mkdtemp` every run).
+
+This swarm has standing go to **commit and push**. Do not leave a
+Phase-9 change-set uncommitted.
 
 `[image]` and `[synth]` are installed in this venv. The suite must
 stay GPU-free anyway. Tests that fall through to `_load` must stub
@@ -91,7 +89,7 @@ it. Do not fire a live generate from pytest.
 
 | thing | state |
 |---|---|
-| GPU-free suite | **332** (re-count) |
+| GPU-free suite | **337** (re-count) |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. CUDA `torch 2.13.0+cu130`, RTX 5090, 31.84 GB. |
 | That frame (looked at) | Orcish tusks. Crossed arms. Scythe, not a two-hand axe. No triple-bar. No bone-spike bracer. Same species, different character. Notes: `records/_control_experiments/NOTES.md` (gitignored). |
@@ -141,8 +139,11 @@ writing to it.
 
 ## Recommended next increment (Advisor ruling)
 
-Increments 1 and 2 **landed this sitting** (Advisor executed them
-after parking the swarm was called). Suite **332**.
+Increments 1 and 2 landed. Phase 9 **landed** (Executor): typecheck
+restored, 7 hidden errors fixed, ruff+mypy are hard `verify.py` legs,
+suite **337**. Named leftover: `requires-python >=3.11` is metadata
+only — mypy targets 3.12, CI is 3.13. Needs a 3.11 CI leg or a
+raised floor. Not closed.
 
 If the Director does **not** name a job: measure HEAD, re-count, stop.
 
@@ -150,7 +151,8 @@ Still out, only if asked:
 
 3. Local Flux text-only / Fill — weights are not on disk.
 4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
-5. Phase 9 formal final test, then Phase 10 full treatment.
+5. 3.11 CI leg or raise `requires-python` to 3.12.
+6. Phase 10 full treatment / publish.
 
 Do **not** start identity-sub-gate wiring or InstantID rewrites
 as a "next obvious step." They are not.

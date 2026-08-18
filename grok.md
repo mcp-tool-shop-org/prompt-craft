@@ -30,19 +30,21 @@ exists. That already happened once.
 
 ## How to run
 
-A repo-local `--basetemp` is a landmine on Windows: pytest writes
-`*current` directory symlinks, then `rmtree` of that tree fails and
-93 tests error at setup. `verify.py` already uses a fresh
-`tempfile.mkdtemp`. The quick count does the same thing under `%TEMP%`.
+Do **not** share a fixed `--basetemp` across seats. A path this
+seat writes can carry ACLs that deny the other seat on the same
+rig. `verify.py` already uses a fresh `tempfile.mkdtemp` per run.
+
+Quick count — no `--basetemp` (exit 0; cosmetic `pytest-current`
+atexit noise is fine):
 
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-If that TEMP dir ever 93-errors, delete it and retry, or run
-`python verify.py` (new scratch every time).
+Blessed full gate: `python verify.py` (lint, typecheck, suite,
+suite under `-O`, build).
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 `pip install -e ".[dev]"` also works (no PYTHONPATH).
@@ -62,11 +64,13 @@ from a test.
 - GEPA is offline, `[synth]`, never on the per-asset hot path.
   `pcraft compile` does not invent a pixel metric.
 - Gates `raise`, never bare `assert`. ASCII in tool output.
-- Leave uncommitted unless asked. When asked to commit, push as you go.
+- This swarm has standing go to commit and push. Do not leave a
+  Phase-9 change-set sitting uncommitted because an older line
+  said "leave uncommitted unless asked."
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **332**. Re-count before quoting.
+- Suite last counted **337**. Re-count before quoting.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional
   inpaint — wired, fake-torch tested. InstantID and IP-Adapter cannot
   share one generate. Local `generate()` **ran** on the 5090

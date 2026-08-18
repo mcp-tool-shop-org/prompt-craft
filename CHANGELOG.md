@@ -22,6 +22,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   one adapter refuse (`Cannot assign 2 scale_configs to 1
   IP-Adapter`). `bind --no-mock` still raises `DEP_IMAGE_MISSING`.
   Flux text-only / Fill not run — weights not on disk.
+- Suite **332 → 337** after Phase 9 (typecheck restored, `verify.py` legs).
 - Suite **328 → 332** after two-plate IP-Adapter + live `bind --no-mock`.
 - Suite **325 → 328** after the GEPA pin and the extra-installed test doors.
 - **Live GEPA compile ran** (2026-08-18) on local Ollama `hermes3:8b`.
@@ -35,6 +36,31 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Fixed
 
+- **The typecheck was a gate that could not run.** `[tool.mypy]` targeted the
+  declared 3.11 floor, but the `[image]` extra pulls numpy 2.5, whose bundled
+  stubs use PEP 695 `type X = ...` (3.12+). mypy refused to parse them and
+  aborted with "errors prevented further checking" — so from the moment
+  `[image]` was installed it checked **zero** pcraft files while still reading
+  as a configured gate. It was hiding 7 real errors. Per-module
+  `follow_imports = "skip"` does not help; the failure is at parse time, before
+  module policy applies (verified against a cleared cache). `python_version` is
+  now `3.12`. **Named cost:** mypy no longer catches 3.12-only syntax that would
+  break on the 3.11 floor, and CI runs 3.13 only — so `requires-python = ">=3.11"`
+  is currently asserted by metadata and verified by no gate. Closing that needs a
+  3.11 CI leg or a raised floor; it is not closed here.
+- **The 7 errors the dead typecheck was hiding.** `run_mock_loop` unpacked the
+  loaded `ThresholdTable` back over its own `thresholds: Path | None` parameter,
+  so one name meant two types (runtime was correct; the annotation was not, and
+  `run_live_loop` beside it already spelled this right). `_UNIMPLEMENTED_METHODS`
+  was an unannotated empty `frozenset()`. The typer/click portability fallback
+  binds two structurally distinct exception classes to one name, which is the
+  point of the fallback — now marked rather than left as noise.
+- **`verify.py` runs the gates the project configures.** `ruff` and `mypy` were
+  configured in pyproject and invoked by no workflow and no script, which is how
+  the typecheck went inert unnoticed. Both are now hard legs, ordered before the
+  suite so a type error does not queue behind a full run plus two builds. Both
+  already ship in the `[dev]` extra the script documents, so this adds no
+  dependency.
 - **Two IP-Adapter plates stay on one adapter.** Costume + face
   images are all passed. One `load_ip_adapter` takes one scale (the
   strongest requested lock). The assembled ashen-reaver contract
@@ -52,6 +78,13 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Added
 
+- `tests/test_verify_legs.py` — pins gate **reachability**, not gate cleanliness:
+  every `[tool.*]` quality gate configured in pyproject must be invoked by a
+  `verify.py` leg. Reads verify.py's own AST (resolving the suite leg's
+  `pytest = [...]` variable, and ordering by `lineno` rather than `ast.walk`
+  order). Asserting "mypy is clean" here would have been the wrong test — it
+  would still pass if someone deleted the leg. Verified red: removing the
+  typecheck leg fails both the reachability and the ordering assertions.
 - **`--json`** on `synth`, `gate`, `bind`, `demo`, `replay`, `list`, and `validate`.
   The pydantic model is the stdout document; the human banner moves to stderr.
 - **`--version`** and **`pcraft doctor`**. Doctor reports python, `[image]`/`[synth]`

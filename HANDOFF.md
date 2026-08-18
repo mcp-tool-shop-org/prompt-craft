@@ -10,17 +10,16 @@ Identity sub-gate stays unwired. Version stays **0.2.1**.
 ## Where you are
 
 Repo: `E:\AI\prompt-craft`
-HEAD at handoff write: measure. Suite last counted **332**. Re-count.
+HEAD at handoff write: measure. Suite last counted **337**. Re-count.
 
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Do not use a repo-local `.pytest-tmp`. That path 93-errored at setup
-for the Executor (Windows `*current` symlinks). `verify.py` is the
-blessed full gate.
+Do not share a fixed `--basetemp`. Two seats on one rig collide.
+`python verify.py` is the blessed full gate.
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`
 
@@ -33,7 +32,7 @@ a run.
 
 | thing | state |
 |---|---|
-| GPU-free suite | 332 |
+| GPU-free suite | 337 |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. Frame: orcish; crossed arms, no two-hand axe, no triple-bar, no bone bracer. Notes in `records/_control_experiments/NOTES.md` (gitignored). |
 | Two IP-Adapter plates | both images on one adapter; scale is the strongest lock |
@@ -49,8 +48,8 @@ a run.
 
 ## This session's job
 
-Increments 1 and 2 **landed** (two-plate IP-Adapter; `bind --no-mock`
-is the live door). Full dispatch in **`ADVISOR.md`**.
+Increments 1 and 2 landed. Phase 9 landed. Full dispatch in
+**`ADVISOR.md`**. Standing go to commit and push.
 
 If the Director does not name a job: measure HEAD, re-count, stop.
 
@@ -58,7 +57,8 @@ Still out, only if asked:
 
 3. Local Flux text-only / Fill — weights not on disk.
 4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
-5. Phase 9 formal final test, then Phase 10 full treatment.
+5. 3.11 CI leg or raise `requires-python` to 3.12.
+6. Phase 10 full treatment / publish.
 
 Do **not** start InstantID rewrites or identity-sub-gate wiring
 unless the Director asks.

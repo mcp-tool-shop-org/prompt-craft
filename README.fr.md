@@ -104,7 +104,7 @@ Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et 
 
 | | |
 |---|---|
-| Cœur du système | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Cœur du système | **337 tests réussis** (comptés le 2026-08-18), sans utilisation de GPU, résultats déterministes. `verify` exécute l’analyse statique du code, la vérification des types, la suite de tests, puis à nouveau la suite de tests sous `-O`, et effectue une compilation du paquet. |
 | Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que caché. |
 | Conditionnement SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** et l’inpaint régional sont **intégrés et couverts par des tests « fake-torch »**. InstantID et IP-Adapter ne peuvent pas partager une même génération. Deux plaques IP-Adapter restent sur un seul adaptateur (toutes les images ; l’échelle est la contrainte la plus forte). L’instance locale `generate()` a été **exécutée** sur le 5090 (2026-08-18, seed `169405236028824`, type `controlnet_ip`). Le rendu est de style orc ; les éléments « grip », « sigil » et « bracer » n’ont pas été correctement intégrés. |
 | Encodeur Flux | Les options texte seul et **remplissage** sont intégrées (tests « fake-torch »). ControlNet pose, IP-Adapter et LoRA continuent d’être refusés (famille incorrecte). `method=reference` écrit le graphe de la recette Cloud et refuse de prétendre que Kontext a été exécuté localement (`GATE_CLOUD_SUBMIT`). |

@@ -104,7 +104,7 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 | | |
 |---|---|
-| Núcleo | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Núcleo | **337 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
 | Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **conectados y cubiertos por las pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. Dos imágenes de IP-Adapter permanecen en un mismo adaptador (todas las imágenes; la escala es la restricción más fuerte). La versión local `generate()` se ejecutó en la 5090 (18 de agosto de 2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma tiene un estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. |
 | Codificador Flux | El modo solo texto y el **relleno** están conectados (fake-torch). ControlNet pose e IP-Adapter siguen rechazados (familia incorrecta). `method=reference` escribe el gráfico de la receta en la nube y se niega a simular que Kontext se ejecuta localmente (`GATE_CLOUD_SUBMIT`). |

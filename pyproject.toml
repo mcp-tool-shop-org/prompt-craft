@@ -79,6 +79,22 @@ line-length = 100
 target-version = "py311"
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12, NOT the 3.11 in requires-python -- and that gap is a known, named cost.
+#
+# numpy arrives with the [image] extra. numpy 2.5 requires-python >=3.12 and its bundled
+# stubs use PEP 695 `type X = ...`. Targeting 3.11, mypy refuses to parse those stubs and
+# aborts with "errors prevented further checking" -- so from the moment [image] was
+# installed the typecheck stopped checking ANY pcraft code while still reporting as a
+# configured gate. A gate that cannot run is the defect class this repo exists to catch,
+# so it is fixed here rather than left inert.
+#
+# Per-module `follow_imports = "skip"` does NOT help: the failure is at parse time, before
+# module policy applies (verified against a cleared .mypy_cache).
+#
+# What this costs: mypy no longer catches 3.12-only syntax that would break on the
+# declared 3.11 floor. Nothing else covers that either -- CI runs 3.13 only. So the 3.11
+# floor is currently asserted by requires-python and verified by no gate. Closing that
+# needs a 3.11 CI leg or a raised floor; it is not closed here.
+python_version = "3.12"
 packages = ["pcraft"]
 ignore_missing_imports = true

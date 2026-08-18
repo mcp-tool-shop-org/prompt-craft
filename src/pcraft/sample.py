@@ -95,7 +95,11 @@ def run_mock_loop(
     a premise instead of inheriting one from the example's policy. The example's ``must_not`` atoms
     are ``optional`` (absence-verification is unmeasured on this stack), so a test about blocking
     behaviour raises the severity itself rather than depending on a setting that can change."""
-    _store, resolved, thresholds, compiled = load_workspace(
+    # Unpack into `table`, not back over `thresholds`: that parameter is the caller's
+    # optional PATH to a threshold file, and rebinding it to the loaded ThresholdTable made
+    # one name mean two types. Runtime was fine; the annotation was not, and it read as a
+    # bug to anyone tracing the argument. `run_live_loop` below already spells it this way.
+    _store, resolved, table, compiled = load_workspace(
         contracts_dirs=contracts_dirs, thresholds=thresholds, contract_id=contract_id
     )
     if mutate_contract is not None:
@@ -112,10 +116,10 @@ def run_mock_loop(
     verifiers = passing_verifiers(scores=verifier_scores)
     config = LoopConfig(
         encoder_rules=_encoder_rules(),
-        thresholds_version=thresholds.version,
+        thresholds_version=table.version,
         records_dir=str(records_dir),
     )
-    return orchestrate.run(resolved, synth, gen, verifiers, thresholds, config=config)
+    return orchestrate.run(resolved, synth, gen, verifiers, table, config=config)
 
 
 def image_extra_present() -> bool:
