@@ -82,9 +82,9 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
 
     merged_must_have = _merge_atoms_fail_closed(base.must_have, contract.must_have, child_id=contract.id)
     merged_must_not = _merge_must_not(base.must_not, contract.must_not, child_id=contract.id)
-    identity_refs: list[IdentityRef] = list(base.identity_refs)
-    if contract.identity_ref:
-        identity_refs.append(contract.identity_ref)
+    identity_refs = _merge_identity_refs(
+        base.identity_refs, contract.identity_ref, child_id=contract.id
+    )
 
     return ResolvedContract(
         id=contract.id,
@@ -96,14 +96,50 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     )
 
 
+def _merge_identity_refs(
+    base_refs: list[IdentityRef], child_ref: IdentityRef | None, *, child_id: str
+) -> list[IdentityRef]:
+    """Compose different plates; refuse a same-plate rewrite that drops the lock.
+
+    Faction costume + character face is the documented composition. A child that
+    restates an inherited plate may only raise weight. Changing method or scope,
+    or lowering weight (including method=none / weight=0), is CONTRACT_RELAXATION.
+    """
+    if child_ref is None:
+        return list(base_refs)
+    merged = list(base_refs)
+    for i, existing in enumerate(merged):
+        if existing.plate != child_ref.plate:
+            continue
+        if child_ref.method != existing.method or child_ref.scope != existing.scope:
+            raise PromptCraftError(
+                "CONTRACT_RELAXATION",
+                f"character {child_id!r} rewrites inherited identity plate "
+                f"{existing.plate!r} (method {existing.method!r}->{child_ref.method!r}, "
+                f"scope {existing.scope!r}->{child_ref.scope!r})",
+                hint=_RELAXATION_HINT,
+            )
+        if child_ref.weight < existing.weight:
+            raise PromptCraftError(
+                "CONTRACT_RELAXATION",
+                f"character {child_id!r} lowers inherited identity weight on "
+                f"{existing.plate!r} ({existing.weight} -> {child_ref.weight})",
+                hint=_RELAXATION_HINT,
+            )
+        merged[i] = existing.model_copy(update={"weight": child_ref.weight})
+        return merged
+    merged.append(child_ref)
+    return merged
+
+
 _SEVERITY_RANK = {Severity.optional: 0, Severity.required: 1}
 
 
 _RELAXATION_HINT = (
     "A character contract may not drop or relax a faction-required atom, and may not "
-    "rewrite an inherited atom's claim, check_type, spatial, enum, or depends_on while "
-    "keeping its id. Raise the severity, or add a new id for genuinely different content "
-    "— never substitute an existing id's content."
+    "rewrite an inherited atom's claim, check_type, spatial, enum, or depends_on, "
+    "or neutralize an inherited identity plate. Raise the severity or weight, or add "
+    "a new id or plate — never substitute an existing id's content."
 )
 
 

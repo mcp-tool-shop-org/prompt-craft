@@ -27,7 +27,7 @@ from pcraft.core.loop.retry_policy import Verdict, verdict_from_transcript
 from pcraft.core.synth.signature import TemplateSynthesizer
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example
-from pcraft.testing import ScriptedVerifier, StubGenerator
+from pcraft.testing import StubGenerator, passing_verifiers
 
 
 def _run(tmp_path, *, verifier_scores=None, generator=None, compensators=None):
@@ -37,11 +37,17 @@ def _run(tmp_path, *, verifier_scores=None, generator=None, compensators=None):
     _store, resolved, thresholds, compiled = load_sprite_example()
     synth = TemplateSynthesizer(compiled)
     gen = generator or StubGenerator(out_dir=tmp_path / "_stub_images")
-    v = ScriptedVerifier(verifier_scores)
+    verifiers = passing_verifiers(scores=verifier_scores)
     config = LoopConfig(thresholds_version=thresholds.version, records_dir=str(tmp_path))
     return orchestrate.run(
-        resolved, synth, gen, {v.tier: v}, thresholds, config=config, compensators=compensators,
+        resolved, synth, gen, verifiers, thresholds, config=config, compensators=compensators,
     )
+
+
+def test_default_run_actually_binds(tmp_path):
+    """LOOP-W3-001: the helper must reach ADVANCE, or the bound-door test is false-green."""
+    result = _run(tmp_path)
+    assert result.decision == "bound"
 
 
 # --------------------------------------------------------------------------- F-b269af73

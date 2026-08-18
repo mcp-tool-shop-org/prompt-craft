@@ -43,6 +43,12 @@ every entry below concerns the GPU-free core.
 - **A `must_have` and a `must_not` may not share an id.** The question DAG keys by
   `atom_id`; a cross-list collision dropped one polarity.
 - The installed package now ships `py.typed`.
+- **`pcraft bind --contract` is honoured.** The flag was accepted and ignored;
+  bind always resolved the demo character.
+- The bound-door compensator test now actually reaches ADVANCE (both required
+  verifier tiers registered).
+- A child cannot neutralize an inherited identity plate (same plate, `method=none`
+  / lower weight). Distinct plates still compose.
 
 ## [0.2.1] — 2026-08-18
 

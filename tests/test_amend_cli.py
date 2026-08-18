@@ -76,6 +76,17 @@ def test_help_still_exits_0():
     assert result.exit_code == 0
 
 
+def test_bind_honours_the_contract_flag(tmp_path):
+    """CLI-W3-001: --contract used to be accepted and ignored; bind always resolved ashen-reaver."""
+    result = runner.invoke(
+        app, ["bind", "--contract", "char:does-not-exist", "--records-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code != 0
+    assert "INPUT_UNKNOWN_CONTRACT" in text or "char:does-not-exist" in text
+    assert "BOUND" not in text
+
+
 def test_synth_success_path_still_exits_0():
     result = runner.invoke(app, ["synth"])
     assert result.exit_code == 0

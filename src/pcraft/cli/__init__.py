@@ -181,7 +181,7 @@ def bind(
         _emit(PromptCraftError("DEP_IMAGE_MISSING", "real bind needs the [image] extra + a GPU; "
               "use --mock for the GPU-free scaffold path"), debug)
     try:
-        result = run_mock_loop(records_dir=records_dir)
+        result = run_mock_loop(records_dir=records_dir, contract_id=contract)
         _print_result(result)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same

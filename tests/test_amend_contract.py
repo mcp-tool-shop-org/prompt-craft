@@ -23,6 +23,7 @@ from pcraft.core.contract.schema import (
     Atom,
     CheckType,
     Contract,
+    IdentityRef,
     MustNot,
     ResolvedContract,
     Severity,
@@ -533,6 +534,40 @@ def test_same_id_in_must_have_and_must_not_is_rejected():
             must_not=[MustNot(id="sigil", claim="the legion sigil")],
         )
     assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"
+
+
+def test_child_cannot_neutralize_an_inherited_identity_plate():
+    """CONTRACT-W3-001: same plate, method=none / weight 0, no CONTRACT_RELAXATION."""
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        identity_ref=IdentityRef(plate="plates/legion.png", method="lora", weight=0.8, scope="costume"),
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        identity_ref=IdentityRef(plate="plates/legion.png", method="none", weight=0.0, scope="costume"),
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
+def test_distinct_identity_plates_still_compose():
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        identity_ref=IdentityRef(plate="plates/costume.png", method="lora", weight=0.8, scope="costume"),
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        identity_ref=IdentityRef(plate="plates/face.png", method="ip_adapter", weight=0.6, scope="face"),
+    )
+    out = resolve(character, _lookup([faction, character]))
+    assert [ir.scope for ir in out.identity_refs] == ["costume", "face"]
 
 
 def test_resolved_contract_rejects_cross_list_id_collision():

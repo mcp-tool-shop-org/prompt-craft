@@ -24,9 +24,11 @@ from .domains.image.subdomains.sprite import CONTRACTS_DIR, EXAMPLE_CHARACTER_ID
 from .testing import StubGenerator, passing_verifiers
 
 
-def load_sprite_example() -> tuple[ContractStore, ResolvedContract, ThresholdTable, CompiledProgram]:
+def load_sprite_example(
+    contract_id: str | None = None,
+) -> tuple[ContractStore, ResolvedContract, ThresholdTable, CompiledProgram]:
     store = ContractStore([CONTRACTS_DIR])
-    resolved = store.resolve(EXAMPLE_CHARACTER_ID)
+    resolved = store.resolve(contract_id or EXAMPLE_CHARACTER_ID)
     thresholds = load_thresholds(THRESHOLDS_PATH)
     compiled = load_pinned(COMPILED_ARTIFACT)
     return store, resolved, thresholds, compiled
@@ -39,6 +41,7 @@ def _encoder_rules() -> str:
 def run_mock_loop(
     *,
     records_dir: str | Path = "records",
+    contract_id: str | None = None,
     verifier_scores: dict[str, float] | Callable[[Question], float] | None = None,
     generator=None,
     mutate_contract: Callable[[ResolvedContract], None] | None = None,
@@ -52,7 +55,7 @@ def run_mock_loop(
     a premise instead of inheriting one from the example's policy. The example's ``must_not`` atoms
     are ``optional`` (absence-verification is unmeasured on this stack), so a test about blocking
     behaviour raises the severity itself rather than depending on a setting that can change."""
-    _store, resolved, thresholds, compiled = load_sprite_example()
+    _store, resolved, thresholds, compiled = load_sprite_example(contract_id)
     if mutate_contract is not None:
         mutate_contract(resolved)
     synth = TemplateSynthesizer(compiled)
