@@ -65,6 +65,7 @@ class SDXLGenerator:
         # CPU in float32 by default (documented diffusers behaviour) with nothing logging that fact.
         # F-02ff1a21: select_device/select_dtype used to sit between the two try blocks, so a
         # surprise from the torch stand-in escaped unclassified.
+        device = "unset"
         try:
             device = select_device(torch)
             dtype = select_dtype(torch, device)

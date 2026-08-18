@@ -40,6 +40,7 @@ class FluxGenerator:
         # specifically because float32 roughly doubles the ~24GB bf16 footprint. prefer_bf16=True on
         # CUDA reflects that; CPU still gets float32 (bf16-on-CPU support varies by torch build).
         # F-02ff1a21: keep select_device/select_dtype inside the classified load try.
+        device = "unset"
         try:
             device = select_device(torch)
             dtype = select_dtype(torch, device, prefer_bf16=True)

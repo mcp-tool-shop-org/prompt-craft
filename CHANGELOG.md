@@ -54,6 +54,8 @@ every entry below concerns the GPU-free core.
   escaping `run()`.
 - `INPAINT_REGION` varies the seed; regional inpaint is not implemented.
 - Device/dtype selection sits inside the classified generator-load try.
+- A `select_device` failure no longer becomes `UnboundLocalError` in the load
+  handler (`device` is bound to `unset` before the try).
 
 ## [0.2.1] — 2026-08-18
 

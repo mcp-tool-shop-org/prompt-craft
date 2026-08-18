@@ -247,6 +247,23 @@ def test_flux_uses_float32_on_cpu_not_bfloat16(monkeypatch):
     assert captured["pipe"].init_kwargs["torch_dtype"] == "float32-sentinel"
 
 
+def test_sdxl_select_device_failure_is_classified_not_unboundlocal(monkeypatch):
+    """IMG-W8-001: if select_device raises, the except used to interpolate unbound `device`."""
+    fake = _install_fake_torch(monkeypatch, cuda_available=True)
+    _install_fake_diffusers(monkeypatch, pipeline_attr="StableDiffusionXLPipeline")
+
+    def boom():
+        raise RuntimeError("cuda init failed")
+
+    monkeypatch.setattr(fake.cuda, "is_available", boom)
+    gen = SDXLGenerator()
+    with pytest.raises(PromptCraftError) as exc:
+        gen._load()
+    assert exc.value.code == "RUNTIME_GENERATOR_LOAD_FAILED"
+    assert "unset" in exc.value.message
+    assert isinstance(exc.value.cause, RuntimeError)
+
+
 def test_sdxl_load_failure_on_to_is_classified_not_raw(monkeypatch):
     _install_fake_torch(monkeypatch, cuda_available=True)
     _install_fake_diffusers(monkeypatch, pipeline_attr="StableDiffusionXLPipeline", pipe_cls=_RaisingOnToPipe)
