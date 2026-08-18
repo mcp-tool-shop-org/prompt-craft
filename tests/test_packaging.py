@@ -39,3 +39,16 @@ def test_version_is_pre_one_and_the_readme_agrees():
     )
     readme = Path("README.md").read_text(encoding="utf-8")
     assert f"v{version}" in readme, f"README does not state v{version}"
+
+
+def test_installed_package_ships_the_py_typed_marker():
+    """A typed-contracts package that installs without py.typed is a packaging lie.
+
+    PEP 561: type checkers only treat the install as typed when this marker is
+    next to the package __init__. Hatch already ships every file under
+    packages=["src/pcraft"]; the marker must exist so that path is not empty.
+    """
+    import pcraft
+
+    marker = Path(pcraft.__file__).resolve().parent / "py.typed"
+    assert marker.is_file(), f"missing py.typed next to {pcraft.__file__}"

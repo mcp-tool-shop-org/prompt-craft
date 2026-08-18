@@ -54,8 +54,9 @@ around this tool, branch on `4` separately.
 
 The Python toolkit's GPU path — the real generators and verifiers behind the `[image]` extra —
 **has never executed on the machine this was developed on**. The core is GPU-free, deterministic,
-and covered by 105 passing tests; everything below the plugin boundary is unproven by
-measurement, and the project's own front door says so.
+and covered by 205 passing tests. Pose-lock and identity-binding are unimplemented: the loop
+records the conditioning dict and the shipped generators refuse if those refs are present. The
+project's own front door says so.
 
 Pre-1.0 deliberately. Promotion should follow evidence, not a version bump.
 

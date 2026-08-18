@@ -65,15 +65,17 @@ concepts, blind to which attribute belongs to which object.
 
 ## Honest status
 
-**v0.2.1 — the core is real; the GPU path has never run here.**
+**v0.2.1 — the core is real; pose-lock and identity-binding are unimplemented.**
 
-- **105 tests passing**, GPU-free and deterministic. The whole suite runs against a mock
+- **205 tests passing**, GPU-free and deterministic. The whole suite runs against a mock
   generator and verifier, which is what proves the plugin boundary holds.
 - The eleven compound decision points in the core are **mutation-tested** — 20 of 21 mutants
   killed, and the survivor is named rather than hidden.
 - The **`[image]` extra has never executed** on the machine this was developed on. `bind
-  --no-mock` refuses with a missing-dependency error. Everything below the plugin boundary is
-  unproven by measurement.
+  --no-mock` refuses with a missing-dependency error.
+- The loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither
+  shipped generator reads a key of that dict; if those refs are present, `generate()` refuses.
+  Pose-lock and identity-binding are unimplemented, not merely unexercised.
 - The sprite sub-gate's thresholds are **hardcoded defaults with no calibration** — no holdout,
   no citation. Treat them as placeholders.
 - Pre-1.0 deliberately, and a test enforces it. Promotion should follow evidence, not a version

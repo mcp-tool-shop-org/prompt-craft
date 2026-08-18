@@ -11,11 +11,38 @@ every entry below concerns the GPU-free core.
 
 ## [Unreleased]
 
-### Added
-
 ### Fixed
 
+- **A one-character typo emptied a contract.** `Contract` was the only model set to
+  `extra="ignore"`; `must_haves` for `must_have` validated clean and produced zero
+  requirements. `extra="forbid"` now, like its five siblings.
+- **A child could rewrite an inherited claim while still reading `required`.** Severity
+  drop raised `CONTRACT_RELAXATION`; claim/`check_type` substitution did not. Both raise now.
+- **The family guard protected one of two doors.** `harness.evaluate` and `pcraft gate` now
+  refuse same-family and CLIPScore; the guard is no longer orchestrate-only.
+- **A missing tier borrowed another family's threshold band.** Wanted-tier missing is
+  SKIPPED, not a silent fall-forward.
+- **The tier census reported 1 of 2 next to a green BOUND and exit 0.** Census now gates
+  both the exit code and the loop verdict. `pcraft demo` earns `2 of 2`.
+- **A mistyped flag exited 2**, the code reserved for a required-atom failure. Usage
+  errors are 1.
+- **Both generators ignored the conditioning dict** they documented as ControlNet /
+  IP-Adapter input. They now refuse if `pose_refs` or `identity_refs` are present.
+  Implementing those encoders is separate work.
+
 ### Changed
+
+- Suite **105 → 205**. STANDARDS NAMED_COMPENSATORS and EXTERNAL_VERIFIER were scored `2`
+  when the public doors were unproven, then restored to `3` when the suite proved both
+  doors. Total **17 / 18**.
+- Honest status no longer calls the `[image]` generators "unproven by measurement."
+  Conditioning is unread. Pose-lock and identity-binding are unimplemented.
+- **Inherited `spatial`, `enum`, and `depends_on` are frozen** the same way claim and
+  `check_type` already were. Omitting them on a severity raise inherits the base;
+  restating them differently is `CONTRACT_RELAXATION`.
+- **A `must_have` and a `must_not` may not share an id.** The question DAG keys by
+  `atom_id`; a cross-list collision dropped one polarity.
+- The installed package now ships `py.typed`.
 
 ## [0.2.1] — 2026-08-18
 

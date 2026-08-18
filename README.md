@@ -127,18 +127,19 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.2.1 — the core is real; the GPU path has never run here.**
+**v0.2.1 — the core is real; pose-lock and identity-binding are unimplemented.**
 
 | | |
 |---|---|
-| Core | **105 tests passing**, GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Core | **205 tests passing**, GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
-| Coverage | 81% overall; GPU-bound generator and verifier adapters are the untested remainder |
-| The `[image]` path | **never executed on this machine.** `bind --no-mock` refuses with a missing-dependency error. Everything below the plugin boundary is unproven by measurement |
+| Coverage | GPU-bound generator and verifier adapters remain the untested remainder |
+| The `[image]` path | **has never executed on this machine.** `bind --no-mock` refuses with a missing-dependency error |
+| Conditioning | the loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither shipped generator reads a key of that dict. If those refs are present, `generate()` **refuses**. Pose-lock and identity-binding are unimplemented, not merely unexercised |
 | Thresholds | the sprite sub-gate's floor and variance limits are **hardcoded defaults with no recorded calibration** — no holdout, no citation. Treat them as placeholders |
 | Real canon | the shipped example contract is a **generic invention**, not any real project's canon. Binding real canon is a deliberate, human decision |
 
-Two claims that earlier versions of this document made and that measurement did not support,
+Three claims that earlier versions of this document made and that measurement did not support,
 corrected here rather than quietly dropped:
 
 - The three-zone thresholds were described as *calibrated against a human-labelled holdout*. They
@@ -148,6 +149,8 @@ corrected here rather than quietly dropped:
   yes/no polling is measurably more stable than open-ended captioning, models cannot reliably
   self-correct without external feedback, and self-recognition tracks self-preference bias. No
   single study runs the head-to-head. The rule is sound; the certainty was overstated.
+- Everything below the plugin boundary was described as *unproven by measurement*. That
+  understated the generators: conditioning is unread. The path is unimplemented, not untested.
 
 ## Requirements
 

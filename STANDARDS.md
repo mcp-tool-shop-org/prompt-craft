@@ -8,21 +8,21 @@
 > **Scale:** `0 MISSING` · `1 PARTIAL` (in prose, not enforced) · `2 PRESENT` (a step enforces it) ·
 > `3 EXEMPLARY` (enforced + documented + a test/receipt proves it).
 >
-> **Status: SCORED AGAINST THE SUITE, 2026-08-18.** The GPU-free suite collects **105**. Each row
-> names the artifact and what the tests actually prove — not what the comments promise.
-> Wave-1 of the prompt-craft dogfood swarm (`swarm-1787033129-beab`) measured two of the
-> previous `3`s as unearned: the mechanism exists, the public door or one persist path does
-> not go through it, and the suite encodes that gap as passing. Those rows drop to `2`.
-> **Total: 15 / 18.** Three standards sit at 2 with named remediations.
+> **Status: SCORED AGAINST THE SUITE, 2026-08-18 (post Stage A fold `74a809b`).** The GPU-free
+> suite collects **205**. Wave 1 dropped NAMED_COMPENSATORS and EXTERNAL_VERIFIER from `3` to
+> `2` because the suite could not prove the public door. Wave 2 closed both doors; the
+> proofs below were re-run green on this checkout. A `3` is restored only from those tests,
+> not from a comment edit.
+> **Total: 17 / 18.** One standard sits at 2 with a named remediation.
 
 | # | Standard | Score | Concrete artifact | Proof (green) |
 |---|----------|-------|-------------------|---------------|
 | 1 | **PIN_PER_STEP** | **3** | `core/receipt/asset_record.py` persists `{contract_hash, compiled_synth_id, generator_id+seed+sampler, conditioning, verifier_ids, thresholds_version, question_dag, gate_transcript, retry_count, decision}`; the synthesizer is a pinned `compiled/*.json` artifact | `test_receipt_replay.py` — a receipt round-trips and `replay` reconstructs the question DAG bit-for-bit; drift is detected. `test_end_to_end_demo.py` asserts the pinned fields |
 | 2 | **ANDON_AUTHORITY** | **3** | `core/loop/orchestrate.py` binds **only** on `ADVANCE` (every required atom PASS); a failed required atom or a violated `must_not` halts into the repair ladder, then escalates | `test_orchestrate_andon.py` — a failed `face` atom and a present `no_human_face` both escalate, never bind |
-| 3 | **NAMED_COMPENSATORS** | **2** | `COMPENSATORS.md` (no-skip) mirrored by `core/loop/compensators.py`; `require(action)` runs before the ADVANCE persist | `test_compensators.py` proves the registry refuses an unregistered name and that every registered compensator has an owner + post-state. It does **not** prove every persist is guarded: the escalation branch of `orchestrate.run` calls `persist()` with no `require("records-write")`. A `3` needs a test that both persist paths refuse when that compensator is missing |
+| 3 | **NAMED_COMPENSATORS** | **3** | `COMPENSATORS.md` (no-skip) mirrored by `core/loop/compensators.py`; `require("records-write")` runs before every `persist()`, bound and escalated | `test_amend_loop.py` — both persist doors refuse with `STATE_NO_COMPENSATOR` when `records-write` is missing. `test_compensators.py` still proves the registry itself |
 | 4 | **DECOMPOSE_BY_SECRETS** | **3** | `core/` (contract, loop, gate harness, synth, optimize, receipt) vs `domains/*` (generator, verifier, encoder rules). `core/` imports zero diffusion/torch symbols | `test_core_is_gpu_free.py` — importing all of `core/` pulls no torch/diffusers, and a static scan finds no such import; the whole loop runs on mocks |
 | 5 | **UNCERTAINTY_GATED_HUMANS** | **2** | `core/gate/thresholds.py` is 3-zone per-clause; only `UNCERTAIN` (and an unconfirmable required atom) routes to escalation — never a silent pass. The escalation reason names the failed/unconfirmed atoms | `test_thresholds.py` + `test_gate_harness.py` — zones + the SKIPPED-required → UNCERTAIN roll-up are green. **Remediation:** the human-checkpoint message is not yet the full contrastive "you probably thought X; I chose Y" artifact with a test (owner: pipeline) |
-| 6 | **EXTERNAL_VERIFIER** | **2** | `core/gate/family_guard.py` hard-refuses `generator_family == verifier_family`; CLIPScore is documented BANNED in `verifier_iface.py` | `test_family_guard.py` proves the function: same-family raises, SigLIP2 siblings normalize to one family, CLIPScore is refused. The only call site is `orchestrate.py`. `harness.evaluate` and `pcraft gate` invoke neither guard. A `3` needs a test that the public gate door refuses. Exploitable by a plugin author, not an end user |
+| 6 | **EXTERNAL_VERIFIER** | **3** | `harness.evaluate` takes `generator_family`, calls `assert_distinct_families` and `forbid_clipscore`; `pcraft gate` passes the plugin generator family or `--generator-family` | `test_amend_gate.py` — `evaluate` refuses same-family and CLIPScore. `test_amend_cli.py` — `pcraft gate --generator-family siglip2` exits 2 with `GATE_SAME_FAMILY`. `test_family_guard.py` still proves the function |
 
 ## Per-standard evidence
 
@@ -38,11 +38,11 @@ faceless-hero failure (`face` scored below threshold) never binds — it runs th
 (`strengthen_identity`, because `face` is an identity atom) and escalates after the budget. The old
 weapon-only gate shipped that character clean; this one cannot.
 
-**3 · NAMED_COMPENSATORS.** The registry and the ADVANCE path are real. `orchestrate.run` calls
-`require("records-write")` and `require("bind-to-canon")` before the bound persist, and
-`require("escalation-ticket")` before a human handoff. The escalation persist at the same
-`persist()` helper is unguarded — a receipt can be written without `records-write` registered.
-`test_compensators.py` proves the registry, not both doors. That is a `2`. See `COMPENSATORS.md`.
+**3 · NAMED_COMPENSATORS.** No skip taken or allowed on either persist door. `orchestrate.run`
+calls `require("records-write")` and `require("bind-to-canon")` before the bound persist, and
+`require("records-write")` plus `require("escalation-ticket")` before the post-gate escalated
+persist. The two early escalation returns that never build a record correctly require only the
+ticket. See `COMPENSATORS.md`.
 
 **4 · DECOMPOSE_BY_SECRETS.** A plugin exports exactly three secrets — a `Generator`, tiered
 `Verifier`s, and an `encoder-craft` ruleset. When the diffusion model changes, only the plugin
@@ -55,23 +55,12 @@ remaining gap is presentational: the escalation currently emits a reason string 
 atoms; the full contrastive checkpoint message + its test is the named remediation.
 
 **6 · EXTERNAL_VERIFIER.** Synthesizer = a 600B LLM; generator = diffusion; gate = a different VLM
-family. `family_guard` refuses same-family generator/verifier (the whole `google/siglip2-*` line is
-one family) **when `orchestrate.run` is the caller**. `pcraft gate` calls `harness.evaluate`
-directly and never reaches the guard. CLIPScore is rejected as the gate metric and documented
-known-broken so nobody reintroduces it — again, only on the orchestrate path. That is a `2`.
+family. `evaluate` refuses same-family generator/verifier (the whole `google/siglip2-*` line is
+one family) on every caller, including `pcraft gate`. CLIPScore is rejected as the gate metric
+and documented known-broken so nobody reintroduces it.
 
 ## Remediation
 
-Three items, one owner each:
-
-1. **NAMED_COMPENSATORS → 3** — `require("records-write")` on every `persist()`, including
-   escalation; a test that both persist paths refuse when that compensator is missing (pipeline).
-2. **EXTERNAL_VERIFIER → 3** — `harness.evaluate` calls `forbid_clipscore`; it takes a
-   `generator_family` and calls `assert_distinct_families`; `pcraft gate` passes the plugin
-   generator's family (or `--generator-family`); a test that the gate door refuses (pipeline).
-3. **UNCERTAINTY_GATED_HUMANS → 3** — wire the contrastive human-checkpoint message ("the gate
-   scored the crest 0.55 — it may read as bronze not gold; confirm or reject") as a tested
-   artifact (pipeline).
-
-A score returns to `3` only when the suite proves the missing door, not when the comment is
-updated. Do not restore a `3` from a docs edit.
+One item, one owner: **UNCERTAINTY_GATED_HUMANS → 3** by wiring the contrastive human-checkpoint
+message ("the gate scored the crest 0.55 — it may read as bronze not gold; confirm or reject") as a
+tested artifact (pipeline). Everything else is at 3 with a green proof that names the public door.

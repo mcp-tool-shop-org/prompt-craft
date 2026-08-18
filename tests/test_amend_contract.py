@@ -26,6 +26,8 @@ from pcraft.core.contract.schema import (
     MustNot,
     ResolvedContract,
     Severity,
+    Spatial,
+    SpatialKind,
 )
 from pcraft.errors import PromptCraftError
 
@@ -248,6 +250,159 @@ def test_must_not_raising_severity_with_identical_content_is_still_allowed():
     assert out.must_not[0].claim == "a firearm"
 
 
+def test_child_cannot_silently_rewrite_an_inherited_spatial():
+    """Stage A remainder: claim/check_type froze; spatial still swapped chest -> hat."""
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[
+            Atom(
+                id="sigil",
+                claim="sigil on chest",
+                check_type=CheckType.vqa,
+                severity=Severity.required,
+                spatial=Spatial(kind=SpatialKind.region, ref="chest"),
+            )
+        ],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[
+            Atom(
+                id="sigil",
+                claim="sigil on chest",
+                check_type=CheckType.vqa,
+                severity=Severity.required,
+                spatial=Spatial(kind=SpatialKind.region, ref="hat"),
+            )
+        ],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
+def test_child_cannot_silently_rewrite_an_inherited_enum():
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[
+            Atom(
+                id="crest",
+                claim="a gold crest",
+                check_type=CheckType.palette,
+                severity=Severity.required,
+                enum=["gold", "red"],
+            )
+        ],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[
+            Atom(
+                id="crest",
+                claim="a gold crest",
+                check_type=CheckType.palette,
+                severity=Severity.required,
+                enum=["plain"],
+            )
+        ],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
+def test_child_cannot_silently_rewrite_an_inherited_depends_on():
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[
+            Atom(id="face", claim="a face", check_type=CheckType.siglip2, severity=Severity.required),
+            Atom(
+                id="scar",
+                claim="a scar on the face",
+                check_type=CheckType.vqa,
+                severity=Severity.required,
+                depends_on="face",
+            ),
+        ],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[
+            Atom(
+                id="scar",
+                claim="a scar on the face",
+                check_type=CheckType.vqa,
+                severity=Severity.required,
+                depends_on="hat",
+            )
+        ],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
+def test_raising_severity_without_restating_spatial_keeps_the_inherited_lock():
+    """Omitting spatial is inherit, not a wipe. A raise must not drop the region."""
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[
+            Atom(
+                id="sigil",
+                claim="sigil on chest",
+                check_type=CheckType.vqa,
+                severity=Severity.optional,
+                spatial=Spatial(kind=SpatialKind.region, ref="chest"),
+            )
+        ],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[
+            Atom(
+                id="sigil",
+                claim="sigil on chest",
+                check_type=CheckType.vqa,
+                severity=Severity.required,
+            )
+        ],
+    )
+    out = resolve(character, _lookup([faction, character]))
+    atom = out.atom_by_id("sigil")
+    assert atom.severity is Severity.required
+    assert atom.spatial is not None
+    assert atom.spatial.ref == "chest"
+
+
+def test_must_not_enum_is_frozen_on_redeclaration():
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_not=[MustNot(id="no_gun", claim="a firearm", enum=["pistol", "rifle"])],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_not=[MustNot(id="no_gun", claim="a firearm", enum=["rubber-duck"])],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
 def test_contract_relaxation_from_the_loader_never_recommends_overriding_the_atom():
     """The hint text used to say 'or override the atom' -- literally endorsing the bypass
     this fix closes. errors.py's DEFAULT_HINTS is out of this domain's owned paths, but
@@ -356,8 +511,7 @@ def test_a_clean_contract_with_no_duplicates_still_compiles(sprite_example):
 
 
 def test_distinct_ids_across_must_have_and_must_not_are_unaffected():
-    """The guard is scoped to within-must_have and within-must_not, per the approved fix --
-    an id used once in each list is not itself a duplicate."""
+    """An id used once in each list, with different names, is not a collision."""
     contract = Contract(
         id="char:x",
         level="character",
@@ -366,3 +520,29 @@ def test_distinct_ids_across_must_have_and_must_not_are_unaffected():
     )
     assert {a.id for a in contract.must_have} == {"face"}
     assert {m.id for m in contract.must_not} == {"no_face_paint"}
+
+
+def test_same_id_in_must_have_and_must_not_is_rejected():
+    """compile_questions keys the DAG by atom_id. A must_have and a must_not sharing
+    an id last-write or first-match one polarity away."""
+    with pytest.raises(PromptCraftError) as exc:
+        Contract(
+            id="char:x",
+            level="character",
+            must_have=[Atom(id="sigil", claim="the legion sigil", check_type=CheckType.vqa)],
+            must_not=[MustNot(id="sigil", claim="the legion sigil")],
+        )
+    assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"
+
+
+def test_resolved_contract_rejects_cross_list_id_collision():
+    with pytest.raises(PromptCraftError) as exc:
+        ResolvedContract(
+            id="char:x",
+            level="character",
+            lineage=["char:x"],
+            identity_refs=[],
+            must_have=[Atom(id="sigil", claim="the legion sigil", check_type=CheckType.vqa)],
+            must_not=[MustNot(id="sigil", claim="the legion sigil")],
+        )
+    assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"

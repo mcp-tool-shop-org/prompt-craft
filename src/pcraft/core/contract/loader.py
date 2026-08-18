@@ -2,7 +2,7 @@
 
 The single load-bearing rule (from sdlab identity inheritance): a character may **raise** a
 severity or add atoms, but may **never drop a faction-required atom, relax its severity, or
-rewrite its claim/check_type** while keeping its id. The loader throws
+rewrite its content (claim, check_type, spatial, enum, depends_on)** while keeping its id. The loader throws
 ``PromptCraftError(CONTRACT_RELAXATION)`` if it tries. One edit to a faction contract then
 propagates to every member's gate automatically."""
 
@@ -101,16 +101,48 @@ _SEVERITY_RANK = {Severity.optional: 0, Severity.required: 1}
 
 _RELAXATION_HINT = (
     "A character contract may not drop or relax a faction-required atom, and may not "
-    "rewrite an inherited atom's claim or check_type while keeping its id. Raise the "
-    "severity, or add a new id for genuinely different content — never substitute an "
-    "existing id's content."
+    "rewrite an inherited atom's claim, check_type, spatial, enum, or depends_on while "
+    "keeping its id. Raise the severity, or add a new id for genuinely different content "
+    "— never substitute an existing id's content."
 )
+
+
+def _rewritten_atom_fields(base, child) -> list[str]:
+    """Content fields the child restated differently from the inherited atom.
+
+    Omitted optional fields (spatial/enum/depends_on left at None) inherit the base.
+    An explicit different value is a rewrite. claim and check_type are always stated.
+    """
+    changed: list[str] = []
+    if child.claim != base.claim:
+        changed.append("claim")
+    if child.check_type != base.check_type:
+        changed.append("check_type")
+    if child.spatial is not None and child.spatial != base.spatial:
+        changed.append("spatial")
+    if child.enum is not None and child.enum != base.enum:
+        changed.append("enum")
+    if child.depends_on is not None and child.depends_on != base.depends_on:
+        changed.append("depends_on")
+    return changed
+
+
+def _rewritten_must_not_fields(base, child) -> list[str]:
+    changed: list[str] = []
+    if child.claim != base.claim:
+        changed.append("claim")
+    if child.check_type != base.check_type:
+        changed.append("check_type")
+    if child.enum is not None and child.enum != base.enum:
+        changed.append("enum")
+    return changed
 
 
 def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
     """Union by atom id. A child override may only RAISE severity, never lower it — and may
-    never rewrite an inherited id's claim/check_type, at any severity (F-a5fa3f8b): raising
-    severity is not a licence to also substitute what the atom checks for."""
+    never rewrite an inherited id's content, at any severity. Raising severity is not a
+    licence to substitute what the atom checks for, where it is checked, or what it
+    depends on."""
     by_id = {a.id: a for a in base_atoms}
     child_ids = {a.id for a in child_atoms}
 
@@ -124,22 +156,22 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
                     f"({base_atom.severity.value} -> {atom.severity.value})",
                     hint=_RELAXATION_HINT,
                 )
-            if atom.claim != base_atom.claim or atom.check_type != base_atom.check_type:
+            rewritten = _rewritten_atom_fields(base_atom, atom)
+            if rewritten:
                 raise PromptCraftError(
                     "CONTRACT_RELAXATION",
-                    f"character {child_id!r} rewrites faction atom {atom.id!r}'s content "
-                    f"(claim {base_atom.claim!r} -> {atom.claim!r}, "
-                    f"check_type {base_atom.check_type.value!r} -> {atom.check_type.value!r}); "
-                    "substituting the claim is not a raise",
+                    f"character {child_id!r} rewrites faction atom {atom.id!r}'s "
+                    f"{', '.join(rewritten)}; substituting content is not a raise",
                     hint=_RELAXATION_HINT,
                 )
-        by_id[atom.id] = atom  # override (same severity/claim/check_type, or a genuine raise) or add
+            # Keep inherited content; only severity may change (and only upward).
+            by_id[atom.id] = base_atom.model_copy(update={"severity": atom.severity})
+        else:
+            by_id[atom.id] = atom
 
     # A character cannot silently DROP a faction-required atom: it simply isn't in child_ids,
     # so the base version survives the union above. That is the fail-closed default — inherited
-    # required atoms always carry through, and (per the content-freeze check above) they carry
-    # through UNCHANGED: a redeclared id may raise severity but never rewrite claim/check_type.
-    # (Documented here because the *absence* is the guarantee.)
+    # required atoms always carry through UNCHANGED except for a severity raise.
     del child_ids  # (kept for readability of the invariant; not used)
     # Preserve base order, then append child-only atoms in declared order.
     ordered = [by_id[a.id] for a in base_atoms]
@@ -178,14 +210,15 @@ def _merge_must_not(base, child, *, child_id: str):
                     f"({base_mn.severity.value} -> {m.severity.value})",
                     hint=_RELAXATION_HINT,
                 )
-            if m.claim != base_mn.claim or m.check_type != base_mn.check_type:
+            rewritten = _rewritten_must_not_fields(base_mn, m)
+            if rewritten:
                 raise PromptCraftError(
                     "CONTRACT_RELAXATION",
-                    f"character {child_id!r} rewrites faction must_not {m.id!r}'s content "
-                    f"(claim {base_mn.claim!r} -> {m.claim!r}, "
-                    f"check_type {base_mn.check_type.value!r} -> {m.check_type.value!r}); "
-                    "substituting the claim is not a raise",
+                    f"character {child_id!r} rewrites faction must_not {m.id!r}'s "
+                    f"{', '.join(rewritten)}; substituting content is not a raise",
                     hint=_RELAXATION_HINT,
                 )
-        by_id[m.id] = m
+            by_id[m.id] = base_mn.model_copy(update={"severity": m.severity})
+        else:
+            by_id[m.id] = m
     return list(by_id.values())

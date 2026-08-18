@@ -8,7 +8,8 @@ live in the contract.
 
 Two levels with inheritance: a ``faction`` is the base class; a ``character`` ``extends`` a faction
 and may ADD or RAISE requirements but may never drop or relax a faction-required atom, nor rewrite
-its claim/check_type while keeping its id (enforced fail-closed in ``loader.py``).
+its content (claim, check_type, spatial, enum, depends_on) while keeping its id
+(enforced fail-closed in ``loader.py``).
 """
 
 from __future__ import annotations
@@ -115,9 +116,24 @@ def _reject_duplicate_ids(
     gate order with no error, and which declaration survives is an accident of list order.
     Rejecting the duplicate here, at contract-construction time, is the fail-closed default;
     the DAG's own dedup must never be the enforcement mechanism.
+
+    The same id in ``must_have`` and ``must_not`` is also a collision: the DAG has one
+    key per id, so one polarity silently disappears.
     """
     _reject_duplicates_in(must_have, contract_id=contract_id, list_name="must_have")
     _reject_duplicates_in(must_not, contract_id=contract_id, list_name="must_not")
+    have_ids = {a.id for a in must_have}
+    for mn in must_not:
+        if mn.id in have_ids:
+            raise PromptCraftError(
+                "CONTRACT_DUPLICATE_ATOM_ID",
+                f"{contract_id!r} uses id {mn.id!r} in both must_have and must_not",
+                hint=(
+                    "must_have and must_not share one id namespace. The question DAG "
+                    "keys by atom_id; a shared id drops one polarity. Give the negation "
+                    "its own id."
+                ),
+            )
 
 
 def _reject_duplicates_in(
@@ -130,10 +146,10 @@ def _reject_duplicates_in(
                 "CONTRACT_DUPLICATE_ATOM_ID",
                 f"{contract_id!r} declares {list_name} id {atom.id!r} more than once",
                 hint=(
-                    "Each id must be unique within must_have (and, separately, within "
-                    "must_not) inside one contract. A duplicate is not deterministically "
-                    "evaluated — QuestionDAG.topological() silently keeps only one "
-                    "declaration and drops the rest."
+                    "Each id must be unique across must_have and must_not inside one "
+                    "contract. A duplicate is not deterministically evaluated — "
+                    "QuestionDAG.topological() silently keeps only one declaration "
+                    "and drops the rest."
                 ),
             )
         seen.add(atom.id)

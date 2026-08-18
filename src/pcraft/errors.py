@@ -59,8 +59,9 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
-    "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom. "
-    "Raise the severity/threshold, or override the atom — never weaken inherited requirements.",
+    "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom, "
+    "and may not rewrite inherited content (claim, check_type, spatial, enum, depends_on). "
+    "Raise the severity, or add a new id — never substitute an existing id's content.",
     "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom. Exit 4.",
     "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score. Exit 4, not 2 — this is not a failed atom.",
     "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",

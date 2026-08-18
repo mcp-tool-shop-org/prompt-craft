@@ -42,14 +42,15 @@ the features.
 
 | | |
 |---|---|
-| The core | **105 tests passing**, GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
+| The core | **205 tests passing**, GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
-| The GPU path | **has never executed on any machine here.** `bind --no-mock` refuses with a missing-dependency error. Everything below the plugin boundary is unproven by measurement |
+| The GPU path | **has never executed on any machine here.** `bind --no-mock` refuses with a missing-dependency error |
+| Conditioning | the loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither shipped generator reads a key of that dict. If those refs are present, `generate()` refuses. Pose-lock and identity-binding are unimplemented, not merely unexercised |
 | Sub-gate thresholds | **hardcoded defaults with no calibration** — no holdout, no citation. Placeholders, and labelled as such |
 | Real canon | the shipped contract is a **generic invention**. Binding real project canon is a deliberate human decision, not a default |
 
-Two claims earlier versions of this project made, corrected here rather than quietly dropped:
+Three claims earlier versions of this project made, corrected here rather than quietly dropped:
 
 - The three-zone thresholds were described as *calibrated against a human-labelled holdout*. They
   were not, and are not. They are defaults.
@@ -58,6 +59,8 @@ Two claims earlier versions of this project made, corrected here rather than qui
   is measurably more stable than open-ended captioning, models cannot reliably self-correct
   without external feedback, and a model's self-recognition tracks its self-preference bias. No
   single study runs the head-to-head. The rule is sound. The certainty was overstated.
+- Everything below the plugin boundary was described as *unproven by measurement*. That
+  understated the generators: conditioning is unread. The path is unimplemented, not untested.
 
 ## Where to go next
 
