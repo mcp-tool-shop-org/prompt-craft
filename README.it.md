@@ -106,7 +106,7 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 |---|---|
 | Nucleo | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
-| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l’inpaint regionale sono stati **integrati e testati con script di verifica**. InstantID e IP-Adapter non possono essere utilizzati contemporaneamente per generare un’immagine. Non è stato eseguito il test locale `generate()` su una scheda grafica 5090. |
+| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l’inpaint regionale sono stati **testati con fake-torch e i risultati sono stati verificati**. InstantID e IP-Adapter non possono essere utilizzati contemporaneamente per generare un’immagine. Non è stato eseguito il test locale `generate()` su una scheda grafica 5090. |
 | Encoder Flux | Le funzioni “solo testo” e “riempimento inpaint” sono state integrate (fake-torch). ControlNet pose, IP-Adapter e LoRA continuano a essere rifiutate (famiglia errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
 | Ricetta Cloud | `pcraft recipe` emette un'immagine cucita con Kontext, un ritaglio sinistro nel grafico e un riempimento Flux che mostra solo il pugno. `method=reference` è quel percorso. Un invio Cloud in diretta (lavoro `06668d4c`, 2026-08-18) ha prodotto un singolo pannello ritagliato e ha mantenuto il bracciale. |
 | Gate | Il livello 2 è una vera espansione DSG (entità / attributo / relazione). L'escalation è un checkpoint contrastivo. Le ricevute memorizzano la storia del tentativo, non solo il numero di tentativi. |
@@ -165,6 +165,10 @@ src/pcraft/
 Le regole dell'encoder sotto `domains/image/rules/` sono **generate** da un database di ricette verificate, non scritte a mano, e contengono un header di generazione. Ogni risorsa associata scrive una **prova di provenienza riproducibile** che registra l'hash del contratto, l'artefatto del sintetizzatore, il generatore e il seed, la versione del verificatore e la trascrizione completa per ogni "gate".
 
 La motivazione del progetto, gli standard rispetto ai quali questo repository si auto-valuta e le azioni di annullamento per ogni azione irreversibile sono disponibili in [`STANDARDS.md`](STANDARDS.md) e [`COMPENSATORS.md`](COMPENSATORS.md).
+
+## Collaboratori
+
+Consultare il file [CONTRIBUTORS.md](CONTRIBUTORS.md). Autore: mcp-tool-shop. Test interni (dogfood) eseguiti su questo modello: Grok (xAI).
 
 ## Licenza
 

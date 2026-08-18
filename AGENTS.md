@@ -1,7 +1,7 @@
 # prompt-craft
 
 Follow **`grok.md`** in this directory. It is the operating file for a
-solo Grok seat on this repo.
+solo Grok seat on this repo. Next session: read **`HANDOFF.md`**.
 
 Load-bearing:
 

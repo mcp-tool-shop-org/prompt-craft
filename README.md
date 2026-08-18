@@ -213,6 +213,11 @@ Design rationale, the standards this repo scores itself against, and the named u
 irreversible action live in [`STANDARDS.md`](STANDARDS.md) and
 [`COMPENSATORS.md`](COMPENSATORS.md).
 
+## Contributors
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md). Author: mcp-tool-shop. Dogfood
+swarm on this tree: Grok (xAI).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The licence of any *model* used through this tool is a separate

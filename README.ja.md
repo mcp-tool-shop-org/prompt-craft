@@ -157,6 +157,10 @@ src/pcraft/
 
 設計の根拠、このリポジトリが評価される基準、およびすべての不可逆的なアクションに対する名前付きの修正は、[`STANDARDS.md`](STANDARDS.md)と[`COMPENSATORS.md`](COMPENSATORS.md)に記載されています。
 
+## 貢献者
+
+[CONTRIBUTORS.md] を参照してください。作成者：mcp-tool-shop。Dogfood。このツリーでテストに使用：Grok（xAI）。
+
 ## ライセンス
 
 MIT — [LICENSE](LICENSE)を参照してください。このツールで使用される*モデル*のライセンスは別の問題であり、本ツールの対象外です。

@@ -39,7 +39,9 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 - Version stays **0.2.1** unless the Director says bump.
 - `identity_subgate.py`: no delete, no promote, no wire.
 - No mutmut, no dependabot.
-- Cloud Comfy is the default generate path. Local 5090 only if asked.
+- Cloud Comfy is the default generate path. Local 5090 only if asked
+  — **except the next session, which is greened for a live 5090
+  generate and a live GEPA compile.** See `HANDOFF.md`.
 - GEPA is offline, `[synth]`, never on the per-asset hot path.
   `pcraft compile` does not invent a pixel metric.
 - Gates `raise`, never bare `assert`. ASCII in tool output.

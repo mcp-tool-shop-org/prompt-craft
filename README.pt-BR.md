@@ -160,6 +160,10 @@ As regras do codificador sob `domains/image/rules/` são **geradas** a partir de
 
 A justificativa do projeto, os padrões pelos quais este repositório se avalia e as ações de desfazer nomeadas para cada ação irreversível estão disponíveis em [`STANDARDS.md`](STANDARDS.md) e [`COMPENSATORS.md`](COMPENSATORS.md).
 
+## Colaboradores
+
+Consulte o arquivo [CONTRIBUTORS.md](CONTRIBUTORS.md). Autor: mcp-tool-shop. Teste interno em larga escala neste projeto: Grok (xAI).
+
 ## Licença
 
 MIT — consulte [LICENSE](LICENSE). A licença de qualquer *modelo* usado por meio desta ferramenta é uma questão separada e não está coberta por ela.

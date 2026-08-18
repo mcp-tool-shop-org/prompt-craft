@@ -106,7 +106,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 |---|---|
 | 核心 | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | 谓词 | `core/` 中的十一个复合决策点都经过了**突变测试**——21 个突变体中有 20 个被杀死，并且[幸存者已命名](scripts/mutate_predicates.py)，而不是隐藏。 |
-| SDXL 条件 | ControlNet OpenPose、IP-Adapter、LoRA 和 **InstantID**，以及区域修复功能都已通过 **fake-torch 测试**，并已连接和配置。InstantID 和 IP-Adapter 不能共享一个生成过程。尚未在配备 5090 的设备上运行本地 `generate()`。 |
+| SDXL 条件 | ControlNet OpenPose、IP-Adapter、LoRA 和 **InstantID**，以及区域修复功能都已通过 **fake-torch 测试**。InstantID 和 IP-Adapter 不能共享一个生成过程。尚未在配备 5090 的本地设备上运行 `generate()`。 |
 | Flux 编码器 | 仅文本和“填充修复”功能已连接（fake-torch）。ControlNet 姿势、IP-Adapter 和 LoRA 仍被拒绝（家族类型错误）。`method=reference` 会写入云端配方图，并拒绝模拟在本地运行（`GATE_CLOUD_SUBMIT`）。 |
 | 云端配方 | `pcraft recipe` 输出 Kontext stitch + 图形中左侧裁剪 + 仅限拳头的 Flux Fill。`method=reference` 是该路径。一个实时云端提交（任务 `06668d4c`，2026-08-18）生成了一个单面板裁剪图并保留了护腕。 |
 | 验证门 | 第二层是一个真实的 DSG 扩展（实体/属性/关系）。升级是一个对比检查点。收据存储尝试历史，而不仅仅是重试计数。 |
@@ -156,6 +156,10 @@ src/pcraft/
 `domains/image/rules/`下的编码器规则是从经过验证的配方数据库**生成**的，而不是手动编写的，并且包含一个生成头。每个绑定的资产都会写入一个**可重现的来源收据**，其中包含合同哈希值、合成器工件、生成器和种子、验证器版本以及完整的逐原子门控记录。
 
 设计原理、本仓库所依据的标准以及对每个不可逆操作的撤销措施都位于[`STANDARDS.md`](STANDARDS.md)和[`COMPENSATORS.md`](COMPENSATORS.md)。
+
+## 贡献者
+
+请参阅 [CONTRIBUTORS.md](CONTRIBUTORS.md)。作者：mcp-tool-shop。Dogfood swarm，该项目在 Grok（xAI）上进行测试。
 
 ## 许可证
 

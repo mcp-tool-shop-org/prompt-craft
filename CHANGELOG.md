@@ -86,6 +86,9 @@ every entry below concerns the GPU-free core.
   `GATE_CONDITIONING_REF_MISSING`. Flux still refuses LoRA.
 - **`method=instantid` on SDXL.** InstantX ControlNet + face plate.
   InstantID and IP-Adapter cannot share one generate. Flux refuses.
+- **`grok.md` / `HANDOFF.md` / `CONTRIBUTORS.md`.** Solo-seat
+  operating file, next-session brief (live 5090 generate + live
+  GEPA), Grok listed as a contributor.
 
 ### Fixed
 

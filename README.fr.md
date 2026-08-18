@@ -166,6 +166,10 @@ Les règles d’encodeur sous `domains/image/rules/` sont **générées** à par
 
 La justification de la conception, les normes auxquelles ce dépôt se compare et la possibilité d’annuler chaque action irréversible sont disponibles dans [`STANDARDS.md`](STANDARDS.md) et [`COMPENSATORS.md`](COMPENSATORS.md).
 
+## Contributeurs
+
+Voir [CONTRIBUTORS.md](CONTRIBUTORS.md). Auteur : mcp-tool-shop. Test en interne (dogfood) sur cet arbre : Grok (xAI).
+
 ## Licence
 
 MIT : voir [LICENSE](LICENSE). La licence de tout *modèle* utilisé avec cet outil est une question distincte et n’est pas couverte par celle-ci.
