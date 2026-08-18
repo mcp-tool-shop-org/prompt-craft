@@ -340,9 +340,15 @@ def test_flux_still_refuses_lora(tmp_path):
     assert "lora" in exc.value.message
 
 
-def test_sdxl_method_none_is_not_a_request(tmp_path):
+def test_sdxl_method_none_is_not_a_request(tmp_path, monkeypatch):
     """method=none skips the plate. No ref to load, so we fall through to _load
-    and (without the extra) DEP_IMAGE_MISSING -- never REF_MISSING / UNSUPPORTED."""
+    and DEP_IMAGE_MISSING -- never REF_MISSING / UNSUPPORTED. Stub _load so a
+    live [image] extra cannot fire a real generate."""
+
+    def boom(self, kind="base"):
+        raise PromptCraftError("DEP_IMAGE_MISSING", "test stub — do not load a pipeline")
+
+    monkeypatch.setattr(SDXLGenerator, "_load", boom)
     with pytest.raises(PromptCraftError) as exc:
         SDXLGenerator().generate(
             "p",
@@ -543,7 +549,9 @@ def test_eight_turnaround_openpose_plates_are_packaged():
 
 
 def test_no_fake_modules_leak_past_this_files_tests():
-    assert "torch" not in sys.modules
-    assert "diffusers" not in sys.modules
-    assert "PIL" not in sys.modules
-    assert "PIL.Image" not in sys.modules
+    """[image] may be installed. A leftover is a ModuleType stand-in with no __file__."""
+    for name in ("torch", "diffusers", "PIL", "PIL.Image"):
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        assert getattr(mod, "__file__", None), f"{name} leaked as a fake ModuleType"

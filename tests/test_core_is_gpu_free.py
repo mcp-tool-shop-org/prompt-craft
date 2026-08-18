@@ -39,10 +39,13 @@ CORE_MODULES = [
 
 
 def test_core_imports_without_gpu_deps():
+    """Importing core must not pull torch/diffusers. They may already be
+    present when the [image] extra is installed; that is not a core leak."""
+    before = {name for name in ("torch", "diffusers") if name in sys.modules}
     for mod in CORE_MODULES:
         importlib.import_module(mod)
-    assert "torch" not in sys.modules, "importing core pulled torch"
-    assert "diffusers" not in sys.modules, "importing core pulled diffusers"
+    pulled = {name for name in ("torch", "diffusers") if name in sys.modules} - before
+    assert not pulled, f"importing core pulled {pulled}"
 
 
 def test_core_source_has_no_diffusion_imports():

@@ -6,10 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 A version here marks **a state of the gate** — what it can check, what it refuses, and what it
-has never been able to prove. The `[image]` path has not executed on any machine to date, so
-every entry below concerns the GPU-free core.
+has never been able to prove. The `[image]` path has now executed once on the 5090
+(2026-08-18). The GPU-free core is still the suite.
 
 ## [Unreleased]
+
+### Measured
+
+- **Local 5090 SDXL `generate()` ran** (2026-08-18). CUDA
+  `torch 2.13.0+cu130`, RTX 5090, 31.84 GB. Ashen-reaver with the
+  shipped two-hand OpenPose + identity plate (`method=ip_adapter`),
+  seed `169405236028824`, kind `controlnet_ip`. Looked at the frame:
+  orcish face with tusks; crossed arms, not a two-hand axe; no
+  triple-bar sigil; no bone-spike bracer. Two IP-Adapter plates on
+  one adapter refuse (`Cannot assign 2 scale_configs to 1
+  IP-Adapter`). `bind --no-mock` still raises `DEP_IMAGE_MISSING`.
+  Flux text-only / Fill not run — weights not on disk.
+
+### Fixed
+
+- **The GPU-free suite stays GPU-free when `[image]` is installed.**
+  Three tests used `DEP_IMAGE_MISSING` as a proxy for "fell through to
+  `_load`" and then ran a live 30-step SDXL generate once torch was
+  present. They now stub `_load`. The torch-absence canaries accept a
+  real `site-packages` torch.
 
 ### Added
 

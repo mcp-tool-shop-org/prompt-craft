@@ -45,7 +45,7 @@ the features.
 | The core | **325 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
-| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and fake-torch tested**. InstantID and IP-Adapter cannot share one generate. Local `generate()` on a 5090 has not been run |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and fake-torch tested**. InstantID and IP-Adapter cannot share one generate. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`). The frame is orcish; grip, sigil, and bracer did not land |
 | Flux encoder | Fill inpaint is wired. Pose / IP-Adapter / LoRA / InstantID stay refused. `method=reference` writes the Cloud recipe and will not pretend Kontext ran locally |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + left crop + fist-only Fill. A live Cloud submit (job `06668d4c`) produced a single-panel crop and kept the bracer |
 | Gate / synth | Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. Offline GEPA is a Python door; no live 600B compile has been run |
@@ -61,8 +61,8 @@ Three claims earlier versions of this project made, corrected here rather than q
   is measurably more stable than open-ended captioning, models cannot reliably self-correct
   without external feedback, and a model's self-recognition tracks its self-preference bias. No
   single study runs the head-to-head. The rule is sound. The certainty was overstated.
-- Conditioning was described as unread. SDXL now reads the assembled refs in code. What remains
-  unexercised is a live local `generate()` on this machine.
+- Conditioning was described as unread. SDXL now reads the assembled refs in code. A live local
+  `generate()` on this machine has now been run. Wired-and-applied is not the plate landing.
 
 ## Where to go next
 

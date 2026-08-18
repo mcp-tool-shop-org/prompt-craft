@@ -177,18 +177,29 @@ def test_sdxl_refuses_a_missing_identity_plate():
     assert "Drop pose_refs" not in (exc.value.hint or "")
 
 
-def test_sdxl_allows_empty_pose_and_identity_lists():
+def _stub_sdxl_load(monkeypatch):
+    """Reach _load without a live pipeline. [image] may be installed; this suite stays GPU-free."""
+
+    def boom(self, kind="base"):
+        raise PromptCraftError("DEP_IMAGE_MISSING", "test stub — do not load a pipeline")
+
+    monkeypatch.setattr(SDXLGenerator, "_load", boom)
+
+
+def test_sdxl_allows_empty_pose_and_identity_lists(monkeypatch):
     """_assemble_conditioning() (core/loop/orchestrate.py) always includes both keys, often as [].
     An empty list means 'not requested', not 'requested and unsupported' -- it must fall through to
-    _load(), not be refused. torch/diffusers are genuinely absent here, so the next thing that
-    happens is DEP_IMAGE_MISSING -- but it must NOT be GATE_CONDITIONING_UNSUPPORTED."""
+    _load(), not be refused. The next coded error is DEP_IMAGE_MISSING (stubbed here so a live
+    [image] extra cannot fire a 30-step generate) -- never GATE_CONDITIONING_UNSUPPORTED."""
+    _stub_sdxl_load(monkeypatch)
     gen = SDXLGenerator()
     with pytest.raises(PromptCraftError) as exc:
         gen.generate("p", "n", {"pose_refs": [], "identity_refs": []}, seed=1)
     assert exc.value.code == "DEP_IMAGE_MISSING"
 
 
-def test_sdxl_allows_conditioning_with_no_pose_or_identity_keys_at_all():
+def test_sdxl_allows_conditioning_with_no_pose_or_identity_keys_at_all(monkeypatch):
+    _stub_sdxl_load(monkeypatch)
     gen = SDXLGenerator()
     with pytest.raises(PromptCraftError) as exc:
         gen.generate("p", "n", {}, seed=1)
@@ -634,10 +645,13 @@ def test_dsg_family_label_is_unchanged():
 
 def test_no_fake_modules_leak_past_this_files_tests():
     """Every fake-module test above uses monkeypatch.setitem (auto-reverted per test), never raw
-    sys.modules mutation. This is the invariant tests/test_core_is_gpu_free.py depends on; if a
-    future edit here breaks that discipline, this canary should catch it before that file does."""
-    assert "torch" not in sys.modules
-    assert "diffusers" not in sys.modules
+    sys.modules mutation. [image] may now be installed, so torch/diffusers can be present —
+    they must be the real packages, not a leftover ModuleType stand-in."""
+    for name in ("torch", "diffusers"):
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        assert getattr(mod, "__file__", None), f"{name} leaked as a fake ModuleType"
     assert "ai_eyes_mcp" not in sys.modules
     assert "ai_eyes_mcp.engine" not in sys.modules
     assert "t2v_metrics" not in sys.modules

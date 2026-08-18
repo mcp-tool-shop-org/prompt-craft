@@ -84,11 +84,12 @@ pip install -e ".[image]"    # torch / diffusers — the real generator and veri
 pip install -e ".[synth]"    # DSPy + a hosted LM — the real synthesizer
 ```
 
-**Neither is needed to run, test, or evaluate the core.** Local `generate()` on a 5090 has not
-been run here. A Cloud recipe (`pcraft recipe`) **has** been submitted live (2026-08-18). Offline
-GEPA compile needs `[synth]` and a Python `gate_metric` — the CLI will not invent one.
-`bind --no-mock` still needs the extras. Treat a live local generate as unproven until you have
-run it yourself.
+**Neither is needed to run, test, or evaluate the core.** Local `generate()` on a 5090 **has**
+been run here (2026-08-18, ashen-reaver, OpenPose + identity plate). The frame is orcish;
+grip, sigil, and bracer did not land. A Cloud recipe (`pcraft recipe`) **has** been submitted
+live (2026-08-18). Offline GEPA compile needs `[synth]` and a Python `gate_metric` — the CLI
+will not invent one. `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the mock
+loop; call `SDXLGenerator().generate()` if you want pixels.
 
 ## Verify a change
 

@@ -130,13 +130,13 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.2.1 — the core is real. SDXL conditioning is assembled in code. Local GPU generate is still unexercised. One Cloud recipe has been run live.**
+**v0.2.1 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
 
 | | |
 |---|---|
 | Core | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
-| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Local `generate()` on a 5090 has not been run. |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. Two IP-Adapter plates on one adapter refuse before pixels. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + in-graph left crop + fist-only Flux Fill. `method=reference` is that path. A live Cloud submit (job `06668d4c`, 2026-08-18) produced a single-panel crop and kept the bracer. |
 | Gate | Tier-2 is a real DSG expansion (entity / attribute / relation). Escalation is a contrastive checkpoint. Receipts store the attempt story, not just a retry count. |
@@ -155,8 +155,8 @@ corrected here rather than quietly dropped:
   self-correct without external feedback, and self-recognition tracks self-preference bias. No
   single study runs the head-to-head. The rule is sound; the certainty was overstated.
 - Conditioning was described as unread, then as unimplemented. SDXL now **reads** the assembled
-  refs in code. What remains unexercised is a live local `generate()` on this machine, not the
-  wiring.
+  refs in code. A live local `generate()` on this machine has now been run. Wired-and-applied
+  is not the same as the plate landing in the pixels.
 
 ## Requirements
 
