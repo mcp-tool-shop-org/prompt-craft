@@ -1,19 +1,37 @@
 """The synth -> generate -> verify -> retry -> bind state machine.
 
-This is the whole loop, domain-agnostic. It is driven by the BLOCK/AMEND/VERIFY/ADVANCE verdict
-machine and obeys every standard: it binds ONLY after every required atom passes (ANDON); it runs a
-no-skip compensator check before any irreversible action (NAMED_COMPENSATORS); the gate is a
-different family from the generator (EXTERNAL_VERIFIER, via family_guard); UNCERTAIN routes to a
-human (UNCERTAINTY_GATED_HUMANS); and every bound asset writes a replayable receipt (PIN_PER_STEP).
+This is the whole loop, domain-agnostic. It is driven by the AMEND/ADVANCE verdict machine and
+obeys every standard: it binds ONLY after every required atom passes AND the tier census confirms
+the gate actually ran (ANDON); it runs a no-skip compensator check before any irreversible action
+(NAMED_COMPENSATORS); the gate is a different family from the generator (EXTERNAL_VERIFIER, via
+family_guard); and every bound asset writes a replayable receipt (PIN_PER_STEP).
+
+⚑ CORRECTED IN PLACE (F-04533cc6): this docstring used to also claim "UNCERTAIN routes to a human
+(UNCERTAINTY_GATED_HUMANS)". It does not. verdict_from_transcript maps Zone.UNCERTAIN to
+Verdict.AMEND — the identical verdict Zone.FAIL gets — so an uncertain required atom is fed
+straight into the same repair ladder as a confirmed failure (choose_repair treats
+failed_required() and uncertain_required() as one combined list). A human is reached only once the
+repair budget is exhausted: gated on step count (repairs_left), not on uncertainty itself, which
+is precisely the anti-pattern UNCERTAINTY_GATED_HUMANS defines itself against. This is not a
+silent pass — the andon invariant above still holds, nothing binds without ADVANCE — but it is not
+UNCERTAINTY_GATED_HUMANS either. STANDARDS.md already scores this standard an honest 2 with a
+remediation note; this wave corrects the claim, not the escalation policy itself.
+
+A TRANSIENT generator error (timeout / rate limit / GPU OOM, i.e. an uncoded exception or a coded
+one outside the SYNTH_/CONTRACT_/GATE_/INPUT_ prefixes) is auto-retried within the existing
+best-of-N / repair budget; a SEMANTIC one escalates immediately — never an automatic re-roll
+(retry_policy.classify_failure).
 
 The contract is used TWICE here: ``synthesize`` covers its atoms, and ``compile_questions`` gates the
 same atoms — one declarative source, two consumers."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
-from ...errors import PromptCraftError
+from ...errors import PromptCraftError, wrap_error
 from ..contract.compile_questions import compile_questions
 from ..contract.hash import contract_hash
 from ..contract.schema import ResolvedContract
@@ -28,7 +46,15 @@ from ..synth.synthesizer_iface import Synthesizer, SynthResult
 from ..synth.visual_inventory import assert_tokens_trace
 from .compensators import CompensatorRegistry, default_registry
 from .generator_iface import GenerationResult, Generator
-from .retry_policy import RepairAction, RetryBudget, Verdict, choose_repair, verdict_from_transcript
+from .retry_policy import (
+    OutcomeClass,
+    RepairAction,
+    RetryBudget,
+    Verdict,
+    choose_repair,
+    classify_failure,
+    verdict_from_transcript,
+)
 
 
 class LoopConfig(BaseModel):
@@ -53,10 +79,28 @@ class Attempt(BaseModel):
 
 class OrchestrationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    decision: str  # bound | escalated | blocked
+    # F-a250372c: narrowed from a bare `str` (comment used to also list "blocked", which no
+    # assignment site ever produced — see retry_policy.Verdict's docstring for why BLOCK was
+    # removed rather than wired). Every one of the four call sites below already only ever used
+    # these two values; the Literal just makes that statically enforced.
+    decision: Literal["bound", "escalated"]
     reason: str
     attempts: list[Attempt]
     record: AssetRecord | None = None
+
+
+class _GenerationBlocked(Exception):
+    """Internal control-flow signal only: generator.generate() raised a SEMANTIC error
+    (F-83c3ad00). Raised by ``_safe_generate``, caught in ``run()``, never escapes this module.
+
+    A SEMANTIC defect is human-gated and must not be absorbed into best-of-N / the repair
+    ladder's automatic reroll. A TRANSIENT error never reaches this class at all — ``_safe_generate``
+    resolves it internally by returning ``None`` so the caller's existing loop naturally retries
+    within its existing budget, no extra budget granted."""
+
+    def __init__(self, err: PromptCraftError) -> None:
+        super().__init__(str(err))
+        self.err = err
 
 
 def run(
@@ -98,13 +142,21 @@ def run(
     conditioning = _assemble_conditioning(resolved)
 
     # --- GENERATE + VERIFY: bounded best-of-N, then the DAG-keyed repair ladder.
-    chosen = _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget)
-    chosen = _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, conditioning, attempts, budget, chosen)
+    try:
+        chosen = _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget)
+        chosen = _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, conditioning, attempts, budget, chosen)
+    except _GenerationBlocked as blocked:
+        # F-83c3ad00: a SEMANTIC generate() failure -- human-gated, never an automatic re-roll.
+        # Mirrors the prose-dump SEMANTIC synth defect above: no gen/transcript pair ever existed
+        # to build a record from, so there is nothing to persist and no "records-write" door to
+        # guard here -- only the human-notice compensator, exactly like that other early-return.
+        compensators.require("escalation-ticket")
+        return OrchestrationResult(decision="escalated", reason=blocked.err.to_safe_text(), attempts=attempts)
 
     gen, transcript = chosen
     verdict = verdict_from_transcript(transcript)
 
-    # --- DECIDE. Bind only on ADVANCE (every required atom PASS).
+    # --- DECIDE. Bind only on ADVANCE (every required atom PASS AND a complete tier census).
     if verdict is Verdict.ADVANCE:
         compensators.require("records-write")
         compensators.require("bind-to-canon")  # no-skip gate BEFORE the irreversible action
@@ -113,6 +165,11 @@ def run(
         return OrchestrationResult(decision="bound", reason="all required atoms passed", attempts=attempts, record=record)
 
     # FAIL / UNCERTAIN after the budget -> human checkpoint (uncertainty / retry-exhaustion).
+    # ⚑ CORRECTED IN PLACE (F-b269af73): this persist() call is structurally identical to the
+    # bound path's persist() above and was missing its "records-write" no-skip check -- only
+    # "escalation-ticket" ran before it. A caller-supplied registry that named "escalation-ticket"
+    # but not "records-write" let this write through unguarded. Both doors now require both.
+    compensators.require("records-write")
     compensators.require("escalation-ticket")
     record = _build_record(resolved, synth, gen, transcript, thresholds, dag, len(attempts), "escalated")
     persist(record, config.records_dir)
@@ -150,23 +207,60 @@ def _assemble_conditioning(resolved: ResolvedContract, identity_weight_bump: flo
     return cond
 
 
-def _gate(gen: GenerationResult, verifiers, thresholds, dag):
+def _safe_generate(
+    generator: Generator, prompt: str, negative_prompt: str, conditioning: dict, seed: int
+) -> GenerationResult | None:
+    """Call generator.generate(), classifying any raised error per the TRANSIENT/SEMANTIC split
+    retry_policy documents (F-83c3ad00). A bare exception is wrapped first
+    (``RUNTIME_GENERATE_FAILED`` carries none of classify_failure's semantic prefixes, so it reads
+    as TRANSIENT -- the same bucket a raw timeout/network error belongs in) so an uncoded crash is
+    treated the same as a coded one. TRANSIENT returns None so the caller's own retry loop
+    (best-of-N or the repair ladder) naturally moves on within its existing budget -- no extra
+    budget is granted. SEMANTIC raises _GenerationBlocked so run() escalates immediately: never an
+    automatic re-roll for a semantic defect."""
+    try:
+        return generator.generate(prompt, negative_prompt, conditioning, seed)
+    except Exception as err:  # classified immediately below; never silently swallowed
+        wrapped = wrap_error(err, "RUNTIME_GENERATE_FAILED")
+        if classify_failure(wrapped.code) is OutcomeClass.SEMANTIC:
+            raise _GenerationBlocked(wrapped) from wrapped
+        return None
+
+
+def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: str):
     preflight_image(gen.image_path)
-    return harness.evaluate(dag, gen.image_path, verifiers, thresholds)
+    # Coordinated signature change (wave-2 core-gate sibling, F-461c4198): the family guard now
+    # also runs inside harness.evaluate itself. generator_family is the orchestrator's own
+    # trusted generator.family -- already validated once by assert_distinct_families in run()
+    # before any generation happened -- not gen.generator_family (a field the generator
+    # self-reports on its own result). Threading the already-validated value keeps one source of
+    # truth instead of trusting the generator's echo of it a second time.
+    return harness.evaluate(dag, gen.image_path, verifiers, thresholds, generator_family=generator_family)
 
 
 def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget):
     candidates: list[tuple[GenerationResult, harness.GateTranscript]] = []
-    for i in range(max(1, budget.best_of_n)):
+    n = max(1, budget.best_of_n)
+    for i in range(n):
         seed = config.base_seed + i
-        gen = generator.generate(synth.prompt, synth.negative_prompt, conditioning, seed)
-        transcript = _gate(gen, verifiers, thresholds, dag)
+        gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, conditioning, seed)
+        if gen is None:
+            continue  # TRANSIENT generate() failure -- auto-retry with the next seed, same budget
+        transcript = _gate(gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=transcript.overall,
                                 verdict=verdict_from_transcript(transcript), note="best-of-N"))
         candidates.append((gen, transcript))
         if transcript.overall is Zone.PASS:  # early exit on first clean pass
             break
     budget.rerolls = max(0, budget.rerolls - len(candidates))
+    if not candidates:
+        # every attempt in the loop above was a TRANSIENT generate() failure -- the auto-retry
+        # budget (best-of-N) is now exhausted with nothing to gate. Escalate rather than hand
+        # _select_best an empty list.
+        raise _GenerationBlocked(PromptCraftError(
+            "RUNTIME_GENERATE_EXHAUSTED",
+            f"every best-of-{n} generate() attempt raised a transient error; none produced an image",
+        ))
     return _select_best(candidates)
 
 
@@ -209,8 +303,11 @@ def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, condi
         elif repair is RepairAction.INPAINT_REGION:
             budget.inpaints -= 1  # same seed (regional inpaint)
 
-        new_gen = generator.generate(synth.prompt, synth.negative_prompt, cond, seed)
-        new_t = _gate(new_gen, verifiers, thresholds, dag)
+        new_gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, cond, seed)
+        if new_gen is None:
+            continue  # TRANSIENT generate() failure on this repair attempt -- repairs_left and
+                      # the action's own sub-budget above are already charged; try the next one
+        new_t = _gate(new_gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=new_t.overall,
                                 verdict=verdict_from_transcript(new_t), repair=repair, note="repair"))
         # keep the better of old/new (the verifier is still the selector)

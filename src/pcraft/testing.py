@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .core.contract.compile_questions import Polarity, Question
+from .core.gate.verifier_iface import Verifier
 from .core.loop.generator_iface import GenerationResult
 
 
@@ -90,7 +91,22 @@ class ScriptedVerifier:
         return 0.005 if question.polarity is Polarity.negate else 0.95
 
 
-def passing_verifiers(**kwargs) -> dict[int, ScriptedVerifier]:
-    """A single different-family Tier-1 verifier; the harness falls forward to it from any tier."""
-    v = ScriptedVerifier(**kwargs)
-    return {v.tier: v}
+def passing_verifiers(**kwargs) -> dict[int, Verifier]:
+    """Tier-0 + Tier-1, different-family verifiers, so the harness actually EXECUTES both
+    required tiers instead of relying on ``_pick``'s tier-1 fallback for Tier-0-designated
+    (siglip2/palette) atoms.
+
+    A single registered Tier-1 verifier still scores every atom -- ``_pick`` falls forward
+    from tier 0 to tier 1 when tier 0 is absent -- so the gate's own verdict was never
+    wrong. But ``_tier_census`` only credits the tier a score actually ``tier_used``, so a
+    demo/bind run that never registers Tier-0 reports ``tiers executed: 1 of 2`` under a
+    clean BOUND/PASS decision: the mock cannot tell "the gate ran fully" apart from "half
+    the gate never ran", because it never truly ran the half it claims credit for
+    (F-834dd470). Registering a real Tier-0 verifier here closes that gap without
+    changing any default score (both verifiers still pass-everything by default), so
+    every existing PASS/BOUND scenario keeps its verdict -- only the census becomes
+    honest.
+    """
+    v0 = ScriptedVerifier(family="siglip2", tier=0, verifier_id="scripted.siglip2.v0", **kwargs)
+    v1 = ScriptedVerifier(**kwargs)  # defaults: family=clip-flant5, tier=1, id=scripted.vqa.v0
+    return {v0.tier: v0, v1.tier: v1}

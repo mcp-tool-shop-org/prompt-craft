@@ -59,7 +59,7 @@ def test_an_optional_negation_that_fails_does_not_block(sprite_example):
     def scorer(q):
         return 0.99  # high on a negate probe == the forbidden thing IS present
 
-    t = harness.evaluate(dag, "x.png", {0: ScriptedVerifier(scorer), 1: ScriptedVerifier(scorer)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {0: ScriptedVerifier(scorer), 1: ScriptedVerifier(scorer)}, thresholds, generator_family="stable-diffusion")
 
     violated = [v for v in t.verdicts if v.polarity.value == "negate" and v.zone is Zone.FAIL]
     assert violated, "the fixture must actually violate the negations or it proves nothing"
@@ -79,7 +79,7 @@ def test_a_required_negation_that_fails_still_blocks(sprite_example):
         mn.severity = Severity.required
     dag = compile_questions(resolved)
     t = harness.evaluate(
-        dag, "x.png", {0: ScriptedVerifier(lambda _q: 0.99), 1: ScriptedVerifier(lambda _q: 0.99)}, thresholds
+        dag, "x.png", {0: ScriptedVerifier(lambda _q: 0.99), 1: ScriptedVerifier(lambda _q: 0.99)}, thresholds, generator_family="stable-diffusion"
     )
     assert [v for v in t.failed_required() if v.polarity.value == "negate"]
     err = error_from_transcript(t)
@@ -98,7 +98,7 @@ def test_an_optional_negations_tier_is_not_a_required_tier(sprite_example):
     for atom in resolved.must_have:
         atom.severity = Severity.optional
     dag = compile_questions(resolved)
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: 0.99)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: 0.99)}, thresholds, generator_family="stable-diffusion")
     assert t.tier_census.required == [], "no atom is required, so no tier is required"
 
 

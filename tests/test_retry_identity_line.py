@@ -34,6 +34,6 @@ def test_a_failed_face_atom_does_not_strengthen_the_plate(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     v = ScriptedVerifier({"face": 0.05})
-    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds, generator_family="stable-diffusion")
     action = choose_repair(t, RetryBudget(), dag)
     assert action is not RepairAction.STRENGTHEN_IDENTITY

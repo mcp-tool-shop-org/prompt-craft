@@ -1,8 +1,12 @@
 """Flux generator (swappable encoder per the system-architecture reuse slot).
 
 Same plugin contract as SDXL; ``family = "flux"``. A sibling to ``SDXLGenerator`` demonstrating that
-the generator is the swappable secret — the core loop, contract, gate, and optimizer are unchanged
-when the encoder changes. torch/diffusers are lazy ``[image]`` deps."""
+the generator is the swappable secret -- the core loop, contract, gate, and optimizer are unchanged
+when the encoder changes. torch/diffusers are lazy ``[image]`` deps.
+
+STAGE A HONESTY NOTE (F-d628ec97): same defect and same fix as ``SDXLGenerator`` -- see that file's
+module docstring. ``FluxPipeline`` here is the plain txt2img pipeline; no ControlNet, no IP-Adapter.
+``generate()`` refuses rather than silently accepting conditioning it cannot apply."""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from pathlib import Path
 
 from ....errors import PromptCraftError
 from ....core.loop.generator_iface import GenerationResult
+from ._device import select_device, select_dtype
 
 
 class FluxGenerator:
@@ -26,21 +31,57 @@ class FluxGenerator:
         if self._pipe is not None:
             return self._pipe
         try:
+            import torch  # noqa: F401
             from diffusers import FluxPipeline  # type: ignore
         except Exception as err:
             raise PromptCraftError("DEP_IMAGE_MISSING", "Flux needs the [image] extra (torch + diffusers)") from err
-        self._pipe = FluxPipeline.from_pretrained(self.model_id)
+
+        # F-10b380ba: FLUX.1-dev is a 12B-parameter model; the official usage snippet loads bf16
+        # specifically because float32 roughly doubles the ~24GB bf16 footprint. prefer_bf16=True on
+        # CUDA reflects that; CPU still gets float32 (bf16-on-CPU support varies by torch build).
+        device = select_device(torch)
+        dtype = select_dtype(torch, device, prefer_bf16=True)
+        try:
+            pipe = FluxPipeline.from_pretrained(self.model_id, torch_dtype=dtype)
+            self._pipe = pipe.to(device)
+        except Exception as err:
+            raise PromptCraftError(
+                "RUNTIME_GENERATOR_LOAD_FAILED",
+                f"Flux pipeline {self.model_id!r} failed to load/move to device {device!r}: {err}",
+                cause=err,
+            ) from err
         return self._pipe
 
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
-        pipe = self._load()
-        import torch  # type: ignore
+        # F-d628ec97: same refusal as SDXLGenerator.generate() -- see that file for the full comment.
+        if conditioning.get("pose_refs") or conditioning.get("identity_refs"):
+            raise PromptCraftError(
+                "GATE_CONDITIONING_UNSUPPORTED",
+                f"{self.generator_id} cannot apply pose_refs/identity_refs conditioning: "
+                "ControlNet pose-lock and IP-Adapter identity binding are not implemented by this "
+                "generator (plain FluxPipeline txt2img only)",
+                hint="Drop pose_refs/identity_refs from the contract for this generator, or use/build "
+                "a FLUX-specific ControlNet/IP-Adapter pipeline before relying on pose-lock or "
+                "identity binding.",
+            )
 
-        generator = torch.Generator(device=getattr(pipe, "device", "cpu")).manual_seed(seed)
-        image = pipe(prompt=prompt, num_inference_steps=self.steps, generator=generator).images[0]
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-        path = self.out_dir / f"{self.generator_id}_seed{seed}.png"
-        image.save(path)
+        pipe = self._load()
+        try:
+            import torch  # type: ignore
+
+            generator = torch.Generator(device=getattr(pipe, "device", "cpu")).manual_seed(seed)
+            image = pipe(prompt=prompt, num_inference_steps=self.steps, generator=generator).images[0]
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            path = self.out_dir / f"{self.generator_id}_seed{seed}.png"
+            image.save(path)
+        except Exception as err:
+            # F-2ef1bb79: convert a raw call-time failure into the one structured error type.
+            raise PromptCraftError(
+                "RUNTIME_GENERATE_FAILED",
+                f"{self.generator_id} failed generating seed={seed}: {err}",
+                cause=err,
+            ) from err
+
         return GenerationResult(
             image_path=str(path), seed=seed, sampler="flow-match", generator_id=self.generator_id,
             generator_family=self.family, conditioning=conditioning,

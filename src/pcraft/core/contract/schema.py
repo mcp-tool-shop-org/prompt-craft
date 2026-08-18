@@ -7,15 +7,18 @@ identity_ref). Prose prompts are a *derived, regenerable* artifact (see ``synth/
 live in the contract.
 
 Two levels with inheritance: a ``faction`` is the base class; a ``character`` ``extends`` a faction
-and may ADD or RAISE requirements but may never drop or relax a faction-required atom
-(enforced fail-closed in ``loader.py``).
+and may ADD or RAISE requirements but may never drop or relax a faction-required atom, nor rewrite
+its claim/check_type while keeping its id (enforced fail-closed in ``loader.py``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from ...errors import PromptCraftError
 
 
 class CheckType(str, Enum):
@@ -101,10 +104,45 @@ class IdentityRef(BaseModel):
     scope: str = "face"  # face | costume | silhouette | full
 
 
+def _reject_duplicate_ids(
+    must_have: Sequence[Atom], must_not: Sequence[MustNot], *, contract_id: str
+) -> None:
+    """Fail closed on a repeated atom id within one list (F-fb7194d3).
+
+    ``QuestionDAG.topological()`` (``compile_questions.py``) keys its dependency walk purely
+    by ``atom_id``: its ``index`` dict comprehension keeps the LAST atom with a given id, but
+    its ``done`` set keeps the FIRST — so a duplicate id silently vanishes from the compiled
+    gate order with no error, and which declaration survives is an accident of list order.
+    Rejecting the duplicate here, at contract-construction time, is the fail-closed default;
+    the DAG's own dedup must never be the enforcement mechanism.
+    """
+    _reject_duplicates_in(must_have, contract_id=contract_id, list_name="must_have")
+    _reject_duplicates_in(must_not, contract_id=contract_id, list_name="must_not")
+
+
+def _reject_duplicates_in(
+    atoms: Sequence[Atom] | Sequence[MustNot], *, contract_id: str, list_name: str
+) -> None:
+    seen: set[str] = set()
+    for atom in atoms:
+        if atom.id in seen:
+            raise PromptCraftError(
+                "CONTRACT_DUPLICATE_ATOM_ID",
+                f"{contract_id!r} declares {list_name} id {atom.id!r} more than once",
+                hint=(
+                    "Each id must be unique within must_have (and, separately, within "
+                    "must_not) inside one contract. A duplicate is not deterministically "
+                    "evaluated — QuestionDAG.topological() silently keeps only one "
+                    "declaration and drops the rest."
+                ),
+            )
+        seen.add(atom.id)
+
+
 class Contract(BaseModel):
     """A single faction or character contract (unresolved — ``extends`` not yet applied)."""
 
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     schema_id: str = Field(default="prompt-craft/contract.v1", alias="$schema")
     id: str
     level: str  # "faction" | "character"
@@ -112,6 +150,17 @@ class Contract(BaseModel):
     must_have: list[Atom] = Field(default_factory=list)
     must_not: list[MustNot] = Field(default_factory=list)
     identity_ref: IdentityRef | None = None
+    # A narrowly-declared allow-list entry, not a reopening of extra="ignore": both shipped
+    # example contracts (src/pcraft/domains/image/subdomains/sprite/contracts/) carry a
+    # top-level "_note" authoring comment. Declaring it explicitly keeps that field legal
+    # while every OTHER unknown/misspelled key (musthave, mustnot, extend, ...) still fails
+    # closed instead of being silently dropped along with it.
+    note: str | None = Field(default=None, alias="_note")
+
+    @model_validator(mode="after")
+    def _check_unique_atom_ids(self) -> Contract:
+        _reject_duplicate_ids(self.must_have, self.must_not, contract_id=self.id)
+        return self
 
 
 class ResolvedContract(BaseModel):
@@ -126,6 +175,11 @@ class ResolvedContract(BaseModel):
     must_have: list[Atom]
     must_not: list[MustNot]
     identity_refs: list[IdentityRef]
+
+    @model_validator(mode="after")
+    def _check_unique_atom_ids(self) -> ResolvedContract:
+        _reject_duplicate_ids(self.must_have, self.must_not, contract_id=self.id)
+        return self
 
     def required_atoms(self) -> list[Atom]:
         return [a for a in self.must_have if a.severity == Severity.required]

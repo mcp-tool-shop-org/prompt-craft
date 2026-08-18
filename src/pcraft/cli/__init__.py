@@ -1,19 +1,95 @@
 """The ``pcraft`` CLI: synth | gate | bind | compile | replay | sync-rules | demo.
 
-Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3; raw tracebacks
-are gated behind --debug."""
+Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
+tracebacks are gated behind --debug."""
 
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
+from collections.abc import Sequence
+from typing import Any
 
 import typer
 
-from ..errors import PromptCraftError
+# Typer 0.26 vendored Click as `typer._click`; 0.25 and earlier use the standalone
+# `click` package. pyproject declares `typer>=0.12`, so BOTH are inside the range this
+# package says it supports and neither import works on its own. Reaching for one and
+# not the other made the whole CLI unimportable on a conforming install
+# (ModuleNotFoundError at import time, before any command runs) — caught only because
+# the swarm's deterministic floor happened to run on a different interpreter than the
+# dev venv. These are the exception types Click raises for its OWN parser errors; there
+# is no public re-export of them under either layout, so the fallback is the portable
+# form rather than a preference.
+try:
+    from typer._click.exceptions import Abort as _ClickAbort
+    from typer._click.exceptions import ClickException as _ClickException
+except ModuleNotFoundError:  # typer < 0.26
+    from click.exceptions import Abort as _ClickAbort
+    from click.exceptions import ClickException as _ClickException
+from typer.core import TyperGroup
+
+from ..errors import PromptCraftError, wrap_error
 from ..gate_report import format_transcript  # local helper (see below)
 
-app = typer.Typer(add_completion=False, help="Contract-driven generative-asset production.")
+
+class _ExitContractGroup(TyperGroup):
+    """Give Click/Typer's own parser errors exit code 1, never this contract's 2.
+
+    A mistyped flag, a missing argument, or an unknown (sub)command never reaches any
+    command body -- Click validates argv before ``self.invoke(ctx)`` runs -- so no
+    ``except PromptCraftError`` below ever sees it. Left alone, Click's ``UsageError``
+    family (``MissingParameter`` / ``NoSuchOption`` / ``BadParameter`` /
+    ``BadArgumentUsage`` / a bare ``UsageError`` for "no such command" or "missing
+    command") exits 2 by the library's own default -- colliding head-on with errors.py's
+    own ``GATE_``/``DEP_``/``IO_``/``RUNTIME_``/``STATE_`` exit 2 ("it ran, and a
+    required atom failed"). A mistyped command is not that. (F-fb4f116a)
+
+    ``standalone_mode=False`` is forced on the inner call so a Click parser exception
+    propagates here as a distinguishable, catchable type instead of Click's own
+    ``main()`` pre-converting it to a bare ``SystemExit(2)`` -- by the time that
+    conversion has happened there is no way left to tell "the parser refused this" apart
+    from a deliberate ``typer.Exit(2)`` (GATE_FAIL). ``typer.Exit``/``typer.Abort`` --
+    what every command below raises for its OWN exit code -- subclass ``RuntimeError``,
+    not Click's ``ClickException``, so they are a structurally different type and this
+    override can never intercept one. The trade-off: with ``standalone_mode=False``,
+    every OTHER path stops calling ``sys.exit`` internally and returns the code instead
+    -- so this override has to replay that exit itself (the final line).
+    """
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        try:
+            rv = super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except _ClickException as exc:
+            exc.show()
+            sys.exit(1)  # INPUT_-class: bad user input -- never GATE_'s exit 2
+        except _ClickAbort:
+            typer.echo("Aborted!", err=True)
+            sys.exit(1)
+        sys.exit(rv if isinstance(rv, int) else 0)
+
+
+app = typer.Typer(
+    add_completion=False,
+    help="Contract-driven generative-asset production.",
+    cls=_ExitContractGroup,
+)
 
 
 def _emit(err: PromptCraftError, debug: bool) -> None:
@@ -42,12 +118,21 @@ def synth(
             typer.echo(f"  {atom_id}: {phrase}")
     except PromptCraftError as err:
         _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()
 def gate(
     image: Path = typer.Argument(..., help="rendered image to gate"),
     contract: str = typer.Option("char:ashen-reaver"),
+    generator_family: str = typer.Option(
+        None,
+        help="override the generator family the same-family gate guard checks against "
+        "(defaults to the registered image domain's own generator.family)",
+    ),
     debug: bool = typer.Option(False),
 ) -> None:
     """Run the contract gate. Missing path, unreadable file, and 'no verifier
@@ -66,14 +151,20 @@ def gate(
         store, _r, thresholds, _c = load_sprite_example()
         resolved = store.resolve(contract)
         dag = compile_questions(resolved)
-        verifiers = get("image").verifiers()
-        transcript = harness.evaluate(dag, str(image), verifiers, thresholds)
+        plugin = get("image")
+        verifiers = plugin.verifiers()
+        family = generator_family or plugin.generator().family
+        transcript = harness.evaluate(dag, str(image), verifiers, thresholds, generator_family=family)
         typer.echo(format_transcript(transcript))
         err = error_from_transcript(transcript)
         if err is not None:
             _emit(err, debug)
     except PromptCraftError as err:
         _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()
@@ -92,10 +183,16 @@ def bind(
     try:
         result = run_mock_loop(records_dir=records_dir)
         _print_result(result)
-        if result.decision != "bound":
-            raise typer.Exit(code=3)
+        # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
+        # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same
+        # number to a caller — the merge the four-way contract exists to prevent.
+        _exit_from_result(result, debug)
     except PromptCraftError as err:
         _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()
@@ -111,8 +208,13 @@ def demo(records_dir: str = typer.Option("records"), debug: bool = typer.Option(
         typer.echo("")
         result = run_mock_loop(records_dir=records_dir)
         _print_result(result)
+        _exit_from_result(result, debug)
     except PromptCraftError as err:
         _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()
@@ -129,6 +231,10 @@ def replay(record: Path = typer.Argument(...), debug: bool = typer.Option(False)
         typer.echo(f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)")
     except PromptCraftError as err:
         _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()
@@ -137,20 +243,27 @@ def compile(  # noqa: A001 - the verb is the command name
     debug: bool = typer.Option(False),
 ) -> None:
     """Offline synthesizer compile (GEPA). Heavy + Director-gated — not on a per-asset path."""
-    if seed:
-        from ..core.optimize.compile import write_seed_artifact
-        from ..domains.image import COMPILED_ARTIFACT
+    try:
+        if seed:
+            from ..core.optimize.compile import write_seed_artifact
+            from ..domains.image import COMPILED_ARTIFACT
 
-        prog = write_seed_artifact(COMPILED_ARTIFACT, "sprite.synth",
-                                   "Convert depictable atoms into one prompt; every token traces to an atom.")
-        typer.echo(f"pinned seed artifact {prog.artifact_id} -> {COMPILED_ARTIFACT}")
-        return
-    typer.echo(
-        "offline compile is GEPA over the EXTERNAL gate pass-rate (no self-verification), run with\n"
-        "the [synth] extra + watchdog up, gated by the Director. The 600B compiles; the cheap local\n"
-        "model runs the pinned artifact per asset. Wire dspy.GEPA in core/optimize/compile.py, then\n"
-        "pin via optimize.artifact.pin(). Use --seed to (re)write the scaffold seed."
-    )
+            prog = write_seed_artifact(COMPILED_ARTIFACT, "sprite.synth",
+                                       "Convert depictable atoms into one prompt; every token traces to an atom.")
+            typer.echo(f"pinned seed artifact {prog.artifact_id} -> {COMPILED_ARTIFACT}")
+            return
+        typer.echo(
+            "offline compile is GEPA over the EXTERNAL gate pass-rate (no self-verification), run with\n"
+            "the [synth] extra + watchdog up, gated by the Director. The 600B compiles; the cheap local\n"
+            "model runs the pinned artifact per asset. Wire dspy.GEPA in core/optimize/compile.py, then\n"
+            "pin via optimize.artifact.pin(). Use --seed to (re)write the scaffold seed."
+        )
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command(name="sync-rules")
@@ -180,6 +293,42 @@ def _find_sync_script() -> Path | None:
         if cand.exists():
             return cand
     return None
+
+
+def _exit_from_result(result, debug: bool) -> None:
+    """A non-bound decision must not exit 0.
+
+    Fold-time gap between two wave-2 fixes that could not see each other: core-loop began
+    CLASSIFYING a failed generate() instead of letting it escape as a traceback, returning
+    `decision="escalated"` with the code in `reason` — a RESULT, not a raised error. The CLI
+    only ever wired exit codes to a raised PromptCraftError, so `pcraft demo` printed
+    `decision: ESCALATED (error[RUNTIME_GENERATE_EXHAUSTED])` and exited **0**. Measured
+    against the real subprocess, not CliRunner.
+
+    The mapping is not invented here — it is `error_from_transcript`'s, so the escalation path
+    reports exactly what `pcraft gate` would for the same transcript. When the loop never got
+    far enough to produce a record, there is no transcript to consult and nothing scored: that
+    is `GATE_UNAVAILABLE` (exit 4, could-not-run), never exit 2 — nothing ran to fail.
+    """
+    if result.decision == "bound":
+        return
+
+    from ..core.gate.exit_contract import error_from_transcript
+
+    if result.record is not None:
+        err = error_from_transcript(result.record.gate_transcript)
+        if err is not None:
+            _emit(err, debug)
+
+    _emit(
+        PromptCraftError(
+            "GATE_UNAVAILABLE",
+            f"the loop did not bind and produced no gate transcript: {result.reason}",
+            hint="Nothing was scored, so this is could-not-run (exit 4), not a failed atom "
+            "(exit 2). Check the generator/verifier the reason names.",
+        ),
+        debug,
+    )
 
 
 def _print_result(result) -> None:

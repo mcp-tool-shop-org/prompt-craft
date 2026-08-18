@@ -25,7 +25,7 @@ from pcraft.core.synth.visual_inventory import (
     build_inventory,
 )
 from pcraft.errors import PromptCraftError
-from pcraft.testing import ScriptedVerifier
+from pcraft.testing import ScriptedVerifier, passing_verifiers
 
 
 def test_a_depends_on_missing_id_does_not_crash_topo_sort():
@@ -79,7 +79,7 @@ def test_optional_unconfirmed_atoms_do_not_enter_uncertain_required(sprite_examp
             return None
         return 0.95
 
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds)
+    t = harness.evaluate(dag, "x.png", passing_verifiers(scores=scorer), thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.PASS
     assert not [v for v in t.uncertain_required() if v.polarity.value == "negate"]
 
@@ -104,7 +104,7 @@ def test_an_optional_score_does_not_mean_the_gate_ran(sprite_example):
             return None
         return 0.95
 
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds, generator_family="stable-diffusion")
     assert t.could_not_run() is True
     assert t.overall is Zone.UNAVAILABLE
 
@@ -114,7 +114,7 @@ def test_parent_gate_does_not_keyerror_on_an_unknown_depends_on(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     dag.questions[0].depends_on = "ghost"
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier()}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier()}, thresholds, generator_family="stable-diffusion")
     assert t.verdicts  # completed; did not raise
 
 
@@ -146,7 +146,7 @@ def test_tier0_does_not_escalate_to_tier2(sprite_example):
             called.append(q.atom_id)
             return 0.99
 
-    t = harness.evaluate(dag, "x.png", {0: T0(), 1: ScriptedVerifier(), 2: T2()}, thresholds)
+    t = harness.evaluate(dag, "x.png", {0: T0(), 1: ScriptedVerifier(), 2: T2()}, thresholds, generator_family="stable-diffusion")
     assert called == []
     assert t.overall in (Zone.PASS, Zone.UNCERTAIN)
 
@@ -161,7 +161,7 @@ def test_a_single_fail_does_not_take_the_multi_fail_resynth(sprite_example):
     """R90 invert >1: one failed leaf with budget is INPAINT, not RESYNTH."""
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"skin": 0.05})}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"skin": 0.05})}, thresholds, generator_family="stable-diffusion")
     action = choose_repair(t, RetryBudget(reprompts=2, inpaints=1), dag)
     assert action is RepairAction.INPAINT_REGION
 
@@ -171,7 +171,7 @@ def test_resynth_is_not_chosen_when_the_reprompt_budget_is_gone(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     t = harness.evaluate(
-        dag, "x.png", {1: ScriptedVerifier({"skin": 0.05, "weapon": 0.05})}, thresholds
+        dag, "x.png", {1: ScriptedVerifier({"skin": 0.05, "weapon": 0.05})}, thresholds, generator_family="stable-diffusion"
     )
     action = choose_repair(t, RetryBudget(reprompts=0, inpaints=0, rerolls=1), dag)
     assert action is not RepairAction.RESYNTH_REWEIGHT

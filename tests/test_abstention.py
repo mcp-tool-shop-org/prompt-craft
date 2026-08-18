@@ -14,7 +14,7 @@ def test_all_skipped_is_unavailable_not_uncertain(sprite_example):
     """The abstention path has its own Zone. It is not UNCERTAIN wearing a skip."""
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: None)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: None)}, thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.UNAVAILABLE
     assert t.overall is not Zone.UNCERTAIN
     assert error_from_transcript(t).code == "GATE_UNAVAILABLE"
@@ -30,7 +30,7 @@ def test_one_mid_band_score_is_uncertain_even_if_the_rest_are_high(sprite_exampl
             return 0.60  # vqa mid-band
         return 0.02 if q.polarity.value == "negate" else 0.99
 
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.UNCERTAIN
     err = error_from_transcript(t)
     assert err is not None and err.code == "PARTIAL_UNCONFIRMED"
@@ -46,7 +46,7 @@ def test_mix_of_pass_and_skip_is_uncertain_not_pass(sprite_example):
             return None
         return 0.02 if q.polarity.value == "negate" else 0.95
 
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(scorer)}, thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.UNCERTAIN
     assert t.could_not_run() is False
 
@@ -55,7 +55,7 @@ def test_partial_printout_leads_with_the_unconfirmed_atom(sprite_example):
     """A PARTIAL report must not read as a wall of PASSes with one asterisk."""
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
-    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"face": 0.60})}, thresholds)
+    t = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"face": 0.60})}, thresholds, generator_family="stable-diffusion")
     text = format_transcript(t)
     assert "unconfirmed / failed:" in text
     fail_at = text.index("unconfirmed / failed:")

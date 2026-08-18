@@ -11,8 +11,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..contract.compile_questions import CheckType, Polarity, QuestionDAG, Severity
+from .family_guard import assert_distinct_families
 from .thresholds import ThresholdTable, Zone
-from .verifier_iface import Verifier
+from .verifier_iface import Verifier, forbid_clipscore
 
 # which gate tier owns each check_type
 _TIER_FOR_CHECK = {CheckType.siglip2: 0, CheckType.palette: 0, CheckType.vqa: 1}
@@ -26,6 +27,7 @@ class AtomVerdict(BaseModel):
     score: float | None
     zone: Zone
     tier_used: int | None
+    tiers_consulted: list[int] = Field(default_factory=list)
     verifier_id: str | None
     reason: str
 
@@ -34,8 +36,12 @@ class TierCensus(BaseModel):
     """N of M required tiers actually executed. Independent of the verdict.
 
     M is the set of tiers the contract's required / must_not atoms map to.
-    N is how many of those produced at least one score. A PASS with 1/2
-    is a pass whose Tier-0 never ran — the watchdog, not a second verdict.
+    N is how many of those produced at least one score. This is the watchdog, not a second
+    verdict: a 1/2 census means Tier-0 never ran, full stop, regardless of what Zone the atoms
+    that DID score rolled up to. Nothing here computes a Zone from n/m (see ``error_from_transcript``
+    for the exit-code consequence) — a 1/2 census used to still coexist with an overall PASS,
+    which is exactly the hole F-175c3b3e/F-d9b28ca6 closed (a required atom that never gets a
+    real score is SKIPPED, and SKIPPED never rolls up to PASS).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -89,12 +95,20 @@ def _counts(v: AtomVerdict) -> bool:
 
 
 def _pick(check_type: CheckType, verifiers: dict[int, Verifier]) -> tuple[Verifier | None, int | None]:
-    """Pick the verifier for a check_type, falling forward to the next available tier."""
+    """Pick the verifier for a check_type's OWN tier. No cross-tier fallback.
+
+    ⚑ CORRECTED IN PLACE (F-175c3b3e). This used to fall forward to whichever tier WAS
+    registered (``for tier in (want, 1, 2, 0)``) when the wanted tier was missing. The score
+    that verifier returned was then graded via ``thresholds.zone(q.check_type.value, ...)`` --
+    keyed purely by the atom's declared check_type, with no relationship to which verifier
+    actually produced the number. Real shipped bands are almost an order of magnitude apart
+    (siglip2 high=0.10 vs vqa high=0.80), so a substituted verifier's own confident answer could
+    read as a confident answer on the WRONG scale: a false PASS or a false FAIL, not merely an
+    unconfirmed one. A missing tier is now SKIPPED, exactly like a verifier that returned
+    ``None`` -- never a guess scored on someone else's calibration.
+    """
     want = _TIER_FOR_CHECK[check_type]
-    for tier in (want, 1, 2, 0):
-        if tier in verifiers:
-            return verifiers[tier], tier
-    return None, None
+    return (verifiers[want], want) if want in verifiers else (None, None)
 
 
 def evaluate(
@@ -102,7 +116,18 @@ def evaluate(
     image_path: str,
     verifiers: dict[int, Verifier],
     thresholds: ThresholdTable,
+    *,
+    generator_family: str,
 ) -> GateTranscript:
+    """Run the gate. ``generator_family`` is required, not optional: EXTERNAL_VERIFIER is
+    enforced HERE, at the protected operation, so every caller gets it -- not only the ones
+    that remember to call ``forbid_clipscore``/``assert_distinct_families`` themselves first
+    (F-461c4198: ``orchestrate.run()`` did; the standalone ``pcraft gate`` CLI command, which
+    calls this function directly, did not)."""
+    for v in verifiers.values():
+        forbid_clipscore(v)
+    assert_distinct_families(generator_family, [v.family for v in verifiers.values()])
+
     verdicts: dict[str, AtomVerdict] = {}
 
     for q in dag.topological():
@@ -118,7 +143,10 @@ def evaluate(
                 continue
 
         verifier, tier = _pick(q.check_type, verifiers)
-        if verifier is None:
+        if verifier is None or tier is None:
+            # _pick returns both or neither; testing `tier` too is what makes that
+            # invariant checkable rather than assumed (and keeps `tiers_consulted`
+            # a list[int], not list[int | None]).
             verdicts[q.atom_id] = _skipped(q, "no verifier available for tier")
             continue
 
@@ -129,6 +157,7 @@ def evaluate(
 
         zone = thresholds.zone(q.check_type.value, score, q.polarity)
         used_id, used_tier = verifier.verifier_id, tier
+        tiers_consulted = [tier]
 
         # Escalate a borderline/failed Tier-1 result to Tier-2 (DSG) for localization.
         if tier == 1 and zone in (Zone.UNCERTAIN, Zone.FAIL) and 2 in verifiers:
@@ -136,10 +165,18 @@ def evaluate(
             if score2 is not None:
                 score, zone = score2, thresholds.zone(q.check_type.value, score2, q.polarity)
                 used_id, used_tier = verifiers[2].verifier_id, 2
+                # ⚑ CORRECTED IN PLACE (F-d9b28ca6). used_tier used to be overwritten with no
+                # record that Tier-1 ran first -- Tier-1's UNCERTAIN/FAIL score is what
+                # triggered this escalation, so it necessarily ran. tier_used keeps meaning
+                # "the tier whose score decided the verdict"; tiers_consulted is the separate,
+                # additive fact the census actually needs: every tier that produced a real
+                # score for this atom, escalated or not.
+                tiers_consulted.append(2)
 
         verdicts[q.atom_id] = AtomVerdict(
             atom_id=q.atom_id, polarity=q.polarity, severity=q.severity,
-            score=round(score, 4), zone=zone, tier_used=used_tier, verifier_id=used_id,
+            score=round(score, 4), zone=zone, tier_used=used_tier, tiers_consulted=tiers_consulted,
+            verifier_id=used_id,
             reason=f"score {score:.4f} -> {zone.value}",
         )
 
@@ -175,11 +212,13 @@ def _required_tiers(dag: QuestionDAG) -> list[int]:
 
 
 def _tier_census(dag: QuestionDAG, verdicts: list[AtomVerdict]) -> TierCensus:
+    """⚑ CORRECTED IN PLACE (F-d9b28ca6). This read ``v.tier_used`` -- the tier that decided the
+    FINAL verdict -- so an atom that escalated Tier-1 -> Tier-2 only ever credited Tier-2 (never
+    in ``required``; escalation is not a required tier), erasing the fact that Tier-1 ran too.
+    Union across ``tiers_consulted`` instead: every tier that produced a real score for the atom,
+    not just the one that decided it."""
     required = _required_tiers(dag)
-    executed = sorted({
-        v.tier_used for v in verdicts
-        if v.score is not None and v.tier_used is not None and v.tier_used in required
-    })
+    executed = sorted({tier for v in verdicts for tier in v.tiers_consulted if tier in required})
     return TierCensus(required=required, executed=executed)
 
 

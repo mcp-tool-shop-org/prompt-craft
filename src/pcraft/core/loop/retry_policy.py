@@ -1,12 +1,25 @@
 """Verdict machine + retry/repair policy, ported from the dogfood-labs swarm control plane.
 
-The four-verdict enum (BLOCK / AMEND / VERIFY / ADVANCE) is the loop's control signal — its control
-flow is reused as-is; only the gate *bodies* are swapped for prompt-craft's synth/generate/verify.
+The two-verdict enum (AMEND / ADVANCE) is the loop's control signal.
 
-  BLOCK   = halt, the defect cannot propagate downstream (andon authority)
   AMEND   = fix-and-re-verify: regenerate/repair with the gate findings as input, then re-verify
-  VERIFY  = output produced but the gate hasn't run yet — run it before any verdict
-  ADVANCE = all gates green — proceed to bind
+  ADVANCE = every required atom passed AND the tier census confirms the gate actually ran on
+            every required tier — proceed to bind
+
+⚑ CORRECTED IN PLACE (F-a250372c): this enum previously also carried BLOCK and VERIFY, inherited
+from the swarm-control-plane state machine this was ported from. Neither was ever constructed or
+compared anywhere in this codebase (confirmed by grep across the whole repo, not just this
+domain). VERIFY named a pre-gate state ("output produced but the gate hasn't run yet") that
+verdict_from_transcript structurally never sees — it only ever runs on an already-built
+GateTranscript, i.e. after the gate ran. BLOCK named a real gap (a structurally un-repairable
+transcript, e.g. Zone.UNAVAILABLE, burns the whole repair budget identically to an ordinary
+recoverable FAIL before escalating), but wiring it is a new verdict category with new
+run()/_repair_ladder branching, and this same wave already changes this function for the tier
+census below plus the gate's call signature (orchestrate._gate) — a third structural change to
+one small function in one wave was judged the wrong trade. A real BLOCK condition is a legitimate
+follow-up with its own dedicated test coverage of the skip-the-ladder budget interaction. Removed
+rather than left advertising a halt path that could never fire; do not re-add without a real
+construction site alongside it.
 
 Retry-eligibility splits by outcome class (state-machine.js): a TRANSIENT failure (generate error /
 timeout) auto-retries; a SEMANTIC defect (schema-invalid synth output) is human-gated, never an
@@ -24,9 +37,7 @@ from ..gate.thresholds import Zone
 
 
 class Verdict(str, Enum):
-    BLOCK = "BLOCK"
     AMEND = "AMEND"
-    VERIFY = "VERIFY"
     ADVANCE = "ADVANCE"
 
 
@@ -67,8 +78,19 @@ def _is_identity_atom(atom_id: str) -> bool:
 
 def verdict_from_transcript(transcript: GateTranscript) -> Verdict:
     """Map a gate transcript to a loop verdict. PASS -> ADVANCE; any required FAIL -> AMEND
-    (repair); UNCERTAIN-only -> AMEND too (route through the repair/human path, never silent pass)."""
-    if transcript.overall is Zone.PASS:
+    (repair); UNCERTAIN-only -> AMEND too (route through the repair/human path, never silent pass).
+
+    ADVANCE also requires the tier census to be complete: Zone and the census are two independent
+    facts and neither is folded into the other (the roll-up to Zone.PASS is still computed purely
+    from Zone; the census is consulted here as a second, separate gate on top of it). Reachable
+    example: a required atom's home tier is unregistered, harness._pick falls forward to a
+    different tier's verifier, and that verifier's score happens to clear the band for the atom's
+    *nominal* check_type — Zone rolls up to PASS, but the atom's actually-required tier never ran
+    (see GATE-002). TierCensus.executed is filtered to tiers already in .required
+    (harness._tier_census), so n can never exceed m — a plain ``n < m`` check is equivalent to
+    requiring ``n == m``."""
+    census = transcript.tier_census
+    if transcript.overall is Zone.PASS and census.n >= census.m:
         return Verdict.ADVANCE
     return Verdict.AMEND
 

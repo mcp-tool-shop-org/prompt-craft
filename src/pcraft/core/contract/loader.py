@@ -1,9 +1,10 @@
 """Contract loader: resolves ``extends`` (faction -> character), FAIL-CLOSED.
 
 The single load-bearing rule (from sdlab identity inheritance): a character may **raise** a
-severity or add atoms, but may **never drop a faction-required atom or relax its severity**. The
-loader throws ``PromptCraftError(CONTRACT_RELAXATION)`` if it tries. One edit to a faction contract
-then propagates to every member's gate automatically."""
+severity or add atoms, but may **never drop a faction-required atom, relax its severity, or
+rewrite its claim/check_type** while keeping its id. The loader throws
+``PromptCraftError(CONTRACT_RELAXATION)`` if it tries. One edit to a faction contract then
+propagates to every member's gate automatically."""
 
 from __future__ import annotations
 
@@ -98,24 +99,47 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
 _SEVERITY_RANK = {Severity.optional: 0, Severity.required: 1}
 
 
+_RELAXATION_HINT = (
+    "A character contract may not drop or relax a faction-required atom, and may not "
+    "rewrite an inherited atom's claim or check_type while keeping its id. Raise the "
+    "severity, or add a new id for genuinely different content — never substitute an "
+    "existing id's content."
+)
+
+
 def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
-    """Union by atom id. A child override may only RAISE severity, never lower it."""
+    """Union by atom id. A child override may only RAISE severity, never lower it — and may
+    never rewrite an inherited id's claim/check_type, at any severity (F-a5fa3f8b): raising
+    severity is not a licence to also substitute what the atom checks for."""
     by_id = {a.id: a for a in base_atoms}
     child_ids = {a.id for a in child_atoms}
 
     for atom in child_atoms:
         base_atom = by_id.get(atom.id)
-        if base_atom is not None and _SEVERITY_RANK[atom.severity] < _SEVERITY_RANK[base_atom.severity]:
-            raise PromptCraftError(
-                "CONTRACT_RELAXATION",
-                f"character {child_id!r} relaxes faction atom {atom.id!r} "
-                f"({base_atom.severity.value} -> {atom.severity.value})",
-            )
-        by_id[atom.id] = atom  # override (same-or-higher severity) or add
+        if base_atom is not None:
+            if _SEVERITY_RANK[atom.severity] < _SEVERITY_RANK[base_atom.severity]:
+                raise PromptCraftError(
+                    "CONTRACT_RELAXATION",
+                    f"character {child_id!r} relaxes faction atom {atom.id!r} "
+                    f"({base_atom.severity.value} -> {atom.severity.value})",
+                    hint=_RELAXATION_HINT,
+                )
+            if atom.claim != base_atom.claim or atom.check_type != base_atom.check_type:
+                raise PromptCraftError(
+                    "CONTRACT_RELAXATION",
+                    f"character {child_id!r} rewrites faction atom {atom.id!r}'s content "
+                    f"(claim {base_atom.claim!r} -> {atom.claim!r}, "
+                    f"check_type {base_atom.check_type.value!r} -> {atom.check_type.value!r}); "
+                    "substituting the claim is not a raise",
+                    hint=_RELAXATION_HINT,
+                )
+        by_id[atom.id] = atom  # override (same severity/claim/check_type, or a genuine raise) or add
 
     # A character cannot silently DROP a faction-required atom: it simply isn't in child_ids,
     # so the base version survives the union above. That is the fail-closed default — inherited
-    # required atoms always carry through. (Documented here because the *absence* is the guarantee.)
+    # required atoms always carry through, and (per the content-freeze check above) they carry
+    # through UNCHANGED: a redeclared id may raise severity but never rewrite claim/check_type.
+    # (Documented here because the *absence* is the guarantee.)
     del child_ids  # (kept for readability of the invariant; not used)
     # Preserve base order, then append child-only atoms in declared order.
     ordered = [by_id[a.id] for a in base_atoms]
@@ -137,15 +161,31 @@ def _merge_must_not(base, child, *, child_id: str):
 
     Measured before the fix: a faction declaring ``no_gun`` required and a character re-declaring
     it optional resolved to optional, no error.
+
+    ⚑ SECOND GUARD, same finding (F-a5fa3f8b). Severity-lowering was the *loud* attack; a child
+    could still keep ``no_gun``'s id and severity while rewriting its claim from "a firearm" to
+    "a rubber duck" — same blocking power, different (or no) actual constraint. Claim/check_type
+    are now frozen on a redeclared id, exactly as for ``must_have`` in ``_merge_atoms_fail_closed``.
     """
     by_id = {m.id: m for m in base}
     for m in child:
         base_mn = by_id.get(m.id)
-        if base_mn is not None and _SEVERITY_RANK[m.severity] < _SEVERITY_RANK[base_mn.severity]:
-            raise PromptCraftError(
-                "CONTRACT_RELAXATION",
-                f"character {child_id!r} relaxes faction must_not {m.id!r} "
-                f"({base_mn.severity.value} -> {m.severity.value})",
-            )
+        if base_mn is not None:
+            if _SEVERITY_RANK[m.severity] < _SEVERITY_RANK[base_mn.severity]:
+                raise PromptCraftError(
+                    "CONTRACT_RELAXATION",
+                    f"character {child_id!r} relaxes faction must_not {m.id!r} "
+                    f"({base_mn.severity.value} -> {m.severity.value})",
+                    hint=_RELAXATION_HINT,
+                )
+            if m.claim != base_mn.claim or m.check_type != base_mn.check_type:
+                raise PromptCraftError(
+                    "CONTRACT_RELAXATION",
+                    f"character {child_id!r} rewrites faction must_not {m.id!r}'s content "
+                    f"(claim {base_mn.claim!r} -> {m.claim!r}, "
+                    f"check_type {base_mn.check_type.value!r} -> {m.check_type.value!r}); "
+                    "substituting the claim is not a raise",
+                    hint=_RELAXATION_HINT,
+                )
         by_id[m.id] = m
     return list(by_id.values())

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pcraft.core.contract.compile_questions import Polarity, compile_questions
-from pcraft.core.contract.schema import Atom, CheckType, ResolvedContract, Severity
+from pcraft.core.contract.schema import Atom, CheckType, ResolvedContract
 
 
 def test_atoms_and_must_not_become_questions(sprite_example):

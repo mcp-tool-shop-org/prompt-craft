@@ -18,7 +18,10 @@ def format_transcript(t: GateTranscript) -> str:
         f"tiers executed: {census.n} of {census.m}  "
         f"(executed {census.executed}; required {census.required})",
     ]
-    problem = [v for v in t.verdicts if v.zone in (Zone.FAIL, Zone.UNCERTAIN, Zone.SKIPPED, Zone.NA)]
+    problem = [
+        v for v in t.verdicts
+        if v.zone in (Zone.FAIL, Zone.UNCERTAIN, Zone.SKIPPED, Zone.NA, Zone.UNAVAILABLE)
+    ]
     rest = [v for v in t.verdicts if v not in problem]
     if problem and t.overall is not Zone.PASS:
         lines.append("unconfirmed / failed:")

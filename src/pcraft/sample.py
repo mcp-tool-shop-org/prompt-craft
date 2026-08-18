@@ -1,8 +1,10 @@
 """Load the generic sprite example and run the loop GPU-free.
 
 Shared by the CLI (`pcraft demo`) and the test suite, so the end-to-end sample is defined once.
-Wires the deterministic TemplateSynthesizer + StubGenerator + a different-family ScriptedVerifier,
-so the whole synth->generate->gate->retry->bind loop runs with no GPU and no network."""
+Wires the deterministic TemplateSynthesizer + StubGenerator + two different-family
+ScriptedVerifiers (Tier-0 + Tier-1, via ``testing.passing_verifiers``), so the whole
+synth->generate->gate->retry->bind loop runs with no GPU and no network -- and so the tier
+census it produces reflects tiers actually executed, not tiers Tier-1 merely fell forward to."""
 
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from .core.optimize.artifact import CompiledProgram, load_pinned
 from .core.synth.signature import TemplateSynthesizer
 from .domains.image import COMPILED_ARTIFACT, RULES_PATH
 from .domains.image.subdomains.sprite import CONTRACTS_DIR, EXAMPLE_CHARACTER_ID, THRESHOLDS_PATH
-from .testing import ScriptedVerifier, StubGenerator, passing_verifiers
+from .testing import StubGenerator, passing_verifiers
 
 
 def load_sprite_example() -> tuple[ContractStore, ResolvedContract, ThresholdTable, CompiledProgram]:
@@ -55,11 +57,14 @@ def run_mock_loop(
         mutate_contract(resolved)
     synth = TemplateSynthesizer(compiled)
     gen = generator or StubGenerator(out_dir=Path(records_dir) / "_stub_images")
-    if verifier_scores is None:
-        verifiers = passing_verifiers()
-    else:
-        v = ScriptedVerifier(verifier_scores)
-        verifiers = {v.tier: v}
+    # Both branches register Tier-0 AND Tier-1. The scripted branch used to build a lone
+    # Tier-1 verifier, which -- now that a missing wanted tier is SKIPPED rather than
+    # falling forward (F-175c3b3e) and the census gates the verdict (F-834dd470) -- made
+    # every scripted scenario report "1 of 2 required tiers executed" and escalate. That
+    # would have been the mock lying about coverage, not the loop misbehaving, so the mock
+    # is what changes. `scores` is forwarded to both tiers, so a scripted atom scores the
+    # same whichever tier owns it.
+    verifiers = passing_verifiers(scores=verifier_scores)
     config = LoopConfig(
         encoder_rules=_encoder_rules(),
         thresholds_version=thresholds.version,

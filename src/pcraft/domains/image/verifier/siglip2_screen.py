@@ -5,11 +5,22 @@ reimplement the SigLIP2 forward pass, sigmoid scoring, or calibration. The score
 sigmoid per query (not a softmax). If the engine is unavailable (the ``[image]`` extra or the
 ai-eyes repo isn't installed), the screen SKIPS gracefully — the harness records SKIPPED, never a
 silent pass. ``family = "siglip2"`` so family_guard treats the whole ``google/siglip2-*`` line as one
-family."""
+family.
+
+HONESTY NOTE (F-dd568f7f / F-2ef1bb79): "the extra isn't installed" and "the extra IS installed but
+construction/scoring blew up for an unrelated reason" used to collapse into the same SKIPPED outcome
+via a bare ``except Exception``. Only the former is SKIPPED now; the latter raises a classified
+``PromptCraftError`` (distinct code, real cause attached, logged) instead of masquerading as
+"dependency not installed"."""
 
 from __future__ import annotations
 
+import logging
+
 from ....core.contract.compile_questions import Question
+from ....errors import PromptCraftError
+
+_LOG = logging.getLogger(__name__)
 
 
 class SigLIP2Screen:
@@ -29,14 +40,35 @@ class SigLIP2Screen:
             try:
                 # the canonical SigLIP2 instrument — import, never reimplement
                 from ai_eyes_mcp.engine import SigLIPEngine  # type: ignore
-
-                self._engine = SigLIPEngine(model_id=self.model_id)
-            except Exception:
+            except ImportError:
                 self._unavailable = True  # graceful degradation: Tier-0 SKIPS, never crashes the run
+                return None
+            try:
+                self._engine = SigLIPEngine(model_id=self.model_id)
+            except Exception as err:
+                _LOG.debug("SigLIP2Screen: engine construction failed for model_id=%r: %s", self.model_id, err, exc_info=True)
+                raise PromptCraftError(
+                    "RUNTIME_VERIFIER_INIT_FAILED",
+                    f"SigLIP2 engine failed to construct (model_id={self.model_id!r}): {err}",
+                    hint="This is not a missing [image]/ai-eyes extra -- construction itself failed "
+                    "(bad model id, corrupted checkpoint, CUDA OOM at load, ...). Check the cause.",
+                    cause=err,
+                ) from err
         return self._engine
 
     def score(self, image_path: str, question: Question) -> float | None:
         engine = self._get_engine()
         if engine is None:
             return None  # SKIPPED — distinct from a fail
-        return float(engine.score(image_path, question.text))
+        try:
+            return float(engine.score(image_path, question.text))
+        except Exception as err:
+            _LOG.debug("SigLIP2Screen: call-time failure scoring atom %r: %s", question.atom_id, err, exc_info=True)
+            raise PromptCraftError(
+                "RUNTIME_VERIFIER_CALL_FAILED",
+                f"SigLIP2 engine raised while scoring atom {question.atom_id!r}: {err}",
+                hint="The engine constructed fine; the failure happened during the actual scoring "
+                "call (bad image path, CUDA OOM mid-run, a shape mismatch, ...). This is distinct "
+                "from SKIPPED -- the tier had a chance to run and blew up mid-question.",
+                cause=err,
+            ) from err

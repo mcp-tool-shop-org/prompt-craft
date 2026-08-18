@@ -15,15 +15,15 @@ from pcraft.core.gate.exit_contract import error_from_transcript
 from pcraft.core.gate.preflight import preflight_image
 from pcraft.core.gate.thresholds import Zone
 from pcraft.errors import PromptCraftError
-from pcraft.testing import ScriptedVerifier, write_solid_png
+from pcraft.testing import ScriptedVerifier, passing_verifiers, write_solid_png
 
 
 def test_could_not_run_and_ran_and_failed_are_different_exits(sprite_example):
     """Nominated chip. GATE_UNAVAILABLE must not share an exit code with GATE_FAIL."""
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
-    skipped = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: None)}, thresholds)
-    failed = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"tabard": 0.05})}, thresholds)
+    skipped = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: None)}, thresholds, generator_family="stable-diffusion")
+    failed = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"tabard": 0.05})}, thresholds, generator_family="stable-diffusion")
     err_skip = error_from_transcript(skipped)
     err_fail = error_from_transcript(failed)
     assert err_skip is not None and err_fail is not None
@@ -69,7 +69,7 @@ def test_could_not_run_when_every_required_atom_is_skipped(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     v = ScriptedVerifier(lambda _q: None)
-    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds, generator_family="stable-diffusion")
     assert t.could_not_run() is True
     assert t.overall is Zone.UNAVAILABLE
     err = error_from_transcript(t)
@@ -81,7 +81,7 @@ def test_a_required_fail_is_gate_fail_not_uncertain(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     v = ScriptedVerifier({"tabard": 0.05})
-    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.FAIL
     err = error_from_transcript(t)
     assert err is not None and err.code == "GATE_FAIL"
@@ -93,7 +93,7 @@ def test_an_uncertain_score_after_a_real_run_is_partial(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
     v = ScriptedVerifier({"face": 0.60})  # vqa band is 0.40..0.80
-    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds, generator_family="stable-diffusion")
     assert t.could_not_run() is False
     err = error_from_transcript(t)
     assert err is not None and err.code == "PARTIAL_UNCONFIRMED"
@@ -103,7 +103,8 @@ def test_an_uncertain_score_after_a_real_run_is_partial(sprite_example):
 def test_a_clean_pass_has_no_error(sprite_example):
     _s, resolved, thresholds, _c = sprite_example
     dag = compile_questions(resolved)
-    v = ScriptedVerifier()
-    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
+    # Both required tiers registered -- a clean pass must mean the whole gate ran.
+    t = harness.evaluate(dag, "x.png", passing_verifiers(), thresholds, generator_family="stable-diffusion")
     assert t.overall is Zone.PASS
+    assert t.tier_census.n == t.tier_census.m
     assert error_from_transcript(t) is None

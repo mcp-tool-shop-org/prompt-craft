@@ -49,7 +49,12 @@ class IdentitySubGate:
                 from ai_eyes_mcp.engine import SigLIPEngine  # type: ignore
 
                 self._engine = SigLIPEngine()
-            except Exception:
+            except ImportError:
+                # F-dd568f7f, narrowed per standing Director ruling on this file (no delete, no
+                # promote, no wire into the loop -- floor/max_variance untouched, nothing else in
+                # this file changed): only "the extra genuinely isn't installed" is SKIPPED now. A
+                # genuine construction failure (bad ctor signature, CUDA OOM, ...) is no longer this
+                # except clause's business -- it propagates instead of masquerading as "not installed".
                 self._unavailable = True
         if self._engine is None:
             return None
