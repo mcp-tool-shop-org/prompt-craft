@@ -104,9 +104,9 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 | | |
 |---|---|
-| Nucleo | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Nucleo | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
-| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l'inpaint regionale sono stati **integrati e testati con simulazioni**. InstantID e IP-Adapter non possono condividere lo stesso processo di generazione. La prova locale `generate()` è stata eseguita sulla scheda grafica 5090 (18 agosto 2026, seed `169405236028824`, tipo `controlnet_ip`). L'immagine risultante ha un aspetto grottesco; gli elementi "grip", "sigil" e "bracer" non sono stati renderizzati correttamente. Due immagini di test per IP-Adapter sullo stesso adattatore vengono rifiutate prima che vengano elaborati i pixel. |
+| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l’inpaint regionale sono **integrati e testati con fake-torch**. InstantID e IP-Adapter non possono essere utilizzati contemporaneamente per generare un’immagine. Due immagini di input per IP-Adapter devono essere associate a un singolo adattatore (tutte le immagini; la scala è il parametro più importante). L’esecuzione locale di `generate()` è avvenuta sulla scheda 5090 (18 agosto 2026, seed `169405236028824`, tipo `controlnet_ip`). L’immagine risultante ha un aspetto “orchesco”; gli elementi relativi alla presa, al sigillo e al bracciale non sono stati generati correttamente. |
 | Encoder Flux | Le funzioni “solo testo” e “riempimento inpaint” sono state integrate (fake-torch). ControlNet pose, IP-Adapter e LoRA continuano a essere rifiutate (famiglia errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
 | Ricetta Cloud | `pcraft recipe` emette un'immagine cucita con Kontext, un ritaglio sinistro nel grafico e un riempimento Flux che mostra solo il pugno. `method=reference` è quel percorso. Un invio Cloud in diretta (lavoro `06668d4c`, 2026-08-18) ha prodotto un singolo pannello ritagliato e ha mantenuto il bracciale. |
 | Gate | Il livello 2 è una vera espansione DSG (entità / attributo / relazione). L'escalation è un checkpoint contrastivo. Le ricevute memorizzano la storia del tentativo, non solo il numero di tentativi. |
@@ -118,7 +118,7 @@ Tre affermazioni che le versioni precedenti di questo documento hanno fatto e ch
 
 - Le soglie a tre zone sono state descritte come *calibrate rispetto a un set di dati etichettato manualmente*. Non lo sono. Sono valori predefiniti.
 - La regola secondo cui un modello generativo non può mai essere il proprio "gatekeeper" è stata affermata come se uno studio l'avesse dimostrato. Le prove a sostegno sono **convergenti piuttosto che dirette**: i test discriminativi sì/no si sono dimostrati misurabilmente più stabili rispetto alla generazione di didascalie aperte, i modelli non possono autocorregersi in modo affidabile senza feedback esterno e il riconoscimento automatico traccia le preferenze. Nessuno studio singolo ha condotto un confronto diretto. La regola è valida; la certezza è stata esagerata.
-- Il processo di "conditioning" è stato inizialmente descritto come non implementato, poi come non utilizzato. SDXL ora **legge** i riferimenti assemblati nel codice. Un `generate()` locale su questa macchina è già stato eseguito. Cablato e applicato non è il plate nei pixel.
+- Il processo di "conditioning" è stato inizialmente descritto come non implementato, poi come non utilizzato. SDXL ora **legge** i riferimenti assemblati nel codice. Ciò che rimane inutilizzato è un'istanza locale attiva `generate()` su questa macchina, non il cablaggio.
 
 ## Requisiti
 

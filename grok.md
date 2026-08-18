@@ -66,13 +66,13 @@ from a test.
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **328**. Re-count before quoting.
+- Suite last counted **332**. Re-count before quoting.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional
   inpaint — wired, fake-torch tested. InstantID and IP-Adapter cannot
   share one generate. Local `generate()` **ran** on the 5090
   (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). Looked
   at the frame: orcish; grip, sigil, bracer did not land. Two
-  IP-Adapter plates on one adapter refuse before pixels.
+  IP-Adapter plates stay on one adapter (all images; strongest scale).
 - Flux: text-only and Fill inpaint are wired. Pose / IP-Adapter stay
   refused. `method=reference` writes the Cloud recipe and raises
   `GATE_CLOUD_SUBMIT`. Local Flux generate was **not** run — weights
@@ -84,8 +84,8 @@ from a test.
   Pinned `sprite.synth.v1-gepa.json`. Seed `sprite.synth.v1.json` is
   still `scaffold-seed`. Per-asset loop still `TemplateSynthesizer`.
 - Identity sub-gate is measured, not in `orchestrate`.
-- `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the
-  mock loop.
+- `bind --no-mock` is the live door when `[image]` is installed.
+  Missing extras are `DEP_IMAGE_MISSING`.
 
 ## Honest language
 

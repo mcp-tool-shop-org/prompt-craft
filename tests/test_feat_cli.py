@@ -243,6 +243,54 @@ def test_schema_dumps_the_authoring_contract():
     assert "$schema" in blob or "schema_id" in blob
 
 
+def test_bind_no_mock_without_image_extra_is_dep_image(monkeypatch, tmp_path):
+    import pcraft.sample as sample
+
+    monkeypatch.setattr(sample, "image_extra_present", lambda: False)
+    result = runner.invoke(app, ["bind", "--no-mock", "--records-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 2
+    assert "DEP_IMAGE_MISSING" in text
+    assert "BOUND" not in text
+
+
+def test_bind_no_mock_uses_the_plugin_generator(monkeypatch, tmp_path):
+    """--no-mock is the live door. Stub generate so the suite stays GPU-free."""
+    from pcraft.core.loop.generator_iface import GenerationResult
+    from pcraft.domains.image import ImagePlugin
+    from pcraft.domains.image.generator.sdxl_generator import SDXLGenerator
+    from pcraft.testing import passing_verifiers, write_solid_png
+
+    import pcraft.sample as sample
+
+    monkeypatch.setattr(sample, "image_extra_present", lambda: True)
+    monkeypatch.setattr(ImagePlugin, "verifiers", lambda self: passing_verifiers())
+    png = write_solid_png(tmp_path / "live.png")
+    seen: dict = {}
+
+    def fake_generate(self, prompt, negative_prompt, conditioning, seed):
+        seen["plates"] = [
+            r.get("plate") for r in (conditioning.get("identity_refs") or []) if isinstance(r, dict)
+        ]
+        seen["generator"] = self.generator_id
+        return GenerationResult(
+            image_path=str(png),
+            seed=seed,
+            sampler="test",
+            generator_id=self.generator_id,
+            generator_family=self.family,
+            conditioning=conditioning,
+        )
+
+    monkeypatch.setattr(SDXLGenerator, "generate", fake_generate)
+    result = runner.invoke(app, ["bind", "--no-mock", "--records-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "DEP_IMAGE_MISSING" not in text
+    assert seen.get("generator") == "sdxl.base-1.0.v1", text
+    assert len(seen.get("plates") or []) == 2, seen
+    assert result.exit_code == 0, text
+
+
 def test_schema_writes_out(tmp_path):
     out = tmp_path / "contract.schema.json"
     result = runner.invoke(app, ["schema", "--out", str(out)])

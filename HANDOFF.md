@@ -10,7 +10,7 @@ Identity sub-gate stays unwired. Version stays **0.2.1**.
 ## Where you are
 
 Repo: `E:\AI\prompt-craft`
-HEAD at handoff write: measure. Suite last counted **328**. Re-count.
+HEAD at handoff write: measure. Suite last counted **332**. Re-count.
 
 ```
 cd E:\AI\prompt-craft
@@ -33,11 +33,11 @@ a run.
 
 | thing | state |
 |---|---|
-| GPU-free suite | 328 |
+| GPU-free suite | 332 |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. Frame: orcish; crossed arms, no two-hand axe, no triple-bar, no bone bracer. Notes in `records/_control_experiments/NOTES.md` (gitignored). |
-| Two IP-Adapter plates | refuse: `Cannot assign 2 scale_configs to 1 IP-Adapter` |
-| `bind --no-mock` | still `DEP_IMAGE_MISSING`, stays on the mock loop |
+| Two IP-Adapter plates | both images on one adapter; scale is the strongest lock |
+| `bind --no-mock` | live door when `[image]` is present; `DEP_IMAGE_MISSING` only if the extra is actually missing |
 | Flux text + Fill | wired, fake-torch. Local Flux **not** run — `FLUX.1-dev` / Fill not on disk |
 | Flux pose / IP / LoRA / InstantID | refuse (wrong family) |
 | `method=reference` | writes Cloud recipe, `GATE_CLOUD_SUBMIT` |
@@ -49,15 +49,16 @@ a run.
 
 ## This session's job
 
-The two live-onlys are done. Full dispatch, ranked leftovers, and
-fences live in **`ADVISOR.md`**.
+Increments 1 and 2 **landed** (two-plate IP-Adapter; `bind --no-mock`
+is the live door). Full dispatch in **`ADVISOR.md`**.
 
 If the Director does not name a job: measure HEAD, re-count, stop.
 
-If the Director says continue, Advisor's first increment is:
+Still out, only if asked:
 
-1. Two IP-Adapter plates on one adapter (do not silently drop a plate).
-2. `bind --no-mock` is not a door.
+3. Local Flux text-only / Fill — weights not on disk.
+4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
+5. Phase 9 formal final test, then Phase 10 full treatment.
 
 Do **not** start InstantID rewrites or identity-sub-gate wiring
 unless the Director asks.

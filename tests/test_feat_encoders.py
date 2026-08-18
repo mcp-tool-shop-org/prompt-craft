@@ -433,6 +433,55 @@ def test_sdxl_pose_lock_uses_the_controlnet_pipeline(monkeypatch, tmp_path):
     assert result.conditioning["applied"]["pose"] == [str(pose)]
 
 
+def test_sdxl_two_ip_adapter_plates_keep_both_images(monkeypatch, tmp_path):
+    """Assembled ashen-reaver is costume + face. One adapter, two images.
+    A scale list is the live miss. Do not drop a plate."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    opened = _install_fake_pil(monkeypatch)
+    costume = write_solid_png(tmp_path / "costume.png")
+    face = write_solid_png(tmp_path / "face.png")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    result = gen.generate(
+        "p",
+        "n",
+        {
+            "identity_refs": [
+                {"plate": str(costume), "method": "ip_adapter", "weight": 0.8},
+                {"plate": str(face), "method": "ip_adapter", "weight": 0.6},
+            ]
+        },
+        seed=4,
+    )
+    pipe = captured["last"]
+    images = pipe.call_kwargs["ip_adapter_image"]
+    assert len(images) == 2
+    assert pipe.ip_scale == pytest.approx(0.8)
+    applied = result.conditioning["applied"]["ip_adapter"]
+    assert len(applied) == 2
+    assert {Path(row["plate"]).name for row in applied} == {"costume.png", "face.png"}
+    assert str(costume) in opened["paths"]
+    assert str(face) in opened["paths"]
+
+
+def test_assembled_ashen_reaver_two_plates_generate(monkeypatch, tmp_path):
+    from pcraft.core.loop.orchestrate import _assemble_conditioning
+    from pcraft.sample import load_sprite_example
+
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    _install_fake_pil(monkeypatch)
+    _s, resolved, _t, _c = load_sprite_example()
+    conditioning = _assemble_conditioning(resolved)
+    assert len(conditioning["identity_refs"]) == 2
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    result = gen.generate("p", "n", conditioning, seed=1)
+    images = captured["last"].call_kwargs["ip_adapter_image"]
+    assert len(images) == 2
+    assert captured["last"].ip_scale == pytest.approx(0.8)
+    assert len(result.conditioning["applied"]["ip_adapter"]) == 2
+
+
 def test_sdxl_ip_adapter_loads_the_plate_and_sets_scale(monkeypatch, tmp_path):
     _install_fake_torch(monkeypatch)
     captured = _install_fake_diffusers(monkeypatch)

@@ -89,8 +89,9 @@ been run here (2026-08-18, ashen-reaver, OpenPose + identity plate). The frame i
 grip, sigil, and bracer did not land. A Cloud recipe (`pcraft recipe`) **has** been submitted
 live (2026-08-18). A live GEPA compile ran 2026-08-18 on local Ollama `hermes3:8b`
 (not 600B) via `compile_synthesizer` and an external `gate_metric`. The CLI will
-not invent one (`STATE_COMPILE_NEEDS_GATE`). `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the mock
-loop; call `SDXLGenerator().generate()` if you want pixels.
+not invent one (`STATE_COMPILE_NEEDS_GATE`). `bind --no-mock` is the live
+door when `[image]` is installed; missing extras are `DEP_IMAGE_MISSING`.
+`--mock` stays the GPU-free scaffold.
 
 ## Verify a change
 

@@ -100,17 +100,17 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## 诚实的状态
 
-**v0.2.1——核心功能已实现。SDXL条件控制已在代码中组装完毕。现在已经在一台本地的5090 `generate()`上进行了测试。一个云端配方也已在线运行。**
+**v0.2.1——核心功能已实现。SDXL条件控制已在代码中组装完毕。现在已经在一台本地的5090 `generate()`设备上进行了测试。一个云端配方也已进行实时测试。**
 
 | | |
 |---|---|
-| 核心 | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| 核心 | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | 谓词 | `core/` 中的十一个复合决策点都经过了**突变测试**——21 个突变体中有 20 个被杀死，并且[幸存者已命名](scripts/mutate_predicates.py)，而不是隐藏。 |
-| SDXL 条件 | ControlNet OpenPose、IP-Adapter、LoRA、《InstantID》和区域修复功能均已完成，并使用“假torch”进行测试。InstantID和IP-Adapter不能共享一次生成过程。本地`generate()`在5090上运行（2026-08-18，种子`169405236028824`，类型`controlnet_ip`）。生成的图像风格偏向兽人；手柄、标志和护腕没有正确呈现。在一个适配器上使用两个IP-Adapter图层会导致问题，像素渲染失败。 |
+| SDXL 条件 | ControlNet OpenPose、IP-Adapter、LoRA、《InstantID》和区域修复功能均已连接并使用“假torch”测试覆盖。InstantID和IP-Adapter不能共享一次生成过程。两个IP-Adapter图层停留在同一个适配器上（所有图像；比例是最强的限制）。本地`generate()`在5090设备上运行（2026-08-18，种子`169405236028824`，类型`controlnet_ip`）。生成的画面带有兽人的风格；握持、标志和护腕没有正确呈现。 |
 | Flux 编码器 | 仅文本和“填充修复”功能已连接（fake-torch）。ControlNet 姿势、IP-Adapter 和 LoRA 仍被拒绝（家族类型错误）。`method=reference` 会写入云端配方图，并拒绝模拟在本地运行（`GATE_CLOUD_SUBMIT`）。 |
 | 云端配方 | `pcraft recipe` 输出 Kontext stitch + 图形中左侧裁剪 + 仅限拳头的 Flux Fill。`method=reference` 是该路径。一个实时云端提交（任务 `06668d4c`，2026-08-18）生成了一个单面板裁剪图并保留了护腕。 |
 | 验证门 | 第二层是一个真实的 DSG 扩展（实体/属性/关系）。升级是一个对比检查点。收据存储尝试历史，而不仅仅是重试计数。 |
-| 离线合成 | `compile_synthesizer`与**外部**门控指标进行比较（当安装`[synth]`时为`dspy.GEPA`）。一个在线编译过程于2026-08-18在本地Ollama `hermes3:8b`上运行（600B未启动）。固定了`sprite.synth.v1-gepa.json`（`generated_by=gepa`）。种子`sprite.synth.v1.json`保持不变。每个资产的循环仍然使用`TemplateSynthesizer`。命令行界面仍然无法生成像素指标。 |
+| 离线合成 | `compile_synthesizer`与**外部**门控指标进行比较（当安装`[synth]`时为`dspy.GEPA`）。一个实时编译过程于2026-08-18在本地Ollama `hermes3:8b`上运行（600B未启动）。固定了`sprite.synth.v1-gepa.json`（`generated_by=gepa`）。种子`sprite.synth.v1.json`保持不变。每个资产的循环仍然使用`TemplateSynthesizer`。命令行界面仍然无法生成像素指标。 |
 | 身份子验证门 | 分数是 CLIP-I，并且**未连接到** `orchestrate`。阈值 0.55 / 0.05 没有保留集。占位符。 |
 | 真正的规范 | 提供的示例合同是一个**通用发明**，而不是任何实际项目的规范。确定真正的规范是一项经过深思熟虑的人工决策。 |
 
@@ -118,7 +118,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 - 之前描述的三区阈值被认为是*基于人工标注的保留数据集进行校准的*。实际上并非如此。它们是默认值。
 - 之前提到生成模型永远不会成为自身的“守门人”，这似乎暗示着一项研究已经证实了这一点。支持证据**更多的是趋同性而非直接性**——可区分的“是/否”投票在可测量上比开放式的描述更稳定，模型无法可靠地进行自我纠正，除非有外部反馈，并且自我识别会追踪自我偏好偏差。没有单一的研究能够进行直接对比。该规则是合理的；只是之前的确定性被夸大了。
-- 之前描述的条件输入是不读取的，后来又说是未实现的。SDXL现在**读取**代码中组装好的引用。这台机器上的本地 `generate()` 已经跑过。接线并应用，不等于板块落到像素上。
+- 之前描述的条件输入是不读取的，后来又说是未实现的。SDXL现在**读取**代码中组装好的引用。目前尚未使用的部分是在这台机器上的一个本地`generate()`，而不是线路本身。
 
 ## 要求
 

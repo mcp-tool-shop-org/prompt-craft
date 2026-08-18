@@ -134,9 +134,9 @@ in the verifier interface so nobody reintroduces it.
 
 | | |
 |---|---|
-| Core | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Core | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
-| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. Two IP-Adapter plates on one adapter refuse before pixels. |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Two IP-Adapter plates stay on one adapter (all images; scale is the strongest lock). Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + in-graph left crop + fist-only Flux Fill. `method=reference` is that path. A live Cloud submit (job `06668d4c`, 2026-08-18) produced a single-panel crop and kept the bracer. |
 | Gate | Tier-2 is a real DSG expansion (entity / attribute / relation). Escalation is a contrastive checkpoint. Receipts store the attempt story, not just a retry count. |

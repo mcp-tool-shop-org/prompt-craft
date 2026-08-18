@@ -47,7 +47,7 @@ an adapter can. The text describes what is nameable; the plate carries what is n
 
 `method` names the encoder:
 
-- `ip_adapter` — SDXL IP-Adapter (wired; local 5090 generate ran 2026-08-18 — face was orcish, plate lock did not land). Two plates on one adapter refuse.
+- `ip_adapter` — SDXL IP-Adapter (wired; local 5090 generate ran 2026-08-18 — face was orcish, plate lock did not land). Two plates stay on one adapter (all images; scale is the strongest lock).
 - `reference` — the Cloud Kontext stitch + left crop + fist-only Fill recipe (`pcraft recipe`). On the Flux generator this writes the graph and raises `GATE_CLOUD_SUBMIT` rather than pretending Kontext ran locally.
 - `lora` — SDXL `load_lora_weights` on the file (the plate is weights, not an image). Flux refuses.
 - `instantid` — SDXL InstantX ControlNet + face plate. Cannot share a generate with `ip_adapter`. Flux refuses.

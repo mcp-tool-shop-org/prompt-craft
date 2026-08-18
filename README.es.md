@@ -104,9 +104,9 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 | | |
 |---|---|
-| Núcleo | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Núcleo | **332 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
-| Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **implementados y cubiertos por pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. La versión local `generate()` se **ejecutó** en la 5090 (18-08-2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma es de estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. Dos placas de IP-Adapter en un solo adaptador fallan antes de que se procesen los píxeles. |
+| Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **conectados y cubiertos por las pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. Dos imágenes de IP-Adapter permanecen en un mismo adaptador (todas las imágenes; la escala es la restricción más fuerte). La versión local `generate()` se ejecutó en la 5090 (18 de agosto de 2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma tiene un estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. |
 | Codificador Flux | El modo solo texto y el **relleno** están conectados (fake-torch). ControlNet pose e IP-Adapter siguen rechazados (familia incorrecta). `method=reference` escribe el gráfico de la receta en la nube y se niega a simular que Kontext se ejecuta localmente (`GATE_CLOUD_SUBMIT`). |
 | Receta en la nube | `pcraft recipe` emite el ensamblaje de Kontext + recorte izquierdo en el gráfico + relleno Flux solo con puño. `method=reference` es esa ruta. Una ejecución en vivo en la nube (trabajo `06668d4c`, 2026-08-18) produjo un recorte de un solo panel y conservó el soporte. |
 | Puerta | El nivel 2 es una expansión DSG real (entidad / atributo / relación). La escalada es un punto de control contrastivo. Los registros almacenan la historia del intento, no solo el recuento de reintentos. |
@@ -118,7 +118,7 @@ Tres afirmaciones que las versiones anteriores de este documento hicieron y que 
 
 - Se describieron los tres umbrales de zona como *calibrados con un conjunto de datos de prueba etiquetado por humanos*. No lo están. Son valores predeterminados.
 - La regla de que un modelo generativo nunca puede ser su propia puerta se enunció como si un estudio la hubiera establecido. La evidencia de respaldo es **más convergente que directa**: las encuestas discriminativas de sí/no son mediblemente más estables que el etiquetado abierto, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea el sesgo de preferencia propia. Ningún estudio único realiza la comparación directa. La regla es sólida; se exageró la certeza.
-- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Una ejecución local `generate()` en esta máquina **ya se ha ejecutado**. Que esté cableado y aplicado no es lo mismo que el plate aparezca en los píxeles.
+- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Lo que aún no se ha probado es una ejecución local en vivo `generate()` en esta máquina, no la conexión.
 
 ## Requisitos
 

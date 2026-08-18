@@ -25,10 +25,10 @@ def test_version_is_pre_one_and_the_readme_agrees():
     forever" is not an invariant anyone wants: it fires on every legitimate release. The two
     invariants that are actually load-bearing:
 
-    1. **Still pre-1.0.** The `[image]` path has never executed on any machine here — `bind
-       --no-mock` refuses on a missing dependency — so nothing has measured the pipeline
-       end-to-end. A 1.x number asserts a stability the record cannot support. Promoting it
-       should be a decision made on evidence, and deleting a failing assertion is not that.
+    1. **Still pre-1.0.** A live 5090 generate has now run, and `bind --no-mock` is
+       the live door when `[image]` is installed. That is not a 1.x stability claim.
+       Promoting the version should be a decision made on evidence, and deleting a
+       failing assertion is not that.
     2. **The README cannot drift from it.** A front door advertising a version the package does
        not carry is this repo's own defect, one level up.
     """

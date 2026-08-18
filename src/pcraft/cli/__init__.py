@@ -261,18 +261,23 @@ def bind(
     debug: bool = typer.Option(False),
 ) -> None:
     """Run the full synth->generate->gate->retry->bind loop and report the decision."""
-    from ..sample import run_mock_loop
+    from ..sample import run_live_loop, run_mock_loop
 
-    if not mock:
-        _emit(PromptCraftError("DEP_IMAGE_MISSING", "real bind needs the [image] extra + a GPU; "
-              "use --mock for the GPU-free scaffold path"), debug)
     try:
-        result = run_mock_loop(
-            records_dir=records_dir,
-            contract_id=contract,
-            contracts_dirs=contracts_dir or None,
-            thresholds=thresholds,
-        )
+        if mock:
+            result = run_mock_loop(
+                records_dir=records_dir,
+                contract_id=contract,
+                contracts_dirs=contracts_dir or None,
+                thresholds=thresholds,
+            )
+        else:
+            result = run_live_loop(
+                records_dir=records_dir,
+                contract_id=contract,
+                contracts_dirs=contracts_dir or None,
+                thresholds=thresholds,
+            )
         _print_result(result, as_json=as_json)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same

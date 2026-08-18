@@ -45,6 +45,13 @@ _DEFAULT_INSTANTID_CN_SUBFOLDER = "ControlNetModel"
 _DEFAULT_INSTANTID_IP_WEIGHT = "ip-adapter.bin"
 
 
+def ip_adapter_scale(scales: list[float]) -> float:
+    """One loaded adapter takes one scale. Keep every plate; use the strongest lock."""
+    if not scales:
+        return 0.6
+    return max(scales)
+
+
 class SDXLGenerator:
     generator_id = "sdxl.base-1.0.v1"
     family = "stable-diffusion"
@@ -221,10 +228,16 @@ class SDXLGenerator:
                 for plate in plates:
                     weight = float(plate.get("weight") or 0.6) + bump
                     scales.append(min(1.0, max(0.0, weight)))
+                # One load_ip_adapter = one adapter. Extra plates are extra
+                # images on that adapter, not extra scale slots. Passing a
+                # scale list here is "Cannot assign 2 scale_configs to 1
+                # IP-Adapter". Do not drop a plate.
+                adapter_scale = ip_adapter_scale(scales)
                 call["ip_adapter_image"] = images[0] if len(images) == 1 else images
-                pipe.set_ip_adapter_scale(scales[0] if len(scales) == 1 else scales)
+                pipe.set_ip_adapter_scale(adapter_scale)
                 applied["ip_adapter"] = [
-                    {"plate": p["plate"], "scale": s} for p, s in zip(plates, scales, strict=True)
+                    {"plate": p["plate"], "requested_scale": s, "scale": adapter_scale}
+                    for p, s in zip(plates, scales, strict=True)
                 ]
 
             loras = cond.lora_refs(conditioning)

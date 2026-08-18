@@ -6,7 +6,7 @@
 **Executor:** Claude
 **Repo:** `E:\AI\prompt-craft`
 **HEAD at write:** `e42ce2f` on `origin/main`
-**Suite last counted:** **328** (re-count before quoting)
+**Suite last counted:** **332** (re-count before quoting)
 
 Read **`grok.md`**, then this file, then **`HANDOFF.md`**. Measure HEAD
 and the suite. Do not reconstruct from chat.
@@ -91,12 +91,12 @@ it. Do not fire a live generate from pytest.
 
 | thing | state |
 |---|---|
-| GPU-free suite | **328** at `e42ce2f` |
+| GPU-free suite | **332** (re-count) |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. CUDA `torch 2.13.0+cu130`, RTX 5090, 31.84 GB. |
 | That frame (looked at) | Orcish tusks. Crossed arms. Scythe, not a two-hand axe. No triple-bar. No bone-spike bracer. Same species, different character. Notes: `records/_control_experiments/NOTES.md` (gitignored). |
-| Two IP-Adapter plates | refuse: `Cannot assign 2 scale_configs to 1 IP-Adapter`. The assembled ashen-reaver contract (faction costume + character face) cannot generate without dropping a plate. |
-| `bind --no-mock` | still `DEP_IMAGE_MISSING`, stays on the mock loop. Not a door. |
+| Two IP-Adapter plates | **fixed.** Both images on one adapter. Scale is the strongest requested lock. Do not drop a plate. |
+| `bind --no-mock` | **fixed.** Live door when `[image]` is present. `DEP_IMAGE_MISSING` only if the extra is actually missing. `--mock` unchanged. |
 | Flux text + Fill | wired, fake-torch. Local Flux **not** run — `FLUX.1-dev` / Fill not on disk. Token can see both (gated auto). A 24 GB pull was not started. |
 | Flux pose / IP / LoRA / InstantID | refuse (wrong family) |
 | `method=reference` | writes Cloud recipe, `GATE_CLOUD_SUBMIT` |
@@ -141,43 +141,15 @@ writing to it.
 
 ## Recommended next increment (Advisor ruling)
 
-If the Director does **not** name a job: measure HEAD, re-count the
-suite, stop.
+Increments 1 and 2 **landed this sitting** (Advisor executed them
+after parking the swarm was called). Suite **332**.
 
-If the Director says continue, do **these two first**, in this
-order. Both are live-measured doors. Both are GPU-free.
+If the Director does **not** name a job: measure HEAD, re-count, stop.
 
-### 1. Two IP-Adapter plates on one adapter
-
-The shipped ashen-reaver contract assembles two `method=ip_adapter`
-refs (faction costume + character face). `SDXLGenerator` loads one
-adapter and then `set_ip_adapter_scale` with two scales. Live miss:
-`Cannot assign 2 scale_configs to 1 IP-Adapter`.
-
-The 5090 run dropped the costume plate so generate could fire. That
-is a workaround, not a fix.
-
-Fix the generator so the assembled contract can generate, or refuse
-with a coded error that names the real constraint. Do not silently
-drop a plate. Tests ride the change-set. Do not fire a live GPU
-generate from pytest.
-
-### 2. `bind --no-mock` is not a door
-
-`pcraft bind --no-mock` raises `DEP_IMAGE_MISSING` and still runs
-the mock loop. `[image]` is installed. The flag lies.
-
-Make `--no-mock` either (a) call the real generator with a coded
-refuse if extras/GPU are missing, or (b) stay refused but stop
-claiming a missing extra when the extra is present. Do not silently
-fall back to the stub.
-
-### After those, only if asked
+Still out, only if asked:
 
 3. Local Flux text-only / Fill — weights are not on disk.
 4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
-   Demo/bind stay on `TemplateSynthesizer` until that swap is
-   deliberate.
 5. Phase 9 formal final test, then Phase 10 full treatment.
 
 Do **not** start identity-sub-gate wiring or InstantID rewrites

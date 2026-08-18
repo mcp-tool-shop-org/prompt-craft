@@ -70,7 +70,7 @@ concepts, blind to which attribute belongs to which object.
 
 **v0.2.1 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
 
-- **328 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
+- **332 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
   against a mock generator and verifier, which is what proves the plugin boundary holds.
 - Flux Fill inpaint is wired. `method=reference` writes the Cloud recipe (`GATE_CLOUD_SUBMIT`).
   ControlNet pose and IP-Adapter stay refused on Flux.
@@ -78,9 +78,10 @@ concepts, blind to which attribute belongs to which object.
   killed, and the survivor is named rather than hidden.
 - SDXL ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are
   **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one
-  generate. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`).
-  The frame is orcish; grip, sigil, and bracer did not land. Two IP-Adapter plates on
-  one adapter refuse before pixels. Flux refuses those identity methods.
+  generate. Two IP-Adapter plates stay on one adapter (all images; scale is the
+  strongest lock). Local `generate()` **ran** on the 5090 (2026-08-18, seed
+  `169405236028824`). The frame is orcish; grip, sigil, and bracer did not land.
+  Flux refuses those identity methods.
 - `pcraft recipe` emits the Cloud Kontext stitch + left crop + fist-only Fill graph. A live
   Cloud submit (2026-08-18) produced a single-panel crop and kept the bracer.
 - Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. A live GEPA

@@ -116,3 +116,52 @@ def run_mock_loop(
         records_dir=str(records_dir),
     )
     return orchestrate.run(resolved, synth, gen, verifiers, thresholds, config=config)
+
+
+def image_extra_present() -> bool:
+    """True when the [image] extra can import. Used by bind --no-mock."""
+    import importlib.util
+
+    return all(importlib.util.find_spec(name) is not None for name in ("torch", "diffusers", "PIL"))
+
+
+def run_live_loop(
+    *,
+    records_dir: str | Path = "records",
+    contract_id: str | None = None,
+    contracts_dirs: list[Path] | None = None,
+    thresholds: Path | None = None,
+) -> OrchestrationResult:
+    """Real plugin generator + verifiers. Not the stub. Needs [image].
+
+    The per-asset synthesizer stays TemplateSynthesizer. GEPA is offline.
+    """
+    from .domains.image import ImagePlugin
+
+    if not image_extra_present():
+        from .errors import PromptCraftError
+
+        raise PromptCraftError(
+            "DEP_IMAGE_MISSING",
+            "real bind needs the [image] extra (torch + diffusers + Pillow)",
+            hint="pip install -e '.[image]'. Use --mock for the GPU-free scaffold.",
+        )
+    _store, resolved, table, compiled = load_workspace(
+        contracts_dirs=contracts_dirs, thresholds=thresholds, contract_id=contract_id
+    )
+    plugin = ImagePlugin()
+    gen = plugin.generator()
+    gen.out_dir = Path(records_dir) / "_image"
+    config = LoopConfig(
+        encoder_rules=_encoder_rules(),
+        thresholds_version=table.version,
+        records_dir=str(records_dir),
+    )
+    return orchestrate.run(
+        resolved,
+        TemplateSynthesizer(compiled),
+        gen,
+        plugin.verifiers(),
+        table,
+        config=config,
+    )

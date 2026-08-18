@@ -22,6 +22,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   one adapter refuse (`Cannot assign 2 scale_configs to 1
   IP-Adapter`). `bind --no-mock` still raises `DEP_IMAGE_MISSING`.
   Flux text-only / Fill not run — weights not on disk.
+- Suite **328 → 332** after two-plate IP-Adapter + live `bind --no-mock`.
 - Suite **325 → 328** after the GEPA pin and the extra-installed test doors.
 - **Live GEPA compile ran** (2026-08-18) on local Ollama `hermes3:8b`.
   600B was not up; this is not a 600B run. `compile_synthesizer` with
@@ -34,6 +35,14 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Fixed
 
+- **Two IP-Adapter plates stay on one adapter.** Costume + face
+  images are all passed. One `load_ip_adapter` takes one scale (the
+  strongest requested lock). The assembled ashen-reaver contract
+  can generate. Do not drop a plate.
+- **`bind --no-mock` is the live door.** Missing `[image]` is still
+  `DEP_IMAGE_MISSING`. When the extra is present, the loop uses
+  `SDXLGenerator` + plugin verifiers, not the stub. `--mock` is
+  unchanged.
 - **The GPU-free suite stays GPU-free when `[image]` is installed.**
   Three tests used `DEP_IMAGE_MISSING` as a proxy for "fell through to
   `_load`" and then ran a live 30-step SDXL generate once torch was
