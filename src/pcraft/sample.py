@@ -24,14 +24,52 @@ from .domains.image.subdomains.sprite import CONTRACTS_DIR, EXAMPLE_CHARACTER_ID
 from .testing import StubGenerator, passing_verifiers
 
 
+def load_workspace(
+    *,
+    contracts_dirs: list[Path] | None = None,
+    thresholds: Path | None = None,
+    contract_id: str | None = None,
+) -> tuple[ContractStore, ResolvedContract, ThresholdTable, CompiledProgram]:
+    """Load a contract store. Defaults to the shipped sprite example.
+
+    F-CLI-FEAT-001: --contracts-dir / --thresholds are the public door.
+    An empty tree is INPUT_EMPTY_STORE, not a silent ashen-reaver fallback.
+    """
+    store = load_store(contracts_dirs)
+    resolved = store.resolve(contract_id or EXAMPLE_CHARACTER_ID)
+    table = load_thresholds(thresholds or THRESHOLDS_PATH)
+    compiled = load_pinned(COMPILED_ARTIFACT)
+    return store, resolved, table, compiled
+
+
+def load_store(contracts_dirs: list[Path] | None = None) -> ContractStore:
+    """Index *.contract.json trees. Empty is INPUT_EMPTY_STORE."""
+    from .errors import PromptCraftError
+
+    roots = [Path(r) for r in (contracts_dirs or [CONTRACTS_DIR])]
+    if not roots:
+        roots = [CONTRACTS_DIR]
+    for root in roots:
+        if not root.is_dir():
+            raise PromptCraftError(
+                "INPUT_CONTRACTS_DIR",
+                f"contracts dir {str(root)!r} is not a directory",
+                hint="Pass --contracts-dir at a folder that contains *.contract.json files.",
+            )
+    store = ContractStore(roots)
+    if not store.ids():
+        raise PromptCraftError(
+            "INPUT_EMPTY_STORE",
+            "no *.contract.json files in the given --contracts-dir",
+            hint="The shipped sprite tree is the default. A custom dir must contain contracts.",
+        )
+    return store
+
+
 def load_sprite_example(
     contract_id: str | None = None,
 ) -> tuple[ContractStore, ResolvedContract, ThresholdTable, CompiledProgram]:
-    store = ContractStore([CONTRACTS_DIR])
-    resolved = store.resolve(contract_id or EXAMPLE_CHARACTER_ID)
-    thresholds = load_thresholds(THRESHOLDS_PATH)
-    compiled = load_pinned(COMPILED_ARTIFACT)
-    return store, resolved, thresholds, compiled
+    return load_workspace(contract_id=contract_id)
 
 
 def _encoder_rules() -> str:
@@ -42,6 +80,8 @@ def run_mock_loop(
     *,
     records_dir: str | Path = "records",
     contract_id: str | None = None,
+    contracts_dirs: list[Path] | None = None,
+    thresholds: Path | None = None,
     verifier_scores: dict[str, float] | Callable[[Question], float] | None = None,
     generator=None,
     mutate_contract: Callable[[ResolvedContract], None] | None = None,
@@ -55,7 +95,9 @@ def run_mock_loop(
     a premise instead of inheriting one from the example's policy. The example's ``must_not`` atoms
     are ``optional`` (absence-verification is unmeasured on this stack), so a test about blocking
     behaviour raises the severity itself rather than depending on a setting that can change."""
-    _store, resolved, thresholds, compiled = load_sprite_example(contract_id)
+    _store, resolved, thresholds, compiled = load_workspace(
+        contracts_dirs=contracts_dirs, thresholds=thresholds, contract_id=contract_id
+    )
     if mutate_contract is not None:
         mutate_contract(resolved)
     synth = TemplateSynthesizer(compiled)

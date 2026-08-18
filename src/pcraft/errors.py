@@ -67,6 +67,8 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",
     "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
+    "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
+    "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",
     "RUNTIME_UNEXPECTED": "An unclassified error escaped the command. Re-run with --debug to see "
     "the underlying traceback; this code is the backstop, not a diagnosis.",
 }

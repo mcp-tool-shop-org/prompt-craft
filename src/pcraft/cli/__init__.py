@@ -1,4 +1,4 @@
-"""The ``pcraft`` CLI: synth | gate | bind | compile | replay | sync-rules | demo.
+"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug."""
@@ -100,15 +100,18 @@ def _emit(err: PromptCraftError, debug: bool) -> None:
 @app.command()
 def synth(
     contract: str = typer.Option("char:ashen-reaver", help="contract id to synthesize"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Synthesize a prompt from a contract (deterministic template synthesizer)."""
     from ..core.synth.signature import TemplateSynthesizer
-    from ..sample import _encoder_rules, load_sprite_example
+    from ..sample import _encoder_rules, load_workspace
 
     try:
-        store, _resolved, _t, compiled = load_sprite_example()
-        resolved = store.resolve(contract)
+        store, resolved, _t, compiled = load_workspace(
+            contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
+        )
         result = TemplateSynthesizer(compiled).synthesize(resolved, _encoder_rules())
         typer.echo(f"prompt: {result.prompt}")
         typer.echo(f"negative: {result.negative_prompt}")
@@ -128,6 +131,8 @@ def synth(
 def gate(
     image: Path = typer.Argument(..., help="rendered image to gate"),
     contract: str = typer.Option("char:ashen-reaver"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     generator_family: str = typer.Option(
         None,
         help="override the generator family the same-family gate guard checks against "
@@ -141,20 +146,21 @@ def gate(
     from ..core.contract.compile_questions import compile_questions
     from ..core.gate import harness
     from ..core.plugin import get
-    from ..sample import load_sprite_example
+    from ..sample import load_workspace
 
     try:
         from ..core.gate.exit_contract import error_from_transcript
         from ..core.gate.preflight import preflight_image
 
         preflight_image(image)
-        store, _r, thresholds, _c = load_sprite_example()
-        resolved = store.resolve(contract)
+        store, resolved, table, _c = load_workspace(
+            contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
+        )
         dag = compile_questions(resolved)
         plugin = get("image")
         verifiers = plugin.verifiers()
         family = generator_family or plugin.generator().family
-        transcript = harness.evaluate(dag, str(image), verifiers, thresholds, generator_family=family)
+        transcript = harness.evaluate(dag, str(image), verifiers, table, generator_family=family)
         typer.echo(format_transcript(transcript))
         err = error_from_transcript(transcript)
         if err is not None:
@@ -170,6 +176,8 @@ def gate(
 @app.command()
 def bind(
     contract: str = typer.Option("char:ashen-reaver"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     mock: bool = typer.Option(True, help="use deterministic stubs (GPU-free); the default scaffold path"),
     records_dir: str = typer.Option("records"),
     debug: bool = typer.Option(False),
@@ -181,12 +189,65 @@ def bind(
         _emit(PromptCraftError("DEP_IMAGE_MISSING", "real bind needs the [image] extra + a GPU; "
               "use --mock for the GPU-free scaffold path"), debug)
     try:
-        result = run_mock_loop(records_dir=records_dir, contract_id=contract)
+        result = run_mock_loop(
+            records_dir=records_dir,
+            contract_id=contract,
+            contracts_dirs=contracts_dir or None,
+            thresholds=thresholds,
+        )
         _print_result(result)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same
         # number to a caller — the merge the four-way contract exists to prevent.
         _exit_from_result(result, debug)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+@app.command(name="list")
+def list_contracts(
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    debug: bool = typer.Option(False),
+) -> None:
+    """List contract ids in the store."""
+    from ..sample import load_store
+
+    try:
+        store = load_store(contracts_dir or None)
+        for cid in store.ids():
+            typer.echo(f"{cid}  {store.source_path(cid)}")
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+@app.command()
+def validate(
+    contract: str = typer.Option("char:ashen-reaver", help="contract id to lint and resolve"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    debug: bool = typer.Option(False),
+) -> None:
+    """Resolve a contract and compile its question DAG. No generate, no gate."""
+    from ..core.contract.compile_questions import compile_questions
+    from ..sample import load_workspace
+
+    try:
+        store, resolved, _t, _c = load_workspace(
+            contracts_dirs=contracts_dir or None, contract_id=contract
+        )
+        dag = compile_questions(resolved)
+        typer.echo(f"ok  {resolved.id}")
+        typer.echo(f"lineage: {' -> '.join(resolved.lineage)}")
+        typer.echo(f"required: {[a.id for a in resolved.required_atoms()]}")
+        typer.echo(f"must_not: {[m.id for m in resolved.must_not]}")
+        typer.echo(f"questions: {len(dag.questions)}")
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):
@@ -218,14 +279,18 @@ def demo(records_dir: str = typer.Option("records"), debug: bool = typer.Option(
 
 
 @app.command()
-def replay(record: Path = typer.Argument(...), debug: bool = typer.Option(False)) -> None:
+def replay(
+    record: Path = typer.Argument(...),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    debug: bool = typer.Option(False),
+) -> None:
     """Replay a receipt: reconstruct its question DAG from the contract and assert no drift."""
     from ..core.receipt.asset_record import load, replay as do_replay
-    from ..sample import load_sprite_example
+    from ..sample import load_store
 
     try:
         rec = load(record)
-        store, _r, _t, _c = load_sprite_example()
+        store = load_store(contracts_dir or None)
         resolved = store.resolve(rec.contract_id)
         do_replay(rec, resolved)
         typer.echo(f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)")

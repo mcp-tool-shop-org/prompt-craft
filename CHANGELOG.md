@@ -60,6 +60,9 @@ every entry below concerns the GPU-free core.
   not read.
 - `GATE_CONDITIONING_UNSUPPORTED` names `identity_ref` / pose spatials, not a
   contract key called `pose_refs`.
+- **`--contracts-dir` / `--thresholds`** on synth, gate, bind, and replay.
+  `pcraft list` and `pcraft validate` added. An empty custom store is
+  `INPUT_EMPTY_STORE`, not a silent fall-back to ashen-reaver.
 
 ## [0.2.1] — 2026-08-18
 

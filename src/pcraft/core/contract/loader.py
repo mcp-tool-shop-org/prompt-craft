@@ -36,12 +36,19 @@ class ContractStore:
                 self._by_id[contract.id] = contract
                 self._source[contract.id] = path
 
+    def ids(self) -> list[str]:
+        return sorted(self._by_id)
+
+    def source_path(self, contract_id: str) -> Path:
+        self.get(contract_id)
+        return self._source[contract_id]
+
     def get(self, contract_id: str) -> Contract:
         if contract_id not in self._by_id:
             raise PromptCraftError(
                 "INPUT_UNKNOWN_CONTRACT",
                 f"no contract with id {contract_id!r} found in the store",
-                hint="Check the id spelling, or add the contract file to the store roots.",
+                hint="Check the id spelling, or pass --contracts-dir at the tree that holds it.",
             )
         return self._by_id[contract_id]
 
