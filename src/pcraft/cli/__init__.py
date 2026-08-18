@@ -1,4 +1,4 @@
-"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor | recipe.
+"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor | recipe | schema.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
@@ -477,6 +477,28 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
     except PromptCraftError as err:
         report.store_error = err.to_safe_text()
     return report
+
+
+@app.command(name="schema")
+def schema_cmd(
+    out: Path | None = typer.Option(None, "--out", help="write the JSON Schema here; default stdout"),
+    debug: bool = typer.Option(False),
+) -> None:
+    """Emit JSON Schema for the authoring contract. No generate, no gate."""
+    from ..core.contract.schema import export_json_schema
+
+    try:
+        text = json.dumps(export_json_schema(), indent=2)
+        if out is not None:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+        typer.echo(text)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()

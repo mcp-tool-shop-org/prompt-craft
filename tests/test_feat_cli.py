@@ -232,6 +232,26 @@ def test_doctor_missing_contracts_dir_is_not_ok(tmp_path):
     assert "store FAIL" in text
 
 
+def test_schema_dumps_the_authoring_contract():
+    result = runner.invoke(app, ["schema"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    data = json.loads(result.stdout)
+    blob = json.dumps(data)
+    assert "must_have" in blob
+    assert "must_not" in blob
+    assert "identity_ref" in blob
+    assert "$schema" in blob or "schema_id" in blob
+
+
+def test_schema_writes_out(tmp_path):
+    out = tmp_path / "contract.schema.json"
+    result = runner.invoke(app, ["schema", "--out", str(out)])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert out.is_file()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert "must_have" in json.dumps(data)
+
+
 def test_doctor_custom_store_does_not_require_ashen(tmp_path):
     _write_pair(tmp_path)
     result = runner.invoke(app, ["doctor", "--contracts-dir", str(tmp_path)])

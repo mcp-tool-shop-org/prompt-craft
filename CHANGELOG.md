@@ -52,6 +52,7 @@ every entry below concerns the GPU-free core.
   I chose Y" per flagged atom, not a zone name. STANDARDS #5 is now 3.
 - **Receipts store the attempt story.** Each generate+gate step (seed,
   zone, repair) rides the record, not just `retry_count`.
+- **`pcraft schema`** dumps JSON Schema for the authoring contract.
 
 ### Fixed
 

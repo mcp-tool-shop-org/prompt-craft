@@ -179,6 +179,11 @@ class Contract(BaseModel):
         return self
 
 
+def export_json_schema() -> dict:
+    """JSON Schema for the authoring contract. The CLI dumps this."""
+    return Contract.model_json_schema()
+
+
 class ResolvedContract(BaseModel):
     """A character contract with its faction base merged in (output of ``loader.resolve``).
 
