@@ -42,12 +42,13 @@ the features.
 
 | | |
 |---|---|
-| The core | **205 tests passing**, GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
+| The core | **318 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
-| The GPU path | **has never executed on any machine here.** `bind --no-mock` refuses with a missing-dependency error |
-| Conditioning | the loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither shipped generator reads a key of that dict. If those refs are present, `generate()` refuses. Pose-lock and identity-binding are unimplemented, not merely unexercised |
-| Sub-gate thresholds | **hardcoded defaults with no calibration** — no holdout, no citation. Placeholders, and labelled as such |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter, and regional inpaint are **wired and fake-torch tested**. Local `generate()` on a 5090 has not been run. Flux still refuses those refs |
+| Cloud recipe | `pcraft recipe` emits Kontext stitch + left crop + fist-only Fill. A live Cloud submit (job `06668d4c`) produced a single-panel crop and kept the bracer |
+| Gate / synth | Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. Offline GEPA is a Python door; no live 600B compile has been run |
+| Identity sub-gate | **not wired** into `orchestrate`. Thresholds 0.55 / 0.05 have no holdout |
 | Real canon | the shipped contract is a **generic invention**. Binding real project canon is a deliberate human decision, not a default |
 
 Three claims earlier versions of this project made, corrected here rather than quietly dropped:
@@ -59,13 +60,14 @@ Three claims earlier versions of this project made, corrected here rather than q
   is measurably more stable than open-ended captioning, models cannot reliably self-correct
   without external feedback, and a model's self-recognition tracks its self-preference bias. No
   single study runs the head-to-head. The rule is sound. The certainty was overstated.
-- Everything below the plugin boundary was described as *unproven by measurement*. That
-  understated the generators: conditioning is unread. The path is unimplemented, not untested.
+- Conditioning was described as unread. SDXL now reads the assembled refs in code. What remains
+  unexercised is a live local `generate()` on this machine.
 
 ## Where to go next
 
 - **[Getting started](./getting-started/)** — install, and run the whole loop with no GPU
 - **[Contracts](./contracts/)** — what a contract is made of, and why absence is its own problem
 - **[The gate](./the-gate/)** — three tiers, four exit codes, and why "could not check" is its own answer
+- **[The CLI](./cli/)** — every command, what it will and will not do
 - **[Architecture](./architecture/)** — the core/plugin boundary and what keeps it honest
 - **[Security](./security/)** — what this tool touches, what it does not, and the sharp edge

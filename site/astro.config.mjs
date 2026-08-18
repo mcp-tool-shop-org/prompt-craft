@@ -9,8 +9,8 @@ export default defineConfig({
   base: '/prompt-craft',
   integrations: [
     starlight({
-      title: 'my-package',
-      description: 'A tool by mcp-tool-shop',
+      title: 'prompt-craft',
+      description: 'Say what the picture must contain. Check that it does. Refuse when it does not.',
       disable404Route: true,
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mcp-tool-shop-org/prompt-craft' },

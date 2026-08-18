@@ -43,7 +43,16 @@ absence, not before.
 
 **Identity is conditioning, not tokens.** Anatomical description makes a diffusion model render
 *a specimen of a type*; it cannot specify a particular face. A reference plate bound through
-LoRA or an adapter can. The text describes what is nameable; the plate carries what is not.
+an adapter can. The text describes what is nameable; the plate carries what is not.
+
+`method` names the encoder:
+
+- `ip_adapter` — SDXL IP-Adapter (wired; local generate unexercised)
+- `reference` — the Cloud Kontext stitch + left crop + fist-only Fill recipe (`pcraft recipe`)
+- `lora` / `instantid` — still refuse
+- `none` — skip the plate
+
+A `MustNot` may carry `spatial` the same way a `must_have` can. Inherited spatial is frozen.
 
 ## Inheritance fails closed
 

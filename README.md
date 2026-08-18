@@ -73,7 +73,10 @@ verifiers and synthesizer. **Neither is needed to run, test, or evaluate the cor
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft list              # contract ids in the store
+pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
+pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -127,16 +130,17 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.2.1 — the core is real; pose-lock and identity-binding are unimplemented.**
+**v0.2.1 — the core is real. SDXL conditioning is assembled in code. Local GPU generate is still unexercised. One Cloud recipe has been run live.**
 
 | | |
 |---|---|
-| Core | **205 tests passing**, GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Core | **318 tests passing** (counted 2026-08-18 on `d36aa28`), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
-| Coverage | GPU-bound generator and verifier adapters remain the untested remainder |
-| The `[image]` path | **has never executed on this machine.** `bind --no-mock` refuses with a missing-dependency error |
-| Conditioning | the loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither shipped generator reads a key of that dict. If those refs are present, `generate()` **refuses**. Pose-lock and identity-binding are unimplemented, not merely unexercised |
-| Thresholds | the sprite sub-gate's floor and variance limits are **hardcoded defaults with no recorded calibration** — no holdout, no citation. Treat them as placeholders |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), and regional inpaint are **wired and covered by fake-torch tests**. Local `generate()` on a 5090 has not been run. Flux still refuses pose / identity / inpaint (unmeasured family). |
+| Cloud recipe | `pcraft recipe` emits Kontext stitch + in-graph left crop + fist-only Flux Fill. `method=reference` is that path. A live Cloud submit (job `06668d4c`, 2026-08-18) produced a single-panel crop and kept the bracer. |
+| Gate | Tier-2 is a real DSG expansion (entity / attribute / relation). Escalation is a contrastive checkpoint. Receipts store the attempt story, not just a retry count. |
+| Offline synth | `compile_synthesizer` pins against an **external** gate metric (`dspy.GEPA` when `[synth]` is installed). `DSPySynthesizer` runs the pin. No live 600B compile has been run. The per-asset loop still uses `TemplateSynthesizer`. |
+| Identity sub-gate | scores CLIP-I and is **not wired** into `orchestrate`. Thresholds 0.55 / 0.05 have no holdout. Placeholders. |
 | Real canon | the shipped example contract is a **generic invention**, not any real project's canon. Binding real canon is a deliberate, human decision |
 
 Three claims that earlier versions of this document made and that measurement did not support,
@@ -149,8 +153,9 @@ corrected here rather than quietly dropped:
   yes/no polling is measurably more stable than open-ended captioning, models cannot reliably
   self-correct without external feedback, and self-recognition tracks self-preference bias. No
   single study runs the head-to-head. The rule is sound; the certainty was overstated.
-- Everything below the plugin boundary was described as *unproven by measurement*. That
-  understated the generators: conditioning is unread. The path is unimplemented, not untested.
+- Conditioning was described as unread, then as unimplemented. SDXL now **reads** the assembled
+  refs in code. What remains unexercised is a live local `generate()` on this machine, not the
+  wiring.
 
 ## Requirements
 
@@ -193,7 +198,7 @@ keeps that claim honest.
 ```
 src/pcraft/
   core/          contract · loop · gate · synth · optimize · receipt   (GPU-free)
-  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  cli/           pcraft: synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe | compile | sync-rules
   domains/       ── PLUGIN BOUNDARY ──
     image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```

@@ -17,7 +17,7 @@ src/pcraft/
     synth/       prompt synthesis, the anti-prose-dump guard, pre-generation assert
     optimize/    offline compile; the pinned compiled artifact
     receipt/     replayable per-asset provenance record
-  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  cli/           pcraft: synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe | compile | sync-rules
   domains/       ── PLUGIN BOUNDARY ──
     image/       generators, three verifier tiers, encoder rules, sprite subdomain
 ```

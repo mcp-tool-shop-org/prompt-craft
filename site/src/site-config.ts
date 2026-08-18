@@ -11,7 +11,7 @@ export const config: SiteConfig = {
     'MIT Licensed — built by <a href="https://github.com/mcp-tool-shop-org" style="color:var(--color-muted);text-decoration:underline">mcp-tool-shop-org</a>',
 
   hero: {
-    badge: 'v0.2.0 · pre-1.0, deliberately',
+    badge: 'v0.2.1 · pre-1.0, deliberately',
     headline: 'Say what the picture must contain.',
     headlineAccent: 'Then check that it does.',
     description:
@@ -78,6 +78,14 @@ export const config: SiteConfig = {
         {
           title: 'Re-read what was bound',
           code: 'pcraft replay records/hero.json\n\n# contract hash, generator + seed,\n# verifier version, per-atom transcript',
+        },
+        {
+          title: 'Open a store that is not the demo',
+          code: 'pcraft list --contracts-dir ./contracts\npcraft validate --contract char:y',
+        },
+        {
+          title: 'Emit the Cloud recipe graph',
+          code: 'pcraft recipe --out kontext-fill.recipe.json\n\n# does not submit; --image-name remaps plates',
         },
       ],
     },

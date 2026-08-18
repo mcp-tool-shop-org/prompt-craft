@@ -37,10 +37,15 @@ Requires **Python 3.11+**. CI runs 3.13. The core's only runtime dependency is `
 
 ```bash
 pcraft demo
+pcraft list
+pcraft validate
+pcraft doctor
 ```
 
-That runs synth → generate → gate → repair → bind end to end with a stub generator and a scripted
-verifier, and writes a provenance receipt. No GPU, no network, no model downloads.
+`demo` runs synth → generate → gate → repair → bind end to end with a stub generator and a
+scripted verifier, and writes a provenance receipt. `list` and `validate` open a contract store
+without generating. `doctor` reports python, extras, and whether the store loads. No GPU, no
+network, no model downloads. `--contracts-dir` points at a tree that is not the shipped demo.
 
 ## Check an image
 
@@ -79,9 +84,10 @@ pip install -e ".[image]"    # torch / diffusers — the real generator and veri
 pip install -e ".[synth]"    # DSPy + a hosted LM — the real synthesizer
 ```
 
-**Neither is needed to run, test, or evaluate the core**, and neither has been exercised on the
-machine this project was developed on. `bind --no-mock` currently refuses with a
-missing-dependency error. Treat everything below the plugin boundary as unproven until you have
+**Neither is needed to run, test, or evaluate the core.** Local `generate()` on a 5090 has not
+been run here. A Cloud recipe (`pcraft recipe`) **has** been submitted live (2026-08-18). Offline
+GEPA compile needs `[synth]` and a Python `gate_metric` — the CLI will not invent one.
+`bind --no-mock` still needs the extras. Treat a live local generate as unproven until you have
 run it yourself.
 
 ## Verify a change

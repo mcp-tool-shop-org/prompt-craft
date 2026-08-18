@@ -24,7 +24,10 @@ Python 3.11+. The core's only runtime dependency is `pydantic`.
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft list              # contract ids in the store
+pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
+pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -65,19 +68,20 @@ concepts, blind to which attribute belongs to which object.
 
 ## Honest status
 
-**v0.2.1 — the core is real; pose-lock and identity-binding are unimplemented.**
+**v0.2.1 — the core is real. SDXL conditioning is assembled in code. Local GPU generate is still unexercised. One Cloud recipe has been run live.**
 
-- **205 tests passing**, GPU-free and deterministic. The whole suite runs against a mock
-  generator and verifier, which is what proves the plugin boundary holds.
+- **318 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
+  against a mock generator and verifier, which is what proves the plugin boundary holds.
 - The eleven compound decision points in the core are **mutation-tested** — 20 of 21 mutants
   killed, and the survivor is named rather than hidden.
-- The **`[image]` extra has never executed** on the machine this was developed on. `bind
-  --no-mock` refuses with a missing-dependency error.
-- The loop assembles `pose_refs` and `identity_refs` and writes them on the receipt. Neither
-  shipped generator reads a key of that dict; if those refs are present, `generate()` refuses.
-  Pose-lock and identity-binding are unimplemented, not merely unexercised.
-- The sprite sub-gate's thresholds are **hardcoded defaults with no calibration** — no holdout,
-  no citation. Treat them as placeholders.
+- SDXL ControlNet OpenPose, IP-Adapter, and regional inpaint are **wired and covered by
+  fake-torch tests**. Local `generate()` on a 5090 has not been run. Flux still refuses
+  pose / identity / inpaint.
+- `pcraft recipe` emits the Cloud Kontext stitch + left crop + fist-only Fill graph. A live
+  Cloud submit (2026-08-18) produced a single-panel crop and kept the bracer.
+- Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. Offline GEPA compile
+  is a Python door against an external gate metric; no live 600B compile has been run.
+- The identity sub-gate is **not wired**. Its thresholds have no holdout.
 - Pre-1.0 deliberately, and a test enforces it. Promotion should follow evidence, not a version
   bump.
 

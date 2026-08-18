@@ -70,6 +70,13 @@ every entry below concerns the GPU-free core.
   The CLI does not generate pixels (`STATE_COMPILE_NEEDS_GATE`).
   Never on the per-asset hot path.
 
+### Changed
+
+- **Public surfaces match the measured tree.** README, handbook, landing,
+  PyPI README, and npm README no longer claim 205 tests or that
+  pose-lock is unimplemented. The Starlight title is `prompt-craft`,
+  not `my-package`. The landing badge is v0.2.1.
+
 ### Fixed
 
 - **A one-character typo emptied a contract.** `Contract` was the only model set to

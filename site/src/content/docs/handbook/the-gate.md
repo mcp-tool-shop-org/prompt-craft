@@ -20,6 +20,14 @@ about the ways that goes wrong.
 Escalation happens only when a cheap answer is unclear, so the expensive tier runs on the cases
 that need it rather than on everything.
 
+Tier-2 is a **Davidsonian Scene Graph** expansion (Cho et al. 2024): the failed atom becomes
+entity / attribute / relation yes-no probes. A missing entity skips dependents. The default QG
+is a GPU-free template; inject `qg=` to swap it. The answerer may still be Tier-1's VQAScore
+weights — that sharing is on `shares_model_with`, not hidden behind the `dsg-qg` family label.
+
+When the loop escalates to a human, the reason is a **contrastive checkpoint**: what you probably
+thought, and what the gate chose, per flagged atom. A bound run has none.
+
 **CLIPScore is not used as the gate metric.** It behaves as a bag of concepts — blind to which
 attribute belongs to which object, to counts, and to relations. Recent work confirms this is a
 property of the training data rather than something fixable by scaling or by adding hard
