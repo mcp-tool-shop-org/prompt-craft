@@ -54,6 +54,10 @@ _EXIT_BY_CODE: Final[dict[str, int]] = {
 DEFAULT_HINTS: Final[dict[str, str]] = {
     "DEP_IMAGE_MISSING": "Install the GPU extra: pip install -e '.[image]' (torch + diffusers).",
     "DEP_SYNTH_MISSING": "Install the synth extra: pip install -e '.[synth]' (DSPy + an LM backend).",
+    "STATE_COMPILE_NEEDS_GATE": "Call compile_synthesizer from Python with an EXTERNAL gate_metric. "
+    "The CLI does not generate pixels. --seed pins the scaffold artifact.",
+    "STATE_COMPILE_NOT_WIRED": "Use optimizer='gepa' or 'miprov2'. Unknown names refuse.",
+    "STATE_COMPILE_EMPTY": "The optimizer returned nothing to pin. Check the runner.",
     "GATE_SAME_FAMILY": "The generator and the gate verifier are the same model family. "
     "Use a different-family verifier — a model must never be its own gate.",
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",

@@ -63,6 +63,12 @@ every entry below concerns the GPU-free core.
   relation probes. A missing entity skips dependents. The QG slot is
   read (template by default). The answerer may still share Tier-1's
   VQAScore weights; that sharing stays on `shares_model_with`.
+- **Offline GEPA + `DSPySynthesizer`.** `compile_synthesizer` pins a
+  program against an EXTERNAL gate metric (`dspy.GEPA` by default;
+  inject a runner in tests). `DSPySynthesizer` runs the pinned
+  artifact and refuses to silently become `TemplateSynthesizer`.
+  The CLI does not generate pixels (`STATE_COMPILE_NEEDS_GATE`).
+  Never on the per-asset hot path.
 
 ### Fixed
 

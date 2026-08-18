@@ -591,11 +591,20 @@ def compile(  # noqa: A001 - the verb is the command name
                                        "Convert depictable atoms into one prompt; every token traces to an atom.")
             typer.echo(f"pinned seed artifact {prog.artifact_id} -> {COMPILED_ARTIFACT}")
             return
-        typer.echo(
-            "offline compile is GEPA over the EXTERNAL gate pass-rate (no self-verification), run with\n"
-            "the [synth] extra + watchdog up, gated by the Director. The 600B compiles; the cheap local\n"
-            "model runs the pinned artifact per asset. Wire dspy.GEPA in core/optimize/compile.py, then\n"
-            "pin via optimize.artifact.pin(). Use --seed to (re)write the scaffold seed."
+        # The compile API is wired. The CLI does not generate pixels, so it
+        # cannot build an EXTERNAL gate metric. Python callers pass gate_metric.
+        try:
+            import dspy  # noqa: F401
+        except Exception as err:
+            raise PromptCraftError(
+                "DEP_SYNTH_MISSING",
+                "offline compile needs DSPy + an LM backend",
+            ) from err
+        raise PromptCraftError(
+            "STATE_COMPILE_NEEDS_GATE",
+            "pcraft compile needs a Python gate_metric; the CLI does not generate pixels",
+            hint="Call compile_synthesizer(trainset, gate_metric, ...) from Python. "
+            "The metric is the EXTERNAL gate pass-rate. Use --seed to pin the scaffold artifact.",
         )
     except PromptCraftError as err:
         _emit(err, debug)

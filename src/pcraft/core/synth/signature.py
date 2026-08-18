@@ -11,10 +11,13 @@ the core test suite with no model at all."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from ...errors import PromptCraftError
 from ..contract.schema import ResolvedContract
 from ..optimize.artifact import CompiledProgram
 from .synthesizer_iface import SynthResult
-from .visual_inventory import RENDER_BOILERPLATE, build_inventory
+from .visual_inventory import RENDER_BOILERPLATE, build_inventory, assert_tokens_trace
 
 try:  # the real Signature is only defined when the [synth] extra is installed
     import dspy
@@ -66,5 +69,87 @@ class TemplateSynthesizer:
             atom_coverage=atom_coverage,
             visual_inventory=inventory,
             backend="template",
+            degraded=False,
+        )
+
+
+class DSPySynthesizer:
+    """Run a pinned GEPA artifact. The compile is offline; this is the cheap per-asset runner.
+
+    Needs the ``[synth]`` extra (or an injected ``predictor``). Missing DSPy is
+    ``DEP_SYNTH_MISSING``, never a silent TemplateSynthesizer fallback.
+    """
+
+    synthesizer_id = "dspy.v1"
+
+    def __init__(
+        self,
+        compiled: CompiledProgram,
+        *,
+        predictor: Callable[..., SynthResult] | None = None,
+    ) -> None:
+        if compiled is None:
+            raise PromptCraftError(
+                "STATE_COMPILE_EMPTY",
+                "DSPySynthesizer needs a pinned CompiledProgram",
+                hint="Run pcraft compile (offline GEPA) or pass --seed for the scaffold artifact.",
+            )
+        self.compiled = compiled
+        self._predictor = predictor
+        self.synthesizer_id = f"dspy.v1+{compiled.artifact_id}"
+
+    def synthesize(
+        self,
+        resolved: ResolvedContract,
+        encoder_rules: str,
+        *,
+        boost_ids: list[str] | None = None,
+    ) -> SynthResult:
+        rules = encoder_rules or self.compiled.instruction
+        if boost_ids:
+            rules = rules + "\nfront-load failed atoms: " + ", ".join(boost_ids)
+        if self._predictor is not None:
+            result = self._predictor(resolved, rules, self.compiled)
+            return result.model_copy(
+                update={"backend": f"dspy:{self.compiled.artifact_id}", "degraded": False}
+            )
+        if not _HAS_DSPY:
+            raise PromptCraftError(
+                "DEP_SYNTH_MISSING",
+                "DSPySynthesizer needs DSPy + an LM backend",
+                hint="Install the [synth] extra, or inject a predictor in tests. "
+                "Do not silently fall back to TemplateSynthesizer.",
+            )
+        return self._run_dspy(resolved, rules)
+
+    def _run_dspy(self, resolved: ResolvedContract, encoder_rules: str) -> SynthResult:
+        import json
+
+        predict = dspy.Predict(ContractToPrompt)
+        pred = predict(
+            resolved_contract=resolved.model_dump_json(),
+            encoder_rules=encoder_rules,
+        )
+        coverage_raw = getattr(pred, "atom_coverage", "") or "{}"
+        try:
+            coverage = json.loads(coverage_raw) if isinstance(coverage_raw, str) else dict(coverage_raw)
+        except (TypeError, ValueError):
+            coverage = {}
+        inventory = build_inventory(resolved)
+        prompt = str(getattr(pred, "prompt", "") or "")
+        negative = str(getattr(pred, "negative_prompt", "") or "")
+        if not prompt.strip():
+            raise PromptCraftError(
+                "SYNTH_COVERAGE_MISSING",
+                "DSPy returned an empty prompt",
+                hint="The pinned program produced no tokens. Re-run offline compile.",
+            )
+        assert_tokens_trace(prompt, inventory)
+        return SynthResult(
+            prompt=prompt,
+            negative_prompt=negative,
+            atom_coverage={str(k): str(v) for k, v in coverage.items()},
+            visual_inventory=inventory,
+            backend=f"dspy:{self.compiled.artifact_id}",
             degraded=False,
         )
