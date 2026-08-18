@@ -15,8 +15,12 @@ HEAD at handoff write: measure. Suite last counted **328**. Re-count.
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp=E:\AI\prompt-craft\.pytest-tmp -q
+.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
 ```
+
+Do not use a repo-local `.pytest-tmp`. That path 93-errored at setup
+for the Executor (Windows `*current` symlinks). `verify.py` is the
+blessed full gate.
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`
 

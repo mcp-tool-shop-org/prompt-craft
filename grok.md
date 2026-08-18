@@ -30,11 +30,19 @@ exists. That already happened once.
 
 ## How to run
 
+A repo-local `--basetemp` is a landmine on Windows: pytest writes
+`*current` directory symlinks, then `rmtree` of that tree fails and
+93 tests error at setup. `verify.py` already uses a fresh
+`tempfile.mkdtemp`. The quick count does the same thing under `%TEMP%`.
+
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp=E:\AI\prompt-craft\.pytest-tmp -q
+.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
 ```
+
+If that TEMP dir ever 93-errors, delete it and retry, or run
+`python verify.py` (new scratch every time).
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 `pip install -e ".[dev]"` also works (no PYTHONPATH).

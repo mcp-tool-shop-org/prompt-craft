@@ -73,8 +73,17 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp=E:\AI\prompt-craft\.pytest-tmp -q
+.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
 ```
+
+**Advisor miss, 2026-08-18.** The first dispatch prescribed
+`--basetemp=E:\AI\prompt-craft\.pytest-tmp`. That tree filled with
+pytest `*current` directory symlinks, became unlistable, and the
+Executor's verbatim run was `235 passed, 93 errors`. A fresh
+basetemp confirmed 328. The leftover repo dir has been removed.
+`.pytest-tmp/` is now gitignored. `verify.py` already did this
+right (fresh `mkdtemp`). Do not put `--basetemp` back inside the
+repo.
 
 `[image]` and `[synth]` are installed in this venv. The suite must
 stay GPU-free anyway. Tests that fall through to `_load` must stub

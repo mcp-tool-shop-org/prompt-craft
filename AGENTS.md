@@ -18,5 +18,8 @@ Load-bearing:
 ```
 cd E:\AI\prompt-craft
 $env:PYTHONPATH = "src"
-.\.venv\Scripts\python.exe -m pytest --basetemp=E:\AI\prompt-craft\.pytest-tmp -q
+.\.venv\Scripts\python.exe -m pytest --basetemp="$env:TEMP\pcraft-pytest" -q
 ```
+
+Do not use a repo-local `.pytest-tmp`. Windows pytest `*current`
+symlinks make that tree unlistable and 93 tests error at setup.
