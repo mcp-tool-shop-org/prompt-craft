@@ -145,7 +145,10 @@ def run(
     # --- GENERATE + VERIFY: bounded best-of-N, then the DAG-keyed repair ladder.
     try:
         chosen = _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget)
-        chosen = _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, conditioning, attempts, budget, chosen)
+        chosen = _repair_ladder(
+            resolved, synth, synthesizer, generator, verifiers, thresholds, dag,
+            conditioning, attempts, budget, chosen, config,
+        )
     except _GenerationBlocked as blocked:
         # F-83c3ad00: a SEMANTIC generate() failure -- human-gated, never an automatic re-roll.
         # Mirrors the prose-dump SEMANTIC synth defect above: no gen/transcript pair ever existed
@@ -196,6 +199,42 @@ def _synthesize_with_assert(resolved, synthesizer, config) -> SynthResult | None
             last = err  # backtrack: re-synthesize (a real LM gets the missing-atom list injected)
     del last
     return None
+
+
+def _resynth_reweight(
+    synthesizer, resolved, encoder_rules: str, failed_ids: list[str], previous: SynthResult
+) -> SynthResult:
+    """Re-synthesize with failed atoms front-loaded. A seed bump is not this.
+
+    TemplateSynthesizer accepts ``boost_ids``. A synthesizer that does not is
+    still called again; the prompt is then reordered so failed tokens lead.
+    A broken resynth keeps the previous prompt rather than crashing the loop.
+    """
+    try:
+        try:
+            result = synthesizer.synthesize(resolved, encoder_rules, boost_ids=failed_ids)
+        except TypeError:
+            result = synthesizer.synthesize(resolved, encoder_rules)
+            result = _front_load_failed(result, failed_ids)
+        assert_coverage(resolved, result.atom_coverage)
+        assert_tokens_trace(result.prompt, result.visual_inventory)
+        return result
+    except PromptCraftError:
+        return previous
+
+
+def _front_load_failed(synth: SynthResult, failed_ids: list[str]) -> SynthResult:
+    """Fallback when the synthesizer cannot accept boost_ids: reorder the prompt."""
+    boost = set(failed_ids)
+    rows = list(synth.visual_inventory)
+    for row in rows:
+        if row.atom_id in boost:
+            row.front_load_rank -= 1000
+    depictable = sorted((r for r in rows if r.depictable), key=lambda r: r.front_load_rank)
+    from ..synth.visual_inventory import RENDER_BOILERPLATE
+
+    prompt = ", ".join([r.token for r in depictable] + RENDER_BOILERPLATE)
+    return synth.model_copy(update={"prompt": prompt, "visual_inventory": rows})
 
 
 def _inpaint_region(dag, transcript) -> str:
@@ -295,11 +334,15 @@ def _select_best(candidates):
     return min(candidates, key=key)
 
 
-def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, conditioning, attempts, budget, chosen):
+def _repair_ladder(
+    resolved, synth, synthesizer, generator, verifiers, thresholds, dag,
+    conditioning, attempts, budget, chosen, config,
+):
     gen, transcript = chosen
     if is_unrepairable(transcript):
         return gen, transcript
     bump = 0.0
+    current_synth = synth
     # Hard cap guarantees termination even if one repair action keeps being chosen (e.g. an identity
     # atom that never recovers): cap = total remaining repair budget, then escalate to a human.
     repairs_left = budget.inpaints + budget.reprompts + budget.rerolls
@@ -317,6 +360,13 @@ def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, condi
             seed = gen.seed + 100
             budget.rerolls -= 1
         elif repair is RepairAction.RESYNTH_REWEIGHT:
+            failed_ids = [
+                v.atom_id
+                for v in (transcript.failed_required() or transcript.uncertain_required())
+            ]
+            current_synth = _resynth_reweight(
+                synthesizer, resolved, config.encoder_rules, failed_ids, current_synth
+            )
             seed = gen.seed + 1
             budget.reprompts -= 1
         elif repair is RepairAction.INPAINT_REGION:
@@ -329,7 +379,9 @@ def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, condi
             }
             budget.inpaints -= 1
 
-        new_gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, cond, seed)
+        new_gen = _safe_generate(
+            generator, current_synth.prompt, current_synth.negative_prompt, cond, seed
+        )
         if new_gen is None:
             continue  # TRANSIENT generate() failure on this repair attempt -- repairs_left and
                       # the action's own sub-budget above are already charged; try the next one

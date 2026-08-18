@@ -37,19 +37,29 @@ class InventoryRow(BaseModel):
     note: str = ""
 
 
-def build_inventory(resolved: ResolvedContract) -> list[InventoryRow]:
-    """One row per must_have atom. Front-load required + independent (presence) atoms first."""
+def build_inventory(
+    resolved: ResolvedContract, *, boost_ids: list[str] | None = None
+) -> list[InventoryRow]:
+    """One row per must_have atom. Front-load required + independent (presence) atoms first.
+
+    ``boost_ids`` is the RESYNTH lever: failed atoms drop 1000 ranks so they lead
+    the prompt. A seed bump without this is not a re-synthesize.
+    """
+    boost = set(boost_ids or [])
     rows: list[InventoryRow] = []
     for index, atom in enumerate(resolved.must_have):
         rank = (0 if atom.severity is Severity.required else 100)
         rank += (0 if atom.depends_on is None else 10)  # dependents after their parents
         rank += index
+        if atom.id in boost:
+            rank -= 1000
         rows.append(
             InventoryRow(
                 atom_id=atom.id,
                 depictable=True,  # every must_have atom is a visible claim by construction
                 front_load_rank=rank,
                 token=atom.claim,
+                note="resynth-boost" if atom.id in boost else "",
             )
         )
     return rows

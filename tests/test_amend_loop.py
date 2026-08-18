@@ -267,6 +267,42 @@ def test_incomplete_census_does_not_burn_the_repair_ladder(tmp_path):
     assert all(a.repair is None for a in result.attempts)
 
 
+# --------------------------------------------------------------------------- real RESYNTH (not a seed bump)
+
+
+class _PromptSpy:
+    def __init__(self, inner: StubGenerator):
+        self.inner = inner
+        self.prompts: list[str] = []
+        self.generator_id = inner.generator_id
+        self.family = inner.family
+
+    def generate(self, prompt, negative_prompt, conditioning, seed):
+        self.prompts.append(prompt)
+        return self.inner.generate(prompt, negative_prompt, conditioning, seed)
+
+
+def test_resynth_front_loads_failed_atoms_instead_of_only_bumping_the_seed(tmp_path):
+    """RESYNTH_REWEIGHT used to increment the seed and reuse the same prompt.
+
+    Two leaf fails (weapon + skin) pick RESYNTH. The next generate must lead
+    with those claims, not just a different seed.
+    """
+    from pcraft.core.loop.retry_policy import RepairAction
+
+    spy = _PromptSpy(StubGenerator(out_dir=tmp_path / "_stub_images"))
+    result = _run(tmp_path, verifier_scores={"weapon": 0.05, "skin": 0.05}, generator=spy)
+    resynths = [a for a in result.attempts if a.repair is RepairAction.RESYNTH_REWEIGHT]
+    assert resynths, f"expected a RESYNTH, got {[a.repair for a in result.attempts]}"
+    assert len(spy.prompts) >= 2
+    later = spy.prompts[-1]
+    weapon_at = later.lower().find("battle-axe")
+    skin_at = later.lower().find("grey-green")
+    tabard_at = later.lower().find("tabard")
+    assert weapon_at != -1 and skin_at != -1
+    assert min(weapon_at, skin_at) < tabard_at
+
+
 def test_a_scored_fail_with_a_complete_census_still_repairs(tmp_path):
     """The other half: a real FAIL on a fully-run gate still climbs the ladder."""
     result = _run(tmp_path, verifier_scores={"face": 0.05})

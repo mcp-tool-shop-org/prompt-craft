@@ -46,6 +46,8 @@ every entry below concerns the GPU-free core.
   (identity + OpenPose), in-graph left crop so the diptych never ships,
   then Flux Fill on a fist-only mask. Do not mask the bracer.
   `method=reference` is this path; SDXL refuses it. Does not submit.
+- **RESYNTH rewrites the prompt.** Failed atoms are front-loaded and the
+  synthesizer runs again. A seed bump alone is not a re-synthesize.
 
 ### Fixed
 

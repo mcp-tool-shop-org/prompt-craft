@@ -47,8 +47,14 @@ class TemplateSynthesizer:
         if compiled is not None:
             self.synthesizer_id = f"template.v1+{compiled.program_id}@{compiled.version}"
 
-    def synthesize(self, resolved: ResolvedContract, encoder_rules: str) -> SynthResult:
-        inventory = build_inventory(resolved)
+    def synthesize(
+        self,
+        resolved: ResolvedContract,
+        encoder_rules: str,
+        *,
+        boost_ids: list[str] | None = None,
+    ) -> SynthResult:
+        inventory = build_inventory(resolved, boost_ids=boost_ids)
         depictable = sorted((r for r in inventory if r.depictable), key=lambda r: r.front_load_rank)
         atom_coverage = {r.atom_id: r.token for r in depictable}
         prompt = ", ".join([r.token for r in depictable] + RENDER_BOILERPLATE)
