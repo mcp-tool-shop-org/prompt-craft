@@ -99,6 +99,14 @@ def test_bind_honours_the_contract_flag(tmp_path):
     assert "BOUND" not in text
 
 
+def test_demo_announces_that_scores_did_not_read_pixels():
+    """CLI-C-001: BOUND used to look like a real gate pass."""
+    result = runner.invoke(app, ["demo"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "mock:" in text
+    assert "pixels were not read" in text
+
+
 def test_synth_success_path_still_exits_0():
     result = runner.invoke(app, ["synth"])
     assert result.exit_code == 0

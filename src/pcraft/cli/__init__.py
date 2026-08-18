@@ -334,6 +334,9 @@ def _exit_from_result(result, debug: bool) -> None:
 
 
 def _print_result(result) -> None:
+    # CLI-C-001: demo/bind --mock used to print BOUND + a wall of [PASS] 0.950
+    # with no indication the scores never touched pixels.
+    typer.echo("mock: scores are scripted constants; the image pixels were not read.")
     typer.echo(f"decision: {result.decision.upper()}  ({result.reason})")
     typer.echo(f"attempts: {len(result.attempts)}")
     for a in result.attempts:

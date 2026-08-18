@@ -163,6 +163,8 @@ def test_sdxl_refuses_nonempty_identity_refs():
     with pytest.raises(PromptCraftError) as exc:
         gen.generate("p", "n", {"identity_refs": [{"plate": "ref.png"}]}, seed=1)
     assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "identity_ref" in (exc.value.hint or "")
+    assert "Drop pose_refs" not in (exc.value.hint or "")
 
 
 def test_sdxl_allows_empty_pose_and_identity_lists():

@@ -93,9 +93,10 @@ class SDXLGenerator:
                 f"{self.generator_id} cannot apply pose_refs/identity_refs conditioning: "
                 "ControlNet(openpose) pose-lock and IP-Adapter identity binding are not implemented "
                 "by this generator (plain StableDiffusionXLPipeline txt2img only)",
-                hint="Drop pose_refs/identity_refs from the contract for this generator, or use/build "
-                "a generator that actually assembles them (StableDiffusionXLControlNetPipeline / "
-                ".load_ip_adapter()) before relying on pose-lock or identity binding.",
+                hint="The loop assembled those keys from the contract's identity_ref plate "
+                "and any spatial.kind=pose atom. They are not contract JSON keys. For a "
+                "text-only run, omit identity_ref and pose spatials. Pose-lock and "
+                "identity-binding are unimplemented on this generator.",
             )
 
         pipe = self._load()

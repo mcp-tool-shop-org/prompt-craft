@@ -56,6 +56,10 @@ every entry below concerns the GPU-free core.
 - Device/dtype selection sits inside the classified generator-load try.
 - A `select_device` failure no longer becomes `UnboundLocalError` in the load
   handler (`device` is bound to `unset` before the try).
+- `pcraft demo` / `bind --mock` print that scores are scripted and pixels were
+  not read.
+- `GATE_CONDITIONING_UNSUPPORTED` names `identity_ref` / pose spatials, not a
+  contract key called `pose_refs`.
 
 ## [0.2.1] — 2026-08-18
 
