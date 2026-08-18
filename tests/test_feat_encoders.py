@@ -61,6 +61,9 @@ class _FakePipe:
         self.device = "cpu"
         self.ip_adapter = None
         self.ip_scale = None
+        self.loras: list = []
+        self.adapter_names = None
+        self.adapter_weights = None
         self.controlnet = kwargs.get("controlnet")
 
     def to(self, device):
@@ -73,6 +76,13 @@ class _FakePipe:
 
     def set_ip_adapter_scale(self, scale):
         self.ip_scale = scale
+
+    def load_lora_weights(self, path, adapter_name=None, **kwargs):
+        self.loras.append({"path": path, "adapter_name": adapter_name, "kwargs": kwargs})
+
+    def set_adapters(self, names, adapter_weights=None):
+        self.adapter_names = names
+        self.adapter_weights = adapter_weights
 
     def __call__(self, **kwargs):
         self.call_kwargs = kwargs
@@ -196,6 +206,7 @@ def test_pipeline_kind_composes():
         )
         == "inpaint_controlnet_ip"
     )
+    assert cond.pipeline_kind({"identity_refs": [{"plate": "a.safetensors", "method": "lora"}]}) == "lora"
 
 
 # --------------------------------------------------------------------------- refuse-closed (no fakes)
@@ -207,13 +218,61 @@ def test_sdxl_missing_pose_is_ref_missing_not_unsupported():
     assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
 
 
-def test_sdxl_lora_identity_is_still_unsupported(tmp_path):
-    plate = write_solid_png(tmp_path / "costume.png")
+def test_sdxl_lora_loads_weights_and_sets_scale(monkeypatch, tmp_path):
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    result = gen.generate(
+        "p",
+        "n",
+        {
+            "identity_refs": [{"plate": str(weights), "method": "lora", "weight": 0.8}],
+            "identity_weight_bump": 0.1,
+        },
+        seed=7,
+    )
+    pipe = captured["last"]
+    assert pipe.loras
+    assert pipe.loras[0]["path"] == str(weights)
+    assert pipe.adapter_weights == [pytest.approx(0.9)]
+    assert result.conditioning["applied"]["lora"][0]["scale"] == pytest.approx(0.9)
+    assert "lora" in result.conditioning["applied"]["kind"]
+
+
+def test_sdxl_missing_lora_file_is_ref_missing(tmp_path):
     with pytest.raises(PromptCraftError) as exc:
         SDXLGenerator().generate(
             "p",
             "n",
-            {"identity_refs": [{"plate": str(plate), "method": "lora", "weight": 0.8}]},
+            {"identity_refs": [{"plate": str(tmp_path / "gone.safetensors"), "method": "lora"}]},
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
+
+
+def test_sdxl_instantid_is_still_unsupported(tmp_path):
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        SDXLGenerator().generate(
+            "p",
+            "n",
+            {"identity_refs": [{"plate": str(plate), "method": "instantid", "weight": 0.8}]},
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "instantid" in exc.value.message
+
+
+def test_flux_still_refuses_lora(tmp_path):
+    weights = tmp_path / "style.safetensors"
+    weights.write_bytes(b"lora-stub")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator().generate(
+            "p",
+            "n",
+            {"identity_refs": [{"plate": str(weights), "method": "lora", "weight": 0.7}]},
             seed=1,
         )
     assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"

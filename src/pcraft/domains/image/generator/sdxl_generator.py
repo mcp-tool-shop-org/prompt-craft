@@ -4,13 +4,13 @@ The contract NAMES the conditioning; this generator ASSEMBLES it:
 
 - ``spatial.pose`` refs -> ControlNet OpenPose (``image=`` / ``control_image=``)
 - ``identity_ref`` with ``method=ip_adapter`` -> IP-Adapter on the plate
+- ``identity_ref`` with ``method=lora`` -> ``load_lora_weights`` on the file
 - ``inpaint_from`` + ``inpaint_region`` -> SDXL inpaint with a region mask
 
 ``family = "stable-diffusion"`` -- it must differ from every gate verifier family.
 
 A named ref that is not a readable file is refused BEFORE the pipeline loads
-(``GATE_CONDITIONING_REF_MISSING``). ``method=lora`` / ``instantid`` are still
-refused (unimplemented). Flux is a different file and stays refused until measured.
+(``GATE_CONDITIONING_REF_MISSING``). ``method=instantid`` still refuses.
 
 torch/diffusers/PIL are optional ``[image]`` deps, imported lazily so importing
 this module stays GPU-free. No generate() call here downloads or spends.
@@ -145,7 +145,7 @@ class SDXLGenerator:
                 "num_inference_steps": self.steps,
                 "generator": generator,
             }
-            applied: dict = {"kind": kind, "pose": [], "ip_adapter": [], "inpaint": None}
+            applied: dict = {"kind": kind, "pose": [], "ip_adapter": [], "lora": [], "inpaint": None}
 
             poses = [cond.open_image(p) for p in cond.pose_paths(conditioning)]
             if poses:
@@ -169,6 +169,22 @@ class SDXLGenerator:
                 pipe.set_ip_adapter_scale(scales[0] if len(scales) == 1 else scales)
                 applied["ip_adapter"] = [
                     {"plate": p["plate"], "scale": s} for p, s in zip(plates, scales, strict=True)
+                ]
+
+            loras = cond.lora_refs(conditioning)
+            if loras:
+                names: list[str] = []
+                weights: list[float] = []
+                bump = float(conditioning.get("identity_weight_bump") or 0.0)
+                for i, ref in enumerate(loras):
+                    name = f"lora_{i}"
+                    weight = min(1.0, max(0.0, float(ref.get("weight") or 0.6) + bump))
+                    pipe.load_lora_weights(ref["plate"], adapter_name=name)
+                    names.append(name)
+                    weights.append(weight)
+                pipe.set_adapters(names, adapter_weights=weights)
+                applied["lora"] = [
+                    {"plate": r["plate"], "scale": w} for r, w in zip(loras, weights, strict=True)
                 ]
 
             src = cond.inpaint_from(conditioning)

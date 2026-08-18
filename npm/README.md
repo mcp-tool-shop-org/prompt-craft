@@ -53,8 +53,8 @@ around this tool, branch on `4` separately.
 ## Honest limits
 
 The Python toolkit's **local** GPU generate path has not been run on the machine this was
-developed on. The core is GPU-free, deterministic, and covered by **319 passing tests**
-(counted 2026-08-18). SDXL pose-lock, IP-Adapter, and regional inpaint are wired in code and
+developed on. The core is GPU-free, deterministic, and covered by **322 passing tests**
+(counted 2026-08-18). SDXL pose-lock, IP-Adapter, LoRA, and regional inpaint are wired in code and
 tested with fakes; Flux still refuses those refs. A Cloud recipe (`pcraft recipe`) has been
 submitted live. The identity sub-gate is not wired. The project's own front door says so.
 

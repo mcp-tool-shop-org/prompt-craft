@@ -47,9 +47,10 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **319**. Re-count before quoting.
-- SDXL: ControlNet OpenPose, IP-Adapter, regional inpaint — wired,
-  fake-torch tested. Local `generate()` on the 5090 has not been run.
+- Suite last counted **322**. Re-count before quoting.
+- SDXL: ControlNet OpenPose, IP-Adapter, LoRA, regional inpaint —
+  wired, fake-torch tested. Local `generate()` on the 5090 has not
+  been run. InstantID still refuses.
 - Flux: text-only and Fill inpaint are wired. Pose / IP-Adapter stay
   refused. `method=reference` writes the Cloud recipe and raises
   `GATE_CLOUD_SUBMIT`.
@@ -63,7 +64,7 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 
 - Wired + fake-tested ≠ live GPU generate.
 - A Cloud submit is not a local 5090 run.
-- `method=lora` / `instantid` still refuse.
+- `method=instantid` still refuses. `method=lora` is wired on SDXL.
 - The shipped contract is a generic invention, not real canon.
 
 ## Memory

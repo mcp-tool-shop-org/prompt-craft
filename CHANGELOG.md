@@ -81,6 +81,9 @@ every entry below concerns the GPU-free core.
 - **Flux Fill inpaint** is wired (fake-torch). `method=reference` writes
   the Cloud recipe and raises `GATE_CLOUD_SUBMIT` instead of pretending
   Kontext ran locally. Pose / IP-Adapter stay refused on Flux.
+- **`method=lora` on SDXL.** `load_lora_weights` + adapter scale. The
+  plate is a weights file, not an image. Missing file is
+  `GATE_CONDITIONING_REF_MISSING`. Flux and InstantID still refuse.
 
 ### Fixed
 

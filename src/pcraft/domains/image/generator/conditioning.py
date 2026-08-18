@@ -23,7 +23,7 @@ _SPRITE_ROOT = Path(__file__).resolve().parents[1] / "subdomains" / "sprite"
 _IP_ADAPTER = "ip_adapter"
 _REFERENCE = "reference"
 _SKIP_METHODS = frozenset({"none"})
-_UNIMPLEMENTED_METHODS = frozenset({"lora", "instantid"})
+_UNIMPLEMENTED_METHODS = frozenset({"instantid"})
 # hands/weapon ate the bone-spike bracer on the keeper Fill. fist is the measured box.
 _FIST = (0.62, 0.48, 0.88, 0.65)
 
@@ -55,6 +55,10 @@ def reference_refs(conditioning: dict) -> list[dict[str, Any]]:
     return [r for r in identity_refs(conditioning) if r["method"] == _REFERENCE]
 
 
+def lora_refs(conditioning: dict) -> list[dict[str, Any]]:
+    return [r for r in identity_refs(conditioning) if r["method"] == "lora"]
+
+
 def unimplemented_identity_methods(conditioning: dict) -> list[str]:
     return sorted({r["method"] for r in identity_refs(conditioning) if r["method"] in _UNIMPLEMENTED_METHODS})
 
@@ -78,6 +82,8 @@ def pipeline_kind(conditioning: dict) -> str:
         parts.append("ip")
     if reference_refs(conditioning):
         parts.append("reference")
+    if lora_refs(conditioning):
+        parts.append("lora")
     return "_".join(parts) or "base"
 
 
@@ -158,10 +164,9 @@ def refuse_unimplemented_identity(generator_id: str, conditioning: dict) -> None
     raise PromptCraftError(
         "GATE_CONDITIONING_UNSUPPORTED",
         f"{generator_id} cannot apply identity method(s) {methods}: "
-        "only ip_adapter is implemented (lora / instantid are not)",
-        hint="Set identity_ref.method to ip_adapter, or omit the plate. "
-        "method=none skips a plate. method=reference is `pcraft recipe`. "
-        "LoRA and InstantID are not wired.",
+        "instantid is not wired",
+        hint="Set identity_ref.method to ip_adapter or lora. method=none skips. "
+        "method=reference is `pcraft recipe`. InstantID is not wired.",
     )
 
 
@@ -193,6 +198,13 @@ def refuse_unmeasured_family(generator_id: str, family: str, conditioning: dict)
             f"{generator_id} (family={family}) cannot apply method=ip_adapter. "
             "That is the SDXL encoder.",
             hint="Flux identity is method=reference (Cloud Kontext stitch + Fill).",
+        )
+    if lora_refs(conditioning):
+        raise PromptCraftError(
+            "GATE_CONDITIONING_UNSUPPORTED",
+            f"{generator_id} (family={family}) cannot apply method=lora. "
+            "That is the SDXL encoder.",
+            hint="Load a LoRA on SDXL, or use method=reference on Flux.",
         )
 
 

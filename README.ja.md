@@ -106,7 +106,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 |---|---|
 | コア | **319件のテストに合格**（2026年8月18日にカウント）、GPU不要、決定論的。`verify`がテストスイートを実行し、次に`-O`の下でスイートを再度実行し、パッケージをビルドします。 |
 | 述語 | `core/`内の11個の複合的な決定ポイントは**ミューテーションテストされています。** 21個のうち20個のミュータントが排除され、[残りの1つは](scripts/mutate_predicates.py)という名前で、隠されていません。 |
-| SDXLの条件設定 | ControlNet OpenPose、IP-Adapter（`method=ip_adapter`）、およびリージョナルインペイントは、**接続され、「fake-torch」テストでカバーされています**。ローカル環境の5090での`generate()`の実行はまだ行われていません。 |
+| SDXLの条件設定 | ControlNet OpenPose、IP-Adapter（`method=ip_adapter`）、**LoRA（`method=lora`）**、および領域ごとのインペイントは、**フェイク・トーチによるテストで検証され、その結果が確認されています**。5090上でローカルの`generate()`を実行していません。InstantIDはいまだに正常に動作しません。 |
 | Fluxエンコーダー | テキストのみと**塗りつぶしインペイント**が接続されました（fake-torch）。ControlNetポーズとIP-Adapterは拒否されたままです（異なるファミリー）。`method=reference`がクラウドレシピグラフを記述し、Kontextがローカルで実行されているかのように装うことを拒否します（`GATE_CLOUD_SUBMIT`）。 |
 | クラウドレシピ | `pcraft recipe`は、Kontextのステッチ + グラフ内の左側のクロップ + 一部のFlux塗りつぶしを生成します。`method=reference`はそのパスです。実際のクラウドへの送信（ジョブ`06668d4c`、2026年8月18日）により、単一パネルのクロップが生成され、ブレースが保持されました。 |
 | ゲート | Tier-2は、実在するDSG拡張（エンティティ/属性/関係）です。エスカレーションはコントラストチェックポイントです。レシートには、再試行回数だけでなく、試行の履歴が保存されます。 |
