@@ -15,6 +15,19 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Fixed
 
+- **CI `verify (3.11)` was red at `dependency audit`, and had simply never been fixed.** The
+  3.11 leg gets a bundled setuptools from `ensurepip` (79.0.1, carrying PYSEC-2026-3447);
+  3.12+ stopped bundling it, which is the whole reason 3.13 audited clean and 3.11 did not.
+  setuptools is **not a declared dependency of this package** — pip-audit audits the
+  environment, not the dependency set, so the leg failed on something `pyproject.toml` never
+  asked for. The audit step now installs `setuptools>=83` alongside pip-audit.
+  `--ignore-vuln PYSEC-2026-3447` was available and was refused: it makes the step green by
+  lowering the gate. The cost is symmetric and is named in the workflow rather than left to be
+  noticed — on 3.13 this *installs* a setuptools that was not there before, which is harmless
+  and keeps the two legs identical instead of conditionally different. Not a regression from
+  the lint widening; the identical failure is present on run `32194862049`. Reproduced and
+  fixed in a CI-equivalent 3.11.15 venv (79.0.1 ambient, matching the runner) before landing.
+
 - **A `# type: ignore` that had silently stopped applying.** Adopting isort wrapped the
   `click.exceptions` fallback import in parentheses and left its
   `# type: ignore[assignment,no-redef]` on the inner line, where mypy does not apply it. The

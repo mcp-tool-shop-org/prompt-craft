@@ -54,8 +54,21 @@ jobs:
       # Python Packaging Advisory Database. It runs AFTER verify deliberately: a
       # red audit on a tree whose suite is already broken tells you nothing about
       # the dependency.
+      #
+      # `setuptools>=83` is here because the 3.11 leg still gets a bundled
+      # setuptools from `ensurepip` (79.0.1, carrying PYSEC-2026-3447) while 3.12+
+      # stopped bundling it. That setuptools is ambient environment, not a declared
+      # dependency of this package — but pip-audit audits the environment, not the
+      # dependency set, so it reds the leg regardless of what pyproject asks for.
+      #
+      # Upgrading is the honest fix. `--ignore-vuln PYSEC-2026-3447` would make the
+      # step green by lowering the gate, which is the one move this repo does not
+      # make. The cost is symmetric and worth saying out loud rather than leaving to
+      # be noticed: on 3.13 this *installs* a setuptools that was not there before.
+      # That is harmless, and it keeps the two legs identical instead of
+      # conditionally different.
       - name: install pip-audit
-        run: python -m pip install pip-audit
+        run: python -m pip install pip-audit "setuptools>=83"
 
       # `--skip-editable` and NOT `--strict`, and the reason is the package itself.
       # CI installs this project with `-e`, so the environment contains an editable
