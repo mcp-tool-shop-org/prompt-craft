@@ -83,7 +83,9 @@ every entry below concerns the GPU-free core.
   Kontext ran locally. Pose / IP-Adapter stay refused on Flux.
 - **`method=lora` on SDXL.** `load_lora_weights` + adapter scale. The
   plate is a weights file, not an image. Missing file is
-  `GATE_CONDITIONING_REF_MISSING`. Flux and InstantID still refuse.
+  `GATE_CONDITIONING_REF_MISSING`. Flux still refuses LoRA.
+- **`method=instantid` on SDXL.** InstantX ControlNet + face plate.
+  InstantID and IP-Adapter cannot share one generate. Flux refuses.
 
 ### Fixed
 

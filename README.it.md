@@ -104,9 +104,9 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 | | |
 |---|---|
-| Nucleo | **322 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Nucleo | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
-| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), **LoRA (`method=lora`)** e l’inpaint regionale sono stati integrati e testati con dei finti test di fake-torch. Non è stato eseguito il test locale `generate()` su una scheda 5090. InstantID continua a rifiutare. |
+| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l’inpaint regionale sono stati **integrati e testati con script di verifica**. InstantID e IP-Adapter non possono essere utilizzati contemporaneamente per generare un’immagine. Non è stato eseguito il test locale `generate()` su una scheda grafica 5090. |
 | Encoder Flux | Le funzioni “solo testo” e “riempimento inpaint” sono state integrate (fake-torch). ControlNet pose, IP-Adapter e LoRA continuano a essere rifiutate (famiglia errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
 | Ricetta Cloud | `pcraft recipe` emette un'immagine cucita con Kontext, un ritaglio sinistro nel grafico e un riempimento Flux che mostra solo il pugno. `method=reference` è quel percorso. Un invio Cloud in diretta (lavoro `06668d4c`, 2026-08-18) ha prodotto un singolo pannello ritagliato e ha mantenuto il bracciale. |
 | Gate | Il livello 2 è una vera espansione DSG (entità / attributo / relazione). L'escalation è un checkpoint contrastivo. Le ricevute memorizzano la storia del tentativo, non solo il numero di tentativi. |

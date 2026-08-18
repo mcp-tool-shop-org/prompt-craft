@@ -104,9 +104,9 @@ Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et 
 
 | | |
 |---|---|
-| Cœur du système | **322 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Cœur du système | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que caché. |
-| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), **LoRA (`method=lora`)** et le remplissage régional sont **intégrés et testés avec des tests « fake-torch »**. Le test local `generate()` sur une carte 5090 n’a pas été exécuté. InstantID continue de refuser. |
+| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** et le remplissage régional sont **intégrés et couverts par des tests « fake-torch »**. InstantID et IP-Adapter ne peuvent pas être utilisés simultanément pour une même génération. Le test local `generate()` sur une carte 5090 n’a pas été effectué. |
 | Encodeur Flux | Les options texte seul et **remplissage** sont intégrées (tests « fake-torch »). ControlNet pose, IP-Adapter et LoRA continuent d’être refusés (famille incorrecte). `method=reference` écrit le graphe de la recette Cloud et refuse de prétendre que Kontext a été exécuté localement (`GATE_CLOUD_SUBMIT`). |
 | Recette Cloud | `pcraft recipe` émet un assemblage Kontext, une découpe à gauche dans le graphique et un remplissage Flux avec uniquement le poing. `method=reference` est ce chemin. Une soumission Cloud en direct (tâche `06668d4c`, 2026-08-18) a produit une seule image découpée et a conservé le bracelet. |
 | Porte d’entrée | Le niveau 2 est une expansion DSG réelle (entité / attribut / relation). L’escalade est un point de contrôle contrastif. Les reçus stockent l’historique des tentatives, et pas seulement le nombre de nouvelles tentatives. |

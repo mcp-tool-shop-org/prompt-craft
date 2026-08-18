@@ -5,12 +5,13 @@ The contract NAMES the conditioning; this generator ASSEMBLES it:
 - ``spatial.pose`` refs -> ControlNet OpenPose (``image=`` / ``control_image=``)
 - ``identity_ref`` with ``method=ip_adapter`` -> IP-Adapter on the plate
 - ``identity_ref`` with ``method=lora`` -> ``load_lora_weights`` on the file
+- ``identity_ref`` with ``method=instantid`` -> InstantX ControlNet + face plate
 - ``inpaint_from`` + ``inpaint_region`` -> SDXL inpaint with a region mask
 
 ``family = "stable-diffusion"`` -- it must differ from every gate verifier family.
 
 A named ref that is not a readable file is refused BEFORE the pipeline loads
-(``GATE_CONDITIONING_REF_MISSING``). ``method=instantid`` still refuses.
+(``GATE_CONDITIONING_REF_MISSING``). InstantID and IP-Adapter cannot share one generate.
 
 torch/diffusers/PIL are optional ``[image]`` deps, imported lazily so importing
 this module stays GPU-free. No generate() call here downloads or spends.
@@ -39,6 +40,9 @@ _DEFAULT_CONTROLNET = "xinsir/controlnet-openpose-sdxl-1.0"
 _DEFAULT_IP_ADAPTER_REPO = "h94/IP-Adapter"
 _DEFAULT_IP_ADAPTER_SUBFOLDER = "sdxl_models"
 _DEFAULT_IP_ADAPTER_WEIGHT = "ip-adapter_sdxl.bin"
+_DEFAULT_INSTANTID_REPO = "InstantX/InstantID"
+_DEFAULT_INSTANTID_CN_SUBFOLDER = "ControlNetModel"
+_DEFAULT_INSTANTID_IP_WEIGHT = "ip-adapter.bin"
 
 
 class SDXLGenerator:
@@ -55,6 +59,8 @@ class SDXLGenerator:
         ip_adapter_repo: str = _DEFAULT_IP_ADAPTER_REPO,
         ip_adapter_subfolder: str = _DEFAULT_IP_ADAPTER_SUBFOLDER,
         ip_adapter_weight: str = _DEFAULT_IP_ADAPTER_WEIGHT,
+        instantid_repo: str = _DEFAULT_INSTANTID_REPO,
+        face_analyzer=None,
     ):
         self.model_id = model_id
         self.out_dir = Path(out_dir)
@@ -64,6 +70,8 @@ class SDXLGenerator:
         self.ip_adapter_repo = ip_adapter_repo
         self.ip_adapter_subfolder = ip_adapter_subfolder
         self.ip_adapter_weight = ip_adapter_weight
+        self.instantid_repo = instantid_repo
+        self._face_analyzer = face_analyzer
         self._pipe = None
         self._pipe_kind: str | None = None
 
@@ -85,7 +93,14 @@ class SDXLGenerator:
             device = select_device(torch)
             dtype = select_dtype(torch, device)
             pipe = self._build_pipe(kind, dtype)
-            if "ip" in kind.split("_"):
+            parts = kind.split("_")
+            if "instantid" in parts:
+                pipe.load_ip_adapter(
+                    self.instantid_repo,
+                    subfolder=None,
+                    weight_name=_DEFAULT_INSTANTID_IP_WEIGHT,
+                )
+            elif "ip" in parts:
                 pipe.load_ip_adapter(
                     self.ip_adapter_repo,
                     subfolder=self.ip_adapter_subfolder,
@@ -104,22 +119,40 @@ class SDXLGenerator:
             ) from err
         return self._pipe
 
+    def _controlnets(self, kind: str, dtype):
+        from diffusers import ControlNetModel  # type: ignore
+
+        parts = kind.split("_")
+        nets = []
+        if "controlnet" in parts:
+            nets.append(ControlNetModel.from_pretrained(self.controlnet_id, torch_dtype=dtype))
+        if "instantid" in parts:
+            nets.append(
+                ControlNetModel.from_pretrained(
+                    self.instantid_repo,
+                    subfolder=_DEFAULT_INSTANTID_CN_SUBFOLDER,
+                    torch_dtype=dtype,
+                )
+            )
+        if not nets:
+            return None
+        return nets[0] if len(nets) == 1 else nets
+
     def _build_pipe(self, kind: str, dtype):
-        wants_cn = "controlnet" in kind
+        parts = kind.split("_")
+        wants_cn = "controlnet" in parts or "instantid" in parts
         wants_inpaint = kind.startswith("inpaint")
         if wants_cn and wants_inpaint:
-            from diffusers import ControlNetModel, StableDiffusionXLControlNetInpaintPipeline  # type: ignore
+            from diffusers import StableDiffusionXLControlNetInpaintPipeline  # type: ignore
 
-            controlnet = ControlNetModel.from_pretrained(self.controlnet_id, torch_dtype=dtype)
             return StableDiffusionXLControlNetInpaintPipeline.from_pretrained(
-                self.model_id, controlnet=controlnet, torch_dtype=dtype
+                self.model_id, controlnet=self._controlnets(kind, dtype), torch_dtype=dtype
             )
         if wants_cn:
-            from diffusers import ControlNetModel, StableDiffusionXLControlNetPipeline  # type: ignore
+            from diffusers import StableDiffusionXLControlNetPipeline  # type: ignore
 
-            controlnet = ControlNetModel.from_pretrained(self.controlnet_id, torch_dtype=dtype)
             return StableDiffusionXLControlNetPipeline.from_pretrained(
-                self.model_id, controlnet=controlnet, torch_dtype=dtype
+                self.model_id, controlnet=self._controlnets(kind, dtype), torch_dtype=dtype
             )
         if wants_inpaint:
             from diffusers import StableDiffusionXLInpaintPipeline  # type: ignore
@@ -133,6 +166,12 @@ class SDXLGenerator:
         conditioning = cond.assert_refs_readable(conditioning, generator_id=self.generator_id)
         cond.refuse_reference_identity(self.generator_id, conditioning)
         cond.refuse_unimplemented_identity(self.generator_id, conditioning)
+        if cond.instantid_refs(conditioning) and cond.ip_adapter_refs(conditioning):
+            raise PromptCraftError(
+                "GATE_CONDITIONING_UNSUPPORTED",
+                f"{self.generator_id} cannot apply method=instantid and method=ip_adapter together",
+                hint="One face lock per generate. InstantID and IP-Adapter both bind the face.",
+            )
         kind = cond.pipeline_kind(conditioning)
         pipe = self._load(kind)
         try:
@@ -145,17 +184,34 @@ class SDXLGenerator:
                 "num_inference_steps": self.steps,
                 "generator": generator,
             }
-            applied: dict = {"kind": kind, "pose": [], "ip_adapter": [], "lora": [], "inpaint": None}
+            applied: dict = {
+                "kind": kind, "pose": [], "ip_adapter": [], "lora": [], "instantid": [], "inpaint": None,
+            }
 
+            control_images = []
             poses = [cond.open_image(p) for p in cond.pose_paths(conditioning)]
             if poses:
-                pose_arg = poses[0] if len(poses) == 1 else poses
-                if kind.startswith("inpaint"):
-                    call["control_image"] = pose_arg
-                else:
-                    call["image"] = pose_arg
-                call["controlnet_conditioning_scale"] = 0.8
+                control_images.append(poses[0] if len(poses) == 1 else poses)
                 applied["pose"] = cond.pose_paths(conditioning)
+
+            instantids = cond.instantid_refs(conditioning)
+            if instantids:
+                plate = instantids[0]["plate"]
+                kps = self._instantid_kps(plate)
+                control_images.append(kps)
+                bump = float(conditioning.get("identity_weight_bump") or 0.0)
+                scale = min(1.0, max(0.0, float(instantids[0].get("weight") or 0.8) + bump))
+                call["ip_adapter_image"] = cond.open_image(plate)
+                pipe.set_ip_adapter_scale(scale)
+                applied["instantid"] = [{"plate": plate, "scale": scale}]
+
+            if control_images:
+                control_arg = control_images[0] if len(control_images) == 1 else control_images
+                if kind.startswith("inpaint"):
+                    call["control_image"] = control_arg
+                else:
+                    call["image"] = control_arg
+                call["controlnet_conditioning_scale"] = 0.8
 
             plates = cond.ip_adapter_refs(conditioning)
             if plates:
@@ -223,3 +279,9 @@ class SDXLGenerator:
             generator_family=self.family,
             conditioning=receipt_cond,
         )
+
+    def _instantid_kps(self, plate: str):
+        """ControlNet image for InstantID. Injected analyzer wins; else the plate itself."""
+        if self._face_analyzer is not None:
+            return self._face_analyzer(plate)
+        return cond.open_image(plate)

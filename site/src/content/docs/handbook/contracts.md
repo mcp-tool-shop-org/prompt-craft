@@ -50,7 +50,7 @@ an adapter can. The text describes what is nameable; the plate carries what is n
 - `ip_adapter` — SDXL IP-Adapter (wired; local generate unexercised)
 - `reference` — the Cloud Kontext stitch + left crop + fist-only Fill recipe (`pcraft recipe`). On the Flux generator this writes the graph and raises `GATE_CLOUD_SUBMIT` rather than pretending Kontext ran locally.
 - `lora` — SDXL `load_lora_weights` on the file (the plate is weights, not an image). Flux refuses.
-- `instantid` — still refuse
+- `instantid` — SDXL InstantX ControlNet + face plate. Cannot share a generate with `ip_adapter`. Flux refuses.
 - `none` — skip the plate
 
 A `MustNot` may carry `spatial` the same way a `must_have` can. Inherited spatial is frozen.

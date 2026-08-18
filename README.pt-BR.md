@@ -104,9 +104,9 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 | | |
 |---|---|
-| Núcleo | **322 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Núcleo | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
-| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), **LoRA (`method=lora`)** e o preenchimento regional são **testados com o framework fake-torch**. O teste local `generate()` numa placa de vídeo 5090 ainda não foi executado. O InstantID continua a apresentar problemas. |
+| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e o recurso de retoque regional estão **integrados e cobertos por testes do fake-torch**. InstantID e IP-Adapter não podem ser usados em conjunto para gerar uma imagem. O teste local `generate()` numa placa 5090 ainda não foi executado. |
 | Codificador Flux | O modo apenas texto e o preenchimento (Fill Inpaint) estão conectados (fake-torch). O ControlNet pose e o IP-Adapter continuam a ser rejeitados (família incorreta). `method=reference` escreve o gráfico da receita do Cloud e recusa-se a simular que o Kontext foi executado localmente (`GATE_CLOUD_SUBMIT`). |
 | Receita para a nuvem | `pcraft recipe` gera o "Kontext stitch" + recorte à esquerda no gráfico + preenchimento do Flux apenas na mão. `method=reference` é esse caminho. Um envio ao vivo para a nuvem (tarefa `06668d4c`, 2026-08-18) produziu um recorte de painel único e manteve o suporte. |
 | Portão | O nível 2 é uma expansão DSG real (entidade/atributo/relação). A escalada é um ponto de verificação contrastivo. Os registros armazenam a história da tentativa, não apenas a contagem de tentativas. |

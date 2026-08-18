@@ -207,6 +207,7 @@ def test_pipeline_kind_composes():
         == "inpaint_controlnet_ip"
     )
     assert cond.pipeline_kind({"identity_refs": [{"plate": "a.safetensors", "method": "lora"}]}) == "lora"
+    assert cond.pipeline_kind({"identity_refs": [{"plate": "f.png", "method": "instantid"}]}) == "instantid"
 
 
 # --------------------------------------------------------------------------- refuse-closed (no fakes)
@@ -252,13 +253,73 @@ def test_sdxl_missing_lora_file_is_ref_missing(tmp_path):
     assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
 
 
-def test_sdxl_instantid_is_still_unsupported(tmp_path):
+def test_sdxl_instantid_loads_instantx_and_the_face_plate(monkeypatch, tmp_path):
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    _install_fake_pil(monkeypatch)
     plate = write_solid_png(tmp_path / "face.png")
+    seen = {"plates": []}
+
+    def analyzer(path):
+        seen["plates"].append(path)
+        return "kps-image"
+
+    gen = SDXLGenerator(out_dir=tmp_path / "out", face_analyzer=analyzer)
+    result = gen.generate(
+        "p",
+        "n",
+        {"identity_refs": [{"plate": str(plate), "method": "instantid", "weight": 0.7}]},
+        seed=8,
+    )
+    assert "InstantX/InstantID" in captured["controlnets"]
+    pipe = captured["last"]
+    assert pipe.ip_adapter is not None
+    assert pipe.ip_scale == pytest.approx(0.7)
+    assert pipe.call_kwargs["image"] == "kps-image"
+    assert "ip_adapter_image" in pipe.call_kwargs
+    assert seen["plates"] == [str(plate)]
+    assert result.conditioning["applied"]["instantid"][0]["scale"] == pytest.approx(0.7)
+    assert "instantid" in result.conditioning["applied"]["kind"]
+
+
+def test_sdxl_instantid_plus_ip_adapter_refuses(tmp_path):
+    face = write_solid_png(tmp_path / "face.png")
+    costume = write_solid_png(tmp_path / "costume.png")
     with pytest.raises(PromptCraftError) as exc:
         SDXLGenerator().generate(
             "p",
             "n",
-            {"identity_refs": [{"plate": str(plate), "method": "instantid", "weight": 0.8}]},
+            {
+                "identity_refs": [
+                    {"plate": str(face), "method": "instantid"},
+                    {"plate": str(costume), "method": "ip_adapter"},
+                ]
+            },
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "instantid" in exc.value.message
+    assert "ip_adapter" in exc.value.message
+
+
+def test_sdxl_missing_instantid_plate_is_ref_missing(tmp_path):
+    with pytest.raises(PromptCraftError) as exc:
+        SDXLGenerator().generate(
+            "p",
+            "n",
+            {"identity_refs": [{"plate": str(tmp_path / "gone.png"), "method": "instantid"}]},
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
+
+
+def test_flux_still_refuses_instantid(tmp_path):
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator().generate(
+            "p",
+            "n",
+            {"identity_refs": [{"plate": str(plate), "method": "instantid"}]},
             seed=1,
         )
     assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
