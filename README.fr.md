@@ -16,11 +16,7 @@
 
 **Indiquez ce que l’image doit contenir. Vérifiez qu’elle le fait. Refusez si ce n’est pas le cas.**
 
-Un pipeline de génération d’images vous fournira volontiers un personnage avec le mauvais visage, la mauvaise palette
-et aucun des éléments distinctifs de la faction — et indiquera que l’opération a réussi, car rien ne semblait incorrect. prompt-craft
-remplace les instructions textuelles opaques par un **contrat typé contenant des revendications vérifiables**, utilise cette même
-liste deux fois : une fois pour rédiger l’instruction, une fois pour vérifier les pixels — et **bloque l’élément lorsque
-une revendication requise est absente**.
+Un pipeline de génération d’images vous fournira volontiers un personnage avec le mauvais visage, la mauvaise palette de couleurs et aucun des éléments distinctifs de la faction — et indiquera que l’opération a réussi, car rien ne semblait incorrect. Le processus d’optimisation des invites remplace l’invite textuelle opaque par un **contrat typé contenant des affirmations vérifiables**, utilise cette même liste deux fois : une fois pour rédiger l’invite, une fois pour vérifier les pixels, et **bloque l’élément lorsque l’affirmation requise est absente**.
 
 ```
    CONTRACT  ──atoms──▶  SYNTHESIZE  ──prompt──▶  GENERATE
@@ -40,9 +36,7 @@ une revendication requise est absente**.
                    actually passed)
 ```
 
-**L’idée maîtresse :** la liste des éléments du contrat est *la même liste utilisée deux fois*. La rédaction de l’instruction et
-la vérification du résultat obtenu à partir d’une source unique garantissent que ce que vous avez demandé est bien ce qui est
-vérifié. C’est ce qui boucle le processus qu’une instruction opaque laisse ouverte.
+**L’idée maîtresse :** la liste des éléments du contrat est *la même liste utilisée deux fois*. La rédaction de l’invite et la vérification du résultat obtenu à partir d’une source unique garantissent que ce que vous avez demandé est bien ce qui est vérifié. C’est ce qui boucle le processus, contrairement à une invite opaque qui laisse des portes ouvertes.
 
 ## Installation
 
@@ -55,9 +49,7 @@ pcraft --help
 npm install -g @mcptoolshop/prompt-crafter   # the same command, as a launcher
 ```
 
-La distribution est **`prompt-crafter`** car `pcraft` et `prompt-craft` sont tous deux disponibles sur
-PyPI ; le paquet d’importation et la commande restent `pcraft`. Le paquet npm est un **lanceur, pas un
-port** — réimplémenter un seuil dans un deuxième langage est la façon dont un seuil dérive, il transmet donc les informations au Python qui détient la vérité et hérite de son code de sortie.
+La distribution est **`prompt-crafter`** car `pcraft` et `prompt-craft` sont tous deux disponibles sur PyPI ; le paquet d’importation et la commande restent `pcraft`. Le paquet npm est un **lanceur, pas un port** — réimplémenter un seuil dans un deuxième langage est la façon dont un seuil dérive, il transmet donc les informations à Python, qui détient la vérité et hérite de son code de sortie.
 
 Pour le développement :
 
@@ -65,7 +57,7 @@ Pour le développement :
 pip install -e ".[dev]"
 ```
 
-Le noyau est **sans GPU et fonctionne partout** — l’ensemble complet des tests s’exécute sur un générateur et un vérificateur simulés, ce qui prouve que la limite du module fonctionne réellement. Les éléments supplémentaires `[image]` (torch/diffusers) et `[synth]` (DSPy + un modèle de langage hébergé) connectent le générateur, les vérificateurs et le synthétiseur réels. **Aucun n’est nécessaire pour exécuter, tester ou évaluer le noyau.**
+Le noyau est **sans GPU et fonctionne partout** — l’ensemble des tests s’exécute sur un générateur et un vérificateur simulés, ce qui prouve que la limite du module est réellement respectée. L’extra `[image]` (torch/diffusers) et l’extra `[synth]` (DSPy + un modèle de langage hébergé) connectent le générateur, les vérificateurs et le synthétiseur réels. **Aucun n’est nécessaire pour exécuter, tester ou évaluer le noyau.**
 
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
@@ -75,22 +67,21 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## À quoi ressemble un contrat
 
-Pas une instruction textuelle. Une liste de **revendications atomiques, vérifiables individuellement et représentables** :
+Pas une simple invite textuelle. Une liste d’**affirmations atomiques, vérifiables individuellement et descriptibles :**
 
-- **`must_have`** — un vêtement, une palette, une silhouette, un symbole. Chacun comporte un `check_type`
-(qui détermine le niveau de validation), un `severity` et éventuellement une limite `depends_on` afin qu’une revendication ne soit significative que si son élément parent a réussi. Il n’est pas utile de vérifier la couleur d’une hache qui n’est pas là.
-- **`must_not`** — des contraintes inverses, vérifiées comme étant **absentes sur les pixels**. Pas une instruction négative : les instructions négatives laissent des éléments résiduels et se réduisent à une paraphrase.
+- **`must_have`** — un vêtement, une palette de couleurs, une silhouette, un symbole. Chacun comporte un `check_type` (qui détermine le niveau de validation), un `severity` et éventuellement une limite `depends_on` afin qu’une affirmation ne soit significative que si son élément parent a réussi. Il n’est pas utile de vérifier la couleur d’une hache qui n’existe pas.
+- **`must_not`** — des contraintes inverses, vérifiées comme étant l’**absence sur les pixels**. Pas une invite négative : les invites négatives laissent des éléments résiduels et se réduisent à une paraphrase.
 - **`identity_ref`** — une image de référence. **L’identité est un conditionnement, pas des jetons.** Un texte anatomique amène un modèle de diffusion à rendre un spécimen ; une image de référence lie le visage spécifique.
 
-Les contrats héritent — un personnage étend une faction — et l’héritage est **à sécurité renforcée** : un enfant peut *ajouter* une exigence, mais jamais la relâcher ou l’omettre silencieusement.
+Les contrats sont hérités — un personnage étend une faction — et l’héritage est **à sécurité renforcée** : un élément enfant peut *ajouter* une exigence, mais jamais la relâcher ou l’ignorer silencieusement.
 
 ## La porte d’entrée
 
-Trois niveaux, le moins coûteux décidant en premier, et ne passant à un niveau supérieur que si une réponse peu coûteuse est incertaine. Un passage ordonné par dépendance signifie qu’un élément parent qui échoue marque ses enfants comme N/A plutôt que de produire des résultats absurdes.
+Trois niveaux, le moins coûteux décidant en premier, et ne passant à un niveau supérieur que si une réponse peu coûteuse est incertaine. Un passage ordonné par dépendance signifie qu’un élément parent qui échoue marque ses éléments enfants comme N/A plutôt que de renvoyer des résultats absurdes.
 
-**Le vérificateur est toujours un modèle d’une famille différente du générateur**, ce qui est imposé par une protection qui refuse de s’exécuter dans le cas contraire. Un modèle est un mauvais juge de sa propre production, et c’est la partie la moins spéculative de cette conception.
+**Le vérificateur est toujours un modèle d’une famille différente du générateur**, ce qui est imposé par une protection qui refuse de s’exécuter dans le cas contraire. Un modèle est un mauvais juge de sa propre sortie, et c’est la partie la moins spéculative de cette conception.
 
-**Les codes de sortie distinguent quatre éléments différents**, car un appelant lisant un seul nombre doit être capable de les distinguer :
+**Les codes de sortie distinguent quatre choses différentes**, car un appelant qui lit un seul nombre doit pouvoir les distinguer :
 
 | sortie | signification |
 |---|---|
@@ -100,27 +91,27 @@ Trois niveaux, le moins coûteux décidant en premier, et ne passant à un nivea
 | `3` | elle s’est exécutée, et le résultat est **non confirmé** — la bande humaine |
 | `4` | elle n’a **pas pu s’exécuter** — pas d’entrée lisible ou aucun niveau requis disponible |
 
-Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et « J’ai vérifié et c’est mauvais » sont des faits différents, et les réduire à un seul est une source documentée de préjudice réel — c’est pourquoi les navigateurs échouent en douceur la révocation des certificats, et pourquoi les normes de surveillance incluent depuis les années 1990 un verdict *inconnu* distinct. Chaque transcription de la porte d’entrée indique également **combien de niveaux requis ont réellement été exécutés**, indépendamment du résultat, de sorte qu’une porte d’entrée qui a arrêté silencieusement la vérification ne peut pas être interprétée comme une réussite.
+Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et « J’ai vérifié et c’est mauvais » sont des faits différents, et les regrouper est une source de préjudice documentée — c’est pourquoi les navigateurs échouent en douceur la révocation des certificats, et pourquoi les normes de surveillance incluent depuis les années 1990 un verdict *inconnu* distinct. Chaque transcription de la porte d’entrée indique également **combien de niveaux requis ont réellement été exécutés**, indépendamment du résultat, de sorte qu’une porte d’entrée qui a arrêté silencieusement la vérification ne peut pas être interprétée comme une réussite.
 
-**CLIPScore n’est pas utilisé comme métrique pour la porte d’entrée.** Il se comporte comme un ensemble de concepts — ignorant l’attribut auquel appartient chaque objet, les nombres et les relations. Il est documenté comme étant défectueux dans l’interface du vérificateur afin que personne ne le réintroduise.
+**CLIPScore n’est pas utilisé comme métrique pour la porte d’entrée.** Il se comporte comme un ensemble de concepts — ignorant l’attribut auquel appartient chaque objet, les quantités et les relations. Il est documenté comme étant défectueux dans l’interface du vérificateur afin que personne ne le réintroduise.
 
 ## État honnête
 
-**v0.2.0 — le noyau est réel ; le chemin GPU n’a jamais été exécuté ici.**
+**v0.2.1 — le noyau est réel ; le chemin GPU n’a jamais été exécuté ici.**
 
 | | |
 |---|---|
-| Noyau | **105 tests réussis**, sans GPU, déterministe. `verify` exécute la suite, puis à nouveau sous `-O`, et enfin effectue une construction du paquet. |
-| Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que d’être caché. |
-| Couverture | 81 % au total ; les adaptateurs de générateur et de vérificateur liés au GPU sont le reste non testé. |
-| Le chemin `[image]` | **n’a jamais été exécuté sur cette machine.** `bind --no-mock` refuse en signalant une erreur de dépendance manquante. Tout ce qui se trouve au-delà de la limite du module n’est pas prouvé par des mesures. |
-| Seuils | les limites inférieure et de variance de la sous-porte des sprites sont **des valeurs par défaut codées en dur sans calibration enregistrée** — pas d’ensemble de validation, pas de citation. Considérez-les comme des espaces réservés. |
-| Canon réel | le contrat exemple fourni est une **invention générique**, et non le canon d’un projet réel. Lier un canon réel est une décision humaine délibérée. |
+| Noyau | **105 tests réussis**, sans GPU, déterministe. `verify` exécute la suite, puis à nouveau sous `-O`, et enfin une construction de paquet |
+| Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que caché |
+| Couverture | 81 % au total ; les adaptateurs de générateur et de vérificateur liés au GPU sont le reste non testé |
+| Le chemin `[image]` | **n’a jamais été exécuté sur cette machine.** `bind --no-mock` refuse en signalant une erreur de dépendance manquante. Tout ce qui se trouve au-delà de la limite du module n’est pas prouvé par des mesures |
+| Seuils | les limites inférieure et de variance de la sous-porte des sprites sont **des valeurs par défaut codées en dur sans calibration enregistrée** — pas d’ensemble de validation, pas de citation. Considérez-les comme des espaces réservés |
+| Canon réel | le contrat exemple fourni est une **invention générique**, et non le canon d’un projet réel. Lier un canon réel est une décision humaine délibérée |
 
 Deux affirmations que les versions antérieures de ce document ont faites et que la mesure n’a pas confirmées, corrigées ici plutôt que simplement supprimées :
 
 - Les seuils à trois zones ont été décrits comme étant *calibrés par rapport à un ensemble de données étiqueté par des humains*. Ce n’est pas le cas. Il s’agit de valeurs par défaut.
-- La règle selon laquelle un modèle génératif ne peut jamais servir de « gardien » a été énoncée comme si une étude l’avait établie. Les preuves qui la soutiennent sont **plutôt convergentes que directes** : les tests discriminatifs du type oui/non se révèlent mesurablement plus stables que la génération de légendes ouverte, les modèles ne peuvent pas s’auto-corriger de manière fiable sans rétroaction externe et la reconnaissance automatique suit un biais d’autopréférence. Aucune étude unique n’effectue une comparaison directe. La règle est valable ; le degré de certitude a été exagéré.
+- La règle selon laquelle un modèle génératif ne peut jamais être son propre contrôleur a été énoncée comme si une étude l’avait établie. Les preuves à l’appui sont **plutôt convergentes que directes** : les tests discriminatifs du type oui/non se révèlent mesurablement plus stables que la génération de légendes ouverte, les modèles ne peuvent pas s’auto-corriger de manière fiable sans rétroaction externe et la reconnaissance automatique suit un biais d’autopréférence. Aucune étude unique n’effectue une comparaison directe. La règle est valable ; le degré de certitude a été exagéré.
 
 ## Exigences
 
@@ -154,7 +145,7 @@ Deux affirmations que les versions antérieures de ce document ont faites et que
 
 ## Organisation des différents éléments
 
-`core/` est indépendant du domaine et n’importe aucun symbole de diffusion ou de Torch — un module spécifique à un domaine exporte exactement trois éléments : un générateur, une liste de vérificateurs et un ensemble de règles d’encodeur. L’ajout d’un nouveau domaine consiste à créer un nouveau module frère sous `domains/` ; rien dans `core/` ne change. La suite sans GPU est ce qui garantit la validité de cette affirmation.
+`core/` est indépendant du domaine et n’importe aucun symbole de diffusion ou de torch — un module spécifique à un domaine exporte exactement trois éléments : un générateur, une liste de vérificateurs et un ensemble de règles d’encodeur. L’ajout d’un nouveau domaine consiste à créer un nouveau module frère sous `domains/` ; rien dans `core/` ne change. La suite sans GPU est ce qui garantit la validité de cette affirmation.
 
 ```
 src/pcraft/
@@ -166,7 +157,7 @@ src/pcraft/
 
 Les règles d’encodeur sous `domains/image/rules/` sont **générées** à partir d’une base de données de recettes vérifiées, et non écrites manuellement, et contiennent un en-tête de génération. Chaque ressource liée écrit un **enregistrement de provenance reproductible** qui fixe le hachage du contrat, l’artefact du synthétiseur, le générateur et la graine, la version du vérificateur et la transcription complète des portes par atome.
 
-La justification de la conception, les normes auxquelles ce dépôt se compare et les mécanismes d’annulation pour chaque action irréversible sont disponibles dans [`STANDARDS.md`](STANDARDS.md) et [`COMPENSATORS.md`](COMPENSATORS.md).
+La justification de la conception, les normes auxquelles ce dépôt se compare et la possibilité d’annuler chaque action irréversible sont disponibles dans [`STANDARDS.md`](STANDARDS.md) et [`COMPENSATORS.md`](COMPENSATORS.md).
 
 ## Licence
 

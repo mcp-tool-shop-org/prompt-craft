@@ -16,7 +16,7 @@
 
 **Diga o que a imagem deve conter. Verifique se ela contém. Recuse quando não contiver.**
 
-Um pipeline de geração de imagens fornecerá alegremente um personagem com o rosto errado, a paleta de cores errada e nenhum dos elementos distintivos da facção — e reportará sucesso, porque nada pareceu fora do lugar. O prompt-craft substitui o texto opaco do prompt por um **contrato tipificado de afirmações representáveis**, usa essa mesma lista duas vezes — uma para escrever o prompt, outra para verificar os pixels — e **bloqueia o recurso quando uma afirmação necessária não estiver presente**.
+Um pipeline de geração de imagens fornecerá alegremente um personagem com o rosto errado, a paleta de cores errada e nenhum dos elementos distintivos da facção — e reportará sucesso, porque nada pareceu fora do lugar. O prompt-craft substitui o texto opaco do prompt por um **contrato tipificado de afirmações que podem ser representadas**, usa essa mesma lista duas vezes — uma para escrever o prompt, outra para verificar os pixels — e **bloqueia o recurso quando uma afirmação necessária não estiver presente**.
 
 ```
    CONTRACT  ──atoms──▶  SYNTHESIZE  ──prompt──▶  GENERATE
@@ -49,7 +49,7 @@ pcraft --help
 npm install -g @mcptoolshop/prompt-crafter   # the same command, as a launcher
 ```
 
-A distribuição é **`prompt-crafter`** porque `pcraft` e `prompt-craft` estão ambos disponíveis no PyPI; o pacote de importação e o comando permanecem `pcraft`. O pacote npm é um **lançador, não uma porta** — reimplementar um limite em uma segunda linguagem é a forma como um limite se desvia, então ele encaminha para o Python que contém a verdade e herda seu código de saída.
+A distribuição é **`prompt-crafter`** porque `pcraft` e `prompt-craft` já estão disponíveis no PyPI; o pacote de importação e o comando permanecem `pcraft`. O pacote npm é um **inicializador, não uma porta** — reimplementar um limite em uma segunda linguagem é a forma como um limite se desvia, então ele encaminha para o Python que contém a verdade e herda seu código de saída.
 
 Para desenvolvimento:
 
@@ -67,7 +67,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## Como é um contrato
 
-Não é um prompt em prosa. Uma lista de **afirmações atômicas, representáveis e verificáveis individualmente**:
+Não é um prompt em prosa. Uma lista de **afirmações atômicas, que podem ser representadas e verificadas individualmente**:
 
 - **`must_have`** — uma peça de vestuário, uma paleta de cores, uma silhueta, um símbolo. Cada um carrega um `check_type` (que determina qual nível de verificação o valida), um `severity` e, opcionalmente, uma borda `depends_on` para que uma afirmação só tenha significado quando seu elemento pai for validado. Não faz sentido verificar a cor de um machado que não está presente.
 - **`must_not`** — restrições negativas, verificadas como **ausência nos pixels**. Não é um prompt negativo: prompts negativos deixam características residuais e acabam sendo parafraseados.
@@ -87,22 +87,22 @@ Três níveis, o mais barato decidindo primeiro, escalonando apenas quando uma r
 |---|---|
 | `0` | o portão foi executado e cada átomo necessário foi validado |
 | `1` | argumentos inválidos ou um contrato malformado |
-| `2` | ele foi executado, e um átomo necessário **falhou** |
-| `3` | ele foi executado, e o resultado é **não confirmado** — a banda humana |
-| `4` | ele **não pôde ser executado** — nenhuma entrada legível ou nenhum nível necessário disponível |
+| `2` | foi executado, e um átomo necessário **falhou** |
+| `3` | foi executado, e o resultado é **não confirmado** — a banda humana |
+| `4` | **não pôde ser executado** — nenhuma entrada legível ou nenhum nível necessário disponível |
 
-Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e está ruim" são fatos diferentes, e colapsá-los é uma fonte documentada de danos reais — é por isso que os navegadores falham suavemente na revogação de certificados e por que os padrões de monitoramento têm um veredicto *desconhecido* distinto desde a década de 1990. Cada transcrição do portão também relata **quantos níveis necessários foram realmente executados**, independentemente do veredicto, para que um portão que parou silenciosamente de verificar não possa ser interpretado como uma aprovação.
+Essa última linha é a que importa. "Não pude verificar" e "Verifiquei e está ruim" são fatos diferentes, e colapsá-los é uma fonte documentada de danos reais — é por isso que os navegadores falham suavemente na revogação de certificados e por que os padrões de monitoramento têm um veredicto *desconhecido* distinto desde a década de 1990. Cada transcrição do portão também relata **quantos níveis necessários foram realmente executados**, independentemente do veredicto, para que um portão que parou silenciosamente de verificar não possa ser considerado como uma passagem.
 
-**CLIPScore não é usado como a métrica do portão.** Ele se comporta como um conjunto de conceitos — ignorando qual atributo pertence a qual objeto, às contagens e às relações. Está documentado como conhecido por apresentar falhas na interface do verificador para que ninguém o reintroduza.
+**O CLIPScore não é usado como a métrica do portão.** Ele se comporta como um conjunto de conceitos — ignorando qual atributo pertence a qual objeto, às contagens e às relações. Está documentado como conhecido por apresentar falhas na interface do verificador para que ninguém o reintroduza.
 
 ## Status honesto
 
-**v0.2.0 — o núcleo é real; o caminho da GPU nunca foi executado aqui.**
+**v0.2.1 — o núcleo é real; o caminho da GPU nunca foi executado aqui.**
 
 | | |
 |---|---|
-| Núcleo | **105 testes aprovados**, independente da GPU, determinístico. `verify` executa o conjunto de testes, o conjunto novamente sob `-O` e uma construção do pacote |
-| Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
+| Núcleo | **105 testes aprovados**, independente da GPU, determinístico. `verify` executa o conjunto de testes, o mesmo conjunto novamente sob `-O` e uma construção do pacote |
+| Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes foram eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
 | Cobertura | 81% no geral; os adaptadores do gerador e verificador dependentes da GPU são o restante não testado |
 | O caminho `[image]` | **nunca foi executado nesta máquina.** `bind --no-mock` recusa com um erro de dependência ausente. Tudo abaixo da fronteira do plugin não é comprovado por medição |
 | Limites | os limites mínimo e de variância do sub-portão sprite são **padrões rígidos sem calibração registrada** — sem retenção, sem citação. Trate-os como espaços reservados |
@@ -111,7 +111,7 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 Duas afirmações que versões anteriores deste documento fizeram e que a medição não confirmou, corrigidas aqui em vez de serem removidas silenciosamente:
 
 - Os limites de três zonas foram descritos como *calibrados em relação a um conjunto de dados rotulado por humanos*. Não é o caso. São valores padrão.
-- A regra de que um modelo generativo nunca pode ser seu próprio avaliador foi apresentada como se um estudo tivesse comprovado isso. As evidências de suporte são **convergentes, e não diretas** — a avaliação discriminativa do tipo sim/não é mensuravelmente mais estável do que a geração de legendas abertas; os modelos não podem se autocorrigir de forma confiável sem feedback externo, e o reconhecimento próprio rastreia o viés de preferência. Nenhum estudo único realiza uma comparação direta. A regra é válida; a certeza foi exagerada.
+- A regra de que um modelo generativo nunca pode ser seu próprio "gatekeeper" foi apresentada como se um estudo tivesse comprovado isso. As evidências de suporte são **convergentes, e não diretas** — a avaliação discriminativa do tipo sim/não é mensuravelmente mais estável do que a geração de legendas abertas; os modelos não podem se autocorrigir de forma confiável sem feedback externo, e o reconhecimento próprio rastreia o viés de preferência. Nenhum estudo único realiza uma comparação direta. A regra é válida; a certeza foi exagerada.
 
 ## Requisitos
 
@@ -123,20 +123,20 @@ Duas afirmações que versões anteriores deste documento fizeram e que a mediç
 
 ## Modelo de confiança e ameaças
 
-- **Dados acessados** — o arquivo JSON do contrato que você fornece, as imagens que você passa e os registros de proveniência gravados no diretório especificado. Nada mais é lido.
+- **Dados acessados** — o arquivo JSON do contrato que você fornece, as imagens que você envia e os registros de procedência gravados no diretório especificado. Nada mais é lido.
 - **Dados NÃO acessados** — nenhuma credencial de qualquer tipo é lida, armazenada ou transmitida. **Sem telemetria, análise ou contagem de uso**: não há opção para desativar porque não há nada para desativar. O núcleo não importa nenhuma biblioteca de rede.
 - **Comunicação de rede** — nenhuma comunicação do núcleo. Os módulos opcionais `[image]` e `[synth]` acessam um host de modelo por sua própria natureza; esse é o único caminho de rede, e a instalação deles é uma escolha.
-- **Permissões** — permissões de usuário comuns. Sem elevação de privilégios, sem instalação de serviço, sem gravações no registro ou nas configurações do sistema.
-- **O ponto crítico, divulgado em vez de ocultado** — **as operações de arquivo não são executadas em um ambiente isolado.** `--records-dir` e `--db` gravam onde você os direciona, intencionalmente, porque esta é uma ferramenta projetada para uso local primeiro. Direcione-os para um local que você pretende usar.
-- **Erros** — as recusas deliberadas carregam um código, uma mensagem e uma dica, e **geram uma exceção em vez de `assert`**, para que `-O` não possa excluí-las; a suíte é executada uma segunda vez sob `-O` para provar isso. Falhas inesperadas imprimem um rastreamento apenas sob `--debug`.
+- **Permissões** — permissões de usuário comuns. Sem elevação de privilégios, sem instalação de serviço, sem gravação no registro ou nas configurações do sistema.
+- **O ponto crítico, divulgado em vez de ocultado** — **as operações de arquivo não são executadas em um ambiente isolado (sandbox).** `--records-dir` e `--db` gravam onde você os direciona, intencionalmente, porque esta é uma ferramenta projetada para uso local. Direcione-os para um local que você pretende usar.
+- **Erros** — as recusas deliberadas incluem um código, uma mensagem e uma dica, e **geram uma exceção em vez de `assert`**, para que `-O` não possa excluí-las; o conjunto de testes é executado uma segunda vez sob `-O` para comprovar isso. Falhas inesperadas imprimem um rastreamento da pilha apenas sob `--debug`.
 
 ## Status de suporte
 
-`main` é o único estado suportado. Sem canal de lançamento, sem política de retrocompatibilidade, sem SLA. Esta é uma infraestrutura de estúdio publicada em código aberto, não um produto com um contrato de suporte.
+`main` é o único estado suportado. Sem canal de lançamento, sem política de retrocompatibilidade, sem SLA. Esta é uma infraestrutura de estúdio publicada em código aberto, e não um produto com contrato de suporte.
 
 ## Como as partes são organizadas
 
-`core/` é independente do domínio e não importa nenhum símbolo de difusão ou torch — um plugin de domínio exporta exatamente três coisas: um gerador, uma lista de verificadores e um conjunto de regras de codificador. Adicionar um novo domínio é criar um novo módulo subordinado em `domains/`; nada em `core/` muda. A suíte sem GPU é o que mantém essa afirmação verdadeira.
+`core/` é independente do domínio e não importa nenhum símbolo de difusão ou torch — um plugin de domínio exporta exatamente três coisas: um gerador, uma lista de verificadores e um conjunto de regras de codificador. Adicionar um novo domínio é criar um novo módulo subordinado em `domains/`; nada em `core/` muda. O conjunto de testes sem GPU é o que mantém essa afirmação verdadeira.
 
 ```
 src/pcraft/
@@ -146,10 +146,10 @@ src/pcraft/
     image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```
 
-As regras do codificador sob `domains/image/rules/` são **geradas** a partir de um banco de dados de receitas verificadas, e não escritas manualmente, e carregam um cabeçalho de geração. Cada ativo vinculado grava um **registro de proveniência reproduzível**, fixando o hash do contrato, o artefato do sintetizador, o gerador e a semente, a versão do verificador e a transcrição completa por átomo.
+As regras do codificador sob `domains/image/rules/` são **geradas** a partir de um banco de dados de receitas verificadas, e não escritas manualmente, e incluem um cabeçalho de geração. Cada ativo vinculado grava um **registro de procedência reproduzível**, que registra o hash do contrato, o artefato do sintetizador, o gerador e a semente, a versão do verificador e a transcrição completa por átomo.
 
-A justificativa do projeto, os padrões pelos quais este repositório se avalia e as ações de desfazer para cada ação irreversível estão em [`STANDARDS.md`](STANDARDS.md) e [`COMPENSATORS.md`](COMPENSATORS.md).
+A justificativa do projeto, os padrões pelos quais este repositório se avalia e as ações de desfazer para cada ação irreversível estão disponíveis em [`STANDARDS.md`](STANDARDS.md) e [`COMPENSATORS.md`](COMPENSATORS.md).
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE). A licença de qualquer *modelo* usado por meio desta ferramenta é uma questão separada e não está coberta por ela.
+MIT — consulte [LICENSE](LICENSE). A licença de qualquer *modelo* usado por meio desta ferramenta é uma questão separada e não está coberta por ela.

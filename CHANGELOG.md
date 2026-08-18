@@ -17,6 +17,28 @@ every entry below concerns the GPU-free core.
 
 ### Changed
 
+## [0.2.1] — 2026-08-18
+
+**The packaging the first release should have carried.**
+
+### Fixed
+
+- **The npm package had no README at all.** `npm/` carried a LICENSE copied across from a sibling
+  repo and no README beside it, so the package page rendered blank. npm serves the *latest*
+  version's README, which meant even the placeholder's one-line description disappeared the moment
+  0.2.0 landed. The package now carries its own README, with the logo as an **absolute** URL —
+  npm renders only absolute image URLs, and a repo-relative `<img src>` shows nothing.
+- **The PyPI page pointed at a README full of repo-relative links.** The GitHub front door opens
+  with a logo at `docs/assets/logo.png` and a seven-language nav bar of sibling files; on PyPI,
+  which has no repository around it, all nine of those were broken. `README.pypi.md` carries the
+  same content with nothing relative in it, matching the pattern a sibling repo already used.
+- **`project.urls` carried only the repository.** Homepage, Documentation, Changelog and Issues
+  now resolve from the PyPI sidebar.
+
+### Changed
+
+- Nothing in the package's behaviour. Same 105 tests, same gate, same exit contract.
+
 ## [0.2.0] — 2026-08-18
 
 **The gate learned to say "I could not check."**

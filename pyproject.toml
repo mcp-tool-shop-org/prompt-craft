@@ -9,9 +9,13 @@ build-backend = "hatchling.build"
 # registered for this exact name with workflow release.yml, and both are matched
 # byte-for-byte at authentication time.
 name = "prompt-crafter"
-version = "0.2.0"
+version = "0.2.1"
 description = "Say what the picture must contain, check that it does, and refuse when it does not. A typed contract of depictable claims drives both the prompt and the gate that verifies the pixels."
-readme = "README.md"
+# PyPI-specific. The GitHub README opens with a logo at a repo-relative path and a
+# seven-language nav bar of sibling files — both render as broken links on PyPI, which
+# has no repository around it. This file carries the same content with nothing relative
+# in it.
+readme = "README.pypi.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "mcp-tool-shop", email = "64996768+mcp-tool-shop@users.noreply.github.com" }]
@@ -48,7 +52,11 @@ dev = [
 pcraft = "pcraft.cli:app"
 
 [project.urls]
+Homepage = "https://mcp-tool-shop-org.github.io/prompt-craft/"
+Documentation = "https://mcp-tool-shop-org.github.io/prompt-craft/handbook/"
 Repository = "https://github.com/mcp-tool-shop-org/prompt-craft"
+Changelog = "https://github.com/mcp-tool-shop-org/prompt-craft/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mcp-tool-shop-org/prompt-craft/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pcraft"]

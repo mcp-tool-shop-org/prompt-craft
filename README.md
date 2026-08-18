@@ -127,7 +127,7 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.2.0 — the core is real; the GPU path has never run here.**
+**v0.2.1 — the core is real; the GPU path has never run here.**
 
 | | |
 |---|---|
