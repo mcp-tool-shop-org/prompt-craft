@@ -49,5 +49,15 @@ jobs:
       - name: install pip-audit
         run: python -m pip install pip-audit
 
+      # `--skip-editable` and NOT `--strict`, and the reason is the package itself.
+      # CI installs this project with `-e`, so the environment contains an editable
+      # `pcraft` at a version that is not on PyPI — under `--strict` that is a hard
+      # error, and the audit fails because the thing being developed has not been
+      # published yet. That is not a dependency finding.
+      #
+      # The skip is VISIBLE rather than silent: pip-audit prints a table naming what
+      # it skipped and why, so "could not audit" never reads as "audited clean" —
+      # the distinction this whole codebase is built around. Any real vulnerability
+      # in an actual dependency still fails the step.
       - name: dependency audit
-        run: python -m pip_audit --strict --progress-spinner off
+        run: python -m pip_audit --skip-editable --progress-spinner off
