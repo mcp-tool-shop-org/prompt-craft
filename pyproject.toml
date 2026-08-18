@@ -49,7 +49,10 @@ dev = [
     # failed there. `[tool.ruff.lint] select` already fixes the rule set; this stops the
     # TOOL from moving under a gate that can block a publish. Raise it deliberately.
     "ruff>=0.6,<0.17",
-    "mypy>=1.11",
+    # Bounded for the same reason as ruff: typecheck is a hard release gate, and an
+    # unpinned mypy reports this fallback import as [assignment] in one version and
+    # [no-redef] in another -- the ignore comment then does not cover the code CI emits.
+    "mypy>=1.11,<3",
 ]
 
 [project.scripts]

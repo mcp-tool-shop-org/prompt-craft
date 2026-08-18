@@ -6,6 +6,7 @@ import json
 
 from typer.testing import CliRunner
 
+from pcraft import package_version
 from pcraft.cli import app
 
 runner = CliRunner()
@@ -194,10 +195,20 @@ def test_gate_json_dumps_the_transcript_even_when_models_are_missing(tmp_path):
 
 
 def test_version_prints_the_installed_distribution_and_exits_0():
+    """The CLI must SURFACE the installed version, never repeat a literal.
+
+    These assertions were pinned to the 0.2.x literal and went stale at the 0.3.0 bump.
+    They kept passing locally only because an editable install's dist-info is not
+    regenerated when pyproject changes, so the dev venv still reported the previous
+    release. A fresh `pip install -e ".[dev]"` -- exactly what CI does -- reported 0.3.0
+    and failed all three. The version literal lives in pyproject and is pinned there by
+    test_the_version_fallback_matches_pyproject; these check only that the CLI reports
+    what is actually installed.
+    """
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     text = (result.stdout or "") + (result.stderr or "")
-    assert "0.2.1" in text
+    assert package_version() in text
     assert "pcraft" in text
 
 
@@ -205,7 +216,7 @@ def test_doctor_loads_the_shipped_store():
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     text = (result.stdout or "") + (result.stderr or "")
-    assert "pcraft 0.2.1" in text
+    assert f"pcraft {package_version()}" in text
     assert "python" in text
     assert "[image]" in text
     assert "[synth]" in text
@@ -217,7 +228,7 @@ def test_doctor_json_is_a_document():
     result = runner.invoke(app, ["doctor", "--json"])
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     data = json.loads(result.stdout)
-    assert data["version"] == "0.2.1"
+    assert data["version"] == package_version()
     assert data["store_ok"] is True
     assert "char:ashen-reaver" in data["store_ids"]
     extra_names = {e["name"] for e in data["extras"]}

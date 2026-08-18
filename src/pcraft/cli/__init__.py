@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # typer < 0.26
     # Same role, different class object under each layout -- binding both to one
     # name is the whole point of the fallback, so the assignment mismatch is
     # expected rather than a defect to fix.
-    from click.exceptions import Abort as _ClickAbort  # type: ignore[assignment]
-    from click.exceptions import ClickException as _ClickException  # type: ignore[assignment]
+    from click.exceptions import Abort as _ClickAbort  # type: ignore[assignment,no-redef]
+    from click.exceptions import ClickException as _ClickException  # type: ignore[assignment,no-redef]
 from typer.core import TyperGroup
 
 from .. import package_version
