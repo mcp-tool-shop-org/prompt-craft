@@ -2,14 +2,17 @@
   "$schema": "prompt-craft/contract.v1",
   "id": "faction:ashen-pact",
   "level": "faction",
-  "_note": "GENERIC EXAMPLE — invented for the scaffold, NOT real game canon. The shared, inheritable identity layer a character subclass extends.",
+  "_note": "GENERIC EXAMPLE — invented for the scaffold, NOT real game canon. The shared, inheritable identity layer a character subclass extends. Its must_not atoms are `optional` for the same reason as the character contract: the checks run and report, and gain blocking power when absence-verification is measured.",
   "must_have": [
     {
       "id": "tabard",
       "claim": "a grey-ash tabard worn over the torso",
       "check_type": "vqa",
       "severity": "required",
-      "spatial": { "kind": "region", "ref": "torso" }
+      "spatial": {
+        "kind": "region",
+        "ref": "torso"
+      }
     },
     {
       "id": "sigil",
@@ -17,14 +20,21 @@
       "check_type": "vqa",
       "severity": "required",
       "depends_on": "tabard",
-      "spatial": { "kind": "region", "ref": "chest-center" }
+      "spatial": {
+        "kind": "region",
+        "ref": "chest-center"
+      }
     },
     {
       "id": "palette",
       "claim": "an ash-grey, bone-white and blood-red colour scheme",
       "check_type": "palette",
       "severity": "required",
-      "enum": ["#3a3a3a", "#d9d4c8", "#7a1f1f"]
+      "enum": [
+        "#3a3a3a",
+        "#d9d4c8",
+        "#7a1f1f"
+      ]
     }
   ],
   "must_not": [
@@ -32,12 +42,17 @@
       "id": "no_rival_colours",
       "claim": "gold or royal-blue heraldry",
       "check_type": "siglip2",
-      "enum": ["gold heraldry", "royal-blue heraldry"]
+      "enum": [
+        "gold heraldry",
+        "royal-blue heraldry"
+      ],
+      "severity": "optional"
     },
     {
       "id": "no_modern_gear",
       "claim": "a firearm or any modern technology",
-      "check_type": "vqa"
+      "check_type": "vqa",
+      "severity": "optional"
     }
   ],
   "identity_ref": {

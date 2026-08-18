@@ -99,7 +99,12 @@ def compile_questions(resolved: ResolvedContract) -> QuestionDAG:
                 text=_negate_text(mn.claim),
                 check_type=mn.check_type,
                 polarity=Polarity.negate,
-                severity=Severity.required,  # a violated must_not is always blocking
+                # ⚑ CORRECTED IN PLACE. This read `Severity.required` with the comment "a violated
+                # must_not is always blocking". That was a claim about the CONTRACT that only held
+                # because the schema could not express anything else. A negation's blocking power
+                # now tracks the evidence behind the check enforcing it — see MustNot.severity.
+                # The schema default is still `required`, so no existing contract changed meaning.
+                severity=mn.severity,
                 depends_on=None,
                 spatial=None,
                 enum=mn.enum,

@@ -13,8 +13,12 @@ def test_atoms_and_must_not_become_questions(sprite_example):
     negate = [q for q in dag.questions if q.polarity is Polarity.negate]
     assert len(affirm) == len(resolved.must_have)
     assert len(negate) == len(resolved.must_not)
-    # every must_not probe is treated as blocking-required
-    assert all(q.severity is Severity.required for q in negate)
+    # ⚑ CORRECTED IN PLACE. This asserted `all(q.severity is Severity.required for q in negate)`
+    # under the comment "every must_not probe is treated as blocking-required". That was a claim
+    # about the SYSTEM which only held because `MustNot` had no severity field. A negation now
+    # carries the blocking power its evidence supports, so what compilation must preserve is the
+    # contract's own severity — not a constant.
+    assert [q.severity for q in negate] == [mn.severity for mn in resolved.must_not]
 
 
 def test_depends_on_edge_preserved(sprite_example):

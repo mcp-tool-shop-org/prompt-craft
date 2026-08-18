@@ -3,7 +3,7 @@
   "id": "char:ashen-reaver",
   "level": "character",
   "extends": "faction:ashen-pact",
-  "_note": "GENERIC EXAMPLE — NOT real canon. Every atom traces to a phrase that was inert prose in the superseded test_characters.json: 'green skin' -> skin, 'war axe in right hand' -> weapon (spatial pose), 'tusks' -> face. The face atom + no_human_face must_not are exactly what the old weapon-only gate could not catch (the faceless-generic-hero failure).",
+  "_note": "GENERIC EXAMPLE — NOT real canon. Every atom traces to a phrase that was inert prose in the superseded test_characters.json: 'green skin' -> skin, 'war axe in right hand' -> weapon (spatial pose), 'tusks' -> face. The face atom + no_human_face must_not are exactly what the old weapon-only gate could not catch (the faceless-generic-hero failure). Its must_not atoms are `optional`: absence-verification is not yet measured on this stack, so these checks run and report but do not block a bind. Raise them to `required` when the verifier is calibrated for absence.",
   "must_have": [
     {
       "id": "skin",
@@ -16,26 +16,34 @@
       "claim": "a two-handed battle-axe held in both hands",
       "check_type": "vqa",
       "severity": "required",
-      "spatial": { "kind": "pose", "ref": "poses/two-hand-weapon.openpose.png" }
+      "spatial": {
+        "kind": "pose",
+        "ref": "poses/two-hand-weapon.openpose.png"
+      }
     },
     {
       "id": "face",
       "claim": "a visible orcish face with tusks",
       "check_type": "vqa",
       "severity": "required",
-      "spatial": { "kind": "region", "ref": "head" }
+      "spatial": {
+        "kind": "region",
+        "ref": "head"
+      }
     }
   ],
   "must_not": [
     {
       "id": "no_human_face",
       "claim": "a smooth human face",
-      "check_type": "vqa"
+      "check_type": "vqa",
+      "severity": "optional"
     },
     {
       "id": "no_shield",
       "claim": "a shield",
-      "check_type": "vqa"
+      "check_type": "vqa",
+      "severity": "optional"
     }
   ],
   "identity_ref": {

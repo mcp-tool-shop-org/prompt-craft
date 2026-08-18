@@ -74,8 +74,18 @@ class GateTranscript(BaseModel):
 
 
 def _counts(v: AtomVerdict) -> bool:
-    """A verdict counts toward the overall roll-up if it is required or a must_not probe."""
-    return v.severity is Severity.required or v.polarity is Polarity.negate
+    """A verdict counts toward the overall roll-up if it is required.
+
+    ⚑ CORRECTED IN PLACE. This read ``v.severity is Severity.required or v.polarity is
+    Polarity.negate``. That ``or`` was not belt-and-braces — it OVERRODE severity, so a negation
+    counted as blocking whatever its severity said. Harmless while ``MustNot`` had no severity
+    field and every negation was required by construction; the moment a negation can be
+    ``optional`` the same ``or`` makes that setting cosmetic — the atom reads optional in the
+    contract and still blocks a bind.
+
+    A negation blocks when its severity says so, exactly like an affirmation.
+    """
+    return v.severity is Severity.required
 
 
 def _pick(check_type: CheckType, verifiers: dict[int, Verifier]) -> tuple[Verifier | None, int | None]:
@@ -150,9 +160,16 @@ def _skipped(q, reason: str) -> AtomVerdict:
 
 
 def _required_tiers(dag: QuestionDAG) -> list[int]:
+    """Tiers the contract's REQUIRED atoms depend on — the denominator of the census.
+
+    ⚑ CORRECTED IN PLACE, same defect as ``_counts``: the ``or q.polarity is Polarity.negate``
+    counted a negation's tier as required regardless of severity. A contract whose only Tier-1
+    user was an optional negation would then report that tier as required-but-not-executed and
+    look like a dead verifier, when nothing blocking ever needed it.
+    """
     tiers: set[int] = set()
     for q in dag.questions:
-        if q.severity is Severity.required or q.polarity is Polarity.negate:
+        if q.severity is Severity.required:
             tiers.add(_TIER_FOR_CHECK[q.check_type])
     return sorted(tiers)
 

@@ -62,12 +62,29 @@ class MustNot(BaseModel):
     """An anti-constraint, GATE-ENFORCED on the pixels (inverted probe) — NOT a negative prompt.
 
     Negative prompts / concept-erasure leave residual features and fall to paraphrase; satisfaction
-    requires the gate to confirm *absence* on the actual pixels."""
+    requires the gate to confirm *absence* on the actual pixels.
+
+    ``severity`` exists because **a negation's blocking power should match the evidence behind the
+    check that enforces it.** Confirming a thing is *absent* is a different capability from
+    confirming a thing is present, and it is the less established of the two: CLIP-family encoders
+    are documented as limited at negation (TNG-CLIP, arXiv:2505.18434, citation-gated `supported`),
+    and no located source benchmarks a sigmoid zero-shot score as an absence verifier at all.
+
+    A negation whose verifier is calibrated for absence earns ``required`` and blocks a bind. One
+    whose verifier is not yet measured on absence is ``optional``: it still runs, still scores, and
+    still rides the transcript — it simply does not assert more certainty than its evidence
+    supports. This is the same principle as ``Zone.UNAVAILABLE`` and the could-not-run exit code:
+    the system's claims track what it actually established.
+
+    The default stays ``required``, so a contract written before this field means what it always
+    meant. Promotion is the intended direction — measure the verifier on absence, then raise the
+    severity with the measurement in hand."""
 
     model_config = ConfigDict(extra="forbid")
     id: str
     claim: str
     check_type: CheckType = CheckType.vqa
+    severity: Severity = Severity.required
     enum: list[str] | None = None
 
 

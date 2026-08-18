@@ -39,12 +39,20 @@ def run_mock_loop(
     records_dir: str | Path = "records",
     verifier_scores: dict[str, float] | Callable[[Question], float] | None = None,
     generator=None,
+    mutate_contract: Callable[[ResolvedContract], None] | None = None,
 ) -> OrchestrationResult:
     """Run the example contract through the full loop with deterministic stubs.
 
     ``verifier_scores`` (atom_id -> score) scripts the gate; the default passes every atom and binds.
-    Pass e.g. ``{"face": 0.1}`` to drive the faceless-hero failure into the repair ladder."""
+    Pass e.g. ``{"face": 0.1}`` to drive the faceless-hero failure into the repair ladder.
+
+    ``mutate_contract`` runs against the resolved contract before compilation, so a caller can state
+    a premise instead of inheriting one from the example's policy. The example's ``must_not`` atoms
+    are ``optional`` (absence-verification is unmeasured on this stack), so a test about blocking
+    behaviour raises the severity itself rather than depending on a setting that can change."""
     _store, resolved, thresholds, compiled = load_sprite_example()
+    if mutate_contract is not None:
+        mutate_contract(resolved)
     synth = TemplateSynthesizer(compiled)
     gen = generator or StubGenerator(out_dir=Path(records_dir) / "_stub_images")
     if verifier_scores is None:
