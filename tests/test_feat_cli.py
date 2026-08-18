@@ -255,7 +255,7 @@ def test_schema_dumps_the_authoring_contract():
 
 
 def test_bind_no_mock_without_image_extra_is_dep_image(monkeypatch, tmp_path):
-    import pcraft.sample as sample
+    from pcraft import sample
 
     monkeypatch.setattr(sample, "image_extra_present", lambda: False)
     result = runner.invoke(app, ["bind", "--no-mock", "--records-dir", str(tmp_path)])
@@ -267,12 +267,11 @@ def test_bind_no_mock_without_image_extra_is_dep_image(monkeypatch, tmp_path):
 
 def test_bind_no_mock_uses_the_plugin_generator(monkeypatch, tmp_path):
     """--no-mock is the live door. Stub generate so the suite stays GPU-free."""
+    from pcraft import sample
     from pcraft.core.loop.generator_iface import GenerationResult
     from pcraft.domains.image import ImagePlugin
     from pcraft.domains.image.generator.sdxl_generator import SDXLGenerator
     from pcraft.testing import passing_verifiers, write_solid_png
-
-    import pcraft.sample as sample
 
     monkeypatch.setattr(sample, "image_extra_present", lambda: True)
     monkeypatch.setattr(ImagePlugin, "verifiers", lambda self: passing_verifiers())

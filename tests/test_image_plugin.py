@@ -34,7 +34,7 @@ def test_image_encoder_rules_are_generated_from_readouts():
 
 
 def test_real_verifier_skips_gracefully_without_models():
-    store, resolved, _t, _c = load_sprite_example()
+    _store, resolved, _t, _c = load_sprite_example()
     dag = compile_questions(resolved)
     vqascore = get("image").verifiers()[1]
     # the [image] extra isn't installed in the core env -> the verifier returns None (SKIPPED)

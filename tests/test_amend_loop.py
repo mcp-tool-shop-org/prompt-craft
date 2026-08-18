@@ -119,8 +119,8 @@ def test_escalation_door_refuses_to_persist_without_records_write(tmp_path):
 
 
 def _atom_verdict(**over) -> AtomVerdict:
-    base = dict(atom_id="a", polarity=Polarity.affirm, severity=Severity.required,
-                score=0.9, zone=Zone.PASS, tier_used=1, verifier_id="v", reason="x")
+    base = {"atom_id": "a", "polarity": Polarity.affirm, "severity": Severity.required,
+                "score": 0.9, "zone": Zone.PASS, "tier_used": 1, "verifier_id": "v", "reason": "x"}
     base.update(over)
     return AtomVerdict(**base)
 

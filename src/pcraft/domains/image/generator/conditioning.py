@@ -107,7 +107,7 @@ def resolve_ref(raw: str | Path) -> Path:
     candidates = [_SPRITE_ROOT / text]
     # Bare filenames only — do not let poses/front.openpose.png steal
     # poses/turnaround/front.openpose.png.
-    if given.parent == Path("."):
+    if given.parent == Path():
         candidates.extend(
             (
                 _SPRITE_ROOT / "poses" / given.name,

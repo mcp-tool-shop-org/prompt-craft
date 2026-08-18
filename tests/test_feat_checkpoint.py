@@ -7,10 +7,10 @@ the gate chose Y. GPU-free.
 from __future__ import annotations
 
 from pcraft.core.contract.compile_questions import Polarity, compile_questions
+from pcraft.core.contract.schema import Severity
 from pcraft.core.gate.checkpoint import build_checkpoint
 from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
 from pcraft.core.gate.thresholds import Zone
-from pcraft.core.contract.schema import Severity
 from pcraft.sample import load_sprite_example, run_mock_loop
 
 
@@ -46,8 +46,8 @@ def test_uncertain_score_is_contrastive_not_a_zone_name_only():
 
 
 def test_escalated_loop_carries_the_checkpoint(tmp_path):
-    from pcraft.core.loop.orchestrate import LoopConfig
     from pcraft.core.loop import orchestrate
+    from pcraft.core.loop.orchestrate import LoopConfig
     from pcraft.core.synth.signature import TemplateSynthesizer
     from pcraft.testing import StubGenerator, passing_verifiers
 

@@ -19,6 +19,7 @@ SDXL does not pretend to run that model.
 from __future__ import annotations
 
 from pathlib import Path
+
 from pydantic import BaseModel, ConfigDict
 
 from . import conditioning as cond

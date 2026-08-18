@@ -23,7 +23,7 @@ automatic re-roll. The VERIFIER — not the synthesizer — is the selector amon
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,17 +32,17 @@ from ..gate.harness import GateTranscript
 from ..gate.thresholds import Zone
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     AMEND = "AMEND"
     ADVANCE = "ADVANCE"
 
 
-class OutcomeClass(str, Enum):
+class OutcomeClass(StrEnum):
     TRANSIENT = "transient"  # auto-retry: generate error / timeout
     SEMANTIC = "semantic"  # human-gated: schema-invalid output, contract relaxation
 
 
-class RepairAction(str, Enum):
+class RepairAction(StrEnum):
     INPAINT_REGION = "inpaint_region"  # leaf-attribute fail, object present -> regional inpaint, same seed
     RESYNTH_REWEIGHT = "resynth_reweight"  # composition / multiple fails -> re-synthesize, regenerate
     REROLL_NEW_SEED = "reroll_new_seed"  # presence / anatomy fail -> reject + reroll, new seed

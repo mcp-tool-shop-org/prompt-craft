@@ -205,7 +205,7 @@ def _safe_score(verifier: Verifier, image_path: str, question: Question) -> tupl
         raw = verifier.score(image_path, question)
     except PromptCraftError:
         raise
-    except Exception as err:  # instrument crash is "could not score", not a zone
+    except Exception as err:  # noqa: BLE001 - instrument crash is "could not score", not a zone
         return None, f"{verifier.verifier_id} raised {type(err).__name__}: {err}"
     if raw is None:
         return None, f"{verifier.verifier_id} unavailable"

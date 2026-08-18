@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pcraft.domains.image  # noqa: F401
 from pcraft.core.contract.compile_questions import CheckType, Polarity, Question, Severity
 from pcraft.core.plugin import get
 from pcraft.domains.image.generator.reference_lock import assemble
 from pcraft.domains.image.verifier.palette_verifier import PaletteVerifier, Tier0Router
 from pcraft.testing import write_solid_png
-
-import pcraft.domains.image  # noqa: F401
 
 
 def _q(enum: list[str]) -> Question:

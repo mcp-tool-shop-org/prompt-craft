@@ -15,14 +15,14 @@ its content (claim, check_type, spatial, enum, depends_on) while keeping its id
 from __future__ import annotations
 
 from collections.abc import Sequence
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...errors import PromptCraftError
 
 
-class CheckType(str, Enum):
+class CheckType(StrEnum):
     """Selects which gate tier verifies an atom (cheapest first)."""
 
     siglip2 = "siglip2"  # Tier-0: cheap closed-set / presence screen (sigmoid, per-query)
@@ -30,12 +30,12 @@ class CheckType(str, Enum):
     palette = "palette"  # deterministic colour check (no model)
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     required = "required"  # a required atom blocks bind on failure (andon)
     optional = "optional"  # an optional atom only warns
 
 
-class SpatialKind(str, Enum):
+class SpatialKind(StrEnum):
     region = "region"  # a named image region (torso, head, hands, chest-center)
     pose = "pose"  # a ControlNet pose/openpose reference image that locks geometry
 

@@ -8,7 +8,7 @@ versioned; recalibrate when the generator or verifier checkpoint changes (both p
 from __future__ import annotations
 
 import json
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -17,7 +17,7 @@ from ...errors import PromptCraftError
 from ..contract.compile_questions import Polarity
 
 
-class Zone(str, Enum):
+class Zone(StrEnum):
     PASS = "PASS"
     UNCERTAIN = "UNCERTAIN"
     FAIL = "FAIL"

@@ -24,13 +24,13 @@ from ...errors import PromptCraftError
 
 # Normalization rules: map concrete model ids/families onto a coarse family token.
 _FAMILY_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"siglip", re.I), "siglip"),
-    (re.compile(r"clip[-_]?flan[-_]?t5|vqascore", re.I), "clip-flant5"),
-    (re.compile(r"\bsdxl\b|stable[-_]?diffusion|\bsd[-_]?\d", re.I), "stable-diffusion"),
-    (re.compile(r"\bflux\b", re.I), "flux"),
-    (re.compile(r"llava|qwen[-_]?vl|internvl|gpt-?4v|gemini", re.I), "generative-vlm"),
-    (re.compile(r"\bdsg\b|question[-_]?gen", re.I), "dsg-qg"),
-    (re.compile(r"\bclip\b", re.I), "clip"),  # bare CLIP last, so siglip/flant5 win above
+    (re.compile(r"siglip", re.IGNORECASE), "siglip"),
+    (re.compile(r"clip[-_]?flan[-_]?t5|vqascore", re.IGNORECASE), "clip-flant5"),
+    (re.compile(r"\bsdxl\b|stable[-_]?diffusion|\bsd[-_]?\d", re.IGNORECASE), "stable-diffusion"),
+    (re.compile(r"\bflux\b", re.IGNORECASE), "flux"),
+    (re.compile(r"llava|qwen[-_]?vl|internvl|gpt-?4v|gemini", re.IGNORECASE), "generative-vlm"),
+    (re.compile(r"\bdsg\b|question[-_]?gen", re.IGNORECASE), "dsg-qg"),
+    (re.compile(r"\bclip\b", re.IGNORECASE), "clip"),  # bare CLIP last, so siglip/flant5 win above
 ]
 
 

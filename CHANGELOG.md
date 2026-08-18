@@ -15,7 +15,53 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Fixed
 
+- **A `# type: ignore` that had silently stopped applying.** Adopting isort wrapped the
+  `click.exceptions` fallback import in parentheses and left its
+  `# type: ignore[assignment,no-redef]` on the inner line, where mypy does not apply it. The
+  suppression still looked live and was not — the exact defect class this gate exists to
+  catch. The ignore now sits on the statement's first line with a comment saying why it must
+  stay there. Caught by mypy 2.3.1 in a CI-equivalent venv; the local box (mypy 2.1.0,
+  ruff 0.15.16) does not produce this wrap at all.
+- `_merge_atoms_fail_closed` rebuilt its `{b.id for b in base_atoms}` set once per child atom.
+  Hoisted out of the loop — the same merge, no longer quadratic. (Surfaced by PERF401.)
+
 ### Changed
+
+- **The lint gate now declares what it lints for.** v0.3.0 pinned the historical default set
+  (`E4/E7/E9/F`) to buy a clean release; it did not decide the rule set. `[tool.ruff.lint]`
+  now selects 15 families and carries an `ignore` list where **every entry names the reason it
+  is rejected**. 64 findings resolved; suite **339**, unchanged.
+
+  Adopted: `A`, `B`, `BLE`, `C4`, `FURB`, `I`, `N`, `PERF`, `PL`, `PTH`, `RUF`, `SIM`, `TRY`,
+  `UP`, on top of `E4/E7/E9/F`. Two of these were free — with `B008` excluded **bugbear finds
+  nothing**, and `A` finds nothing beyond one shadow (`compile`) that is the command's own
+  name and already suppressed.
+
+  Rejected, with the reason recorded beside each ignore: `B008` (every one is the
+  `typer.Option(...)` idiom Typer requires), `PLC0415` (119 deliberate in-body imports that
+  keep `core/` free of torch symbols — the property `test_core_is_gpu_free.py` defends),
+  `PLR2004` (52 of 58 are tests asserting literals), `PLR0913/0917/0915/0912` (arbitrary
+  counters against deliberate protocol signatures), `TRY003` (would dismantle
+  `PromptCraftError(code, message, hint)` and its exit-code contract), `TRY301` (the
+  raise-inside-try is how `typer.Exit` routes past the blind-except backstop). Not selected at
+  all, with reasons in the config header: `ARG` (47, protocol conformance), `EM` (99),
+  `D` (536), `S` (763), `ANN` (878).
+
+- `BLE` is selected rather than globally ignored. 11 blind-except sites already carried a
+  per-site `# noqa: BLE001`; the 3 that did not now carry one naming its own reason. A global
+  ignore would have made all 14 markers dead and stripped them. The rule stays live for new
+  code.
+
+- Eight `class X(str, Enum)` are now `StrEnum` (`UP042`). Verified before adopting: `json.dumps`
+  output is **byte-identical** either way, so no record or artifact changes shape; only
+  `str()`/f-string rendering differs and `src/` has no such site. Confirmed on both CI legs.
+
+- `RUF100` was evaluated **last**, after the select was locked, and the kickoff's numbers were
+  corrected in the process. Measuring a family with `--select RUF` (or `--select RUF100`)
+  **overrides the config's select**, so every suppression for a non-selected rule reads as
+  dead: the same tree reports **27** that way and **2** against the actual gate. Both real ones
+  were `# noqa: F401` on an `import torch` that is used. Measure RUF100 with a bare
+  `ruff check`, never with `--select`.
 
 ## [0.3.0] — 2026-08-18
 

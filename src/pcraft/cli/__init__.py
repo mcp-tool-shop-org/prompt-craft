@@ -9,8 +9,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -32,8 +32,16 @@ except ModuleNotFoundError:  # typer < 0.26
     # Same role, different class object under each layout -- binding both to one
     # name is the whole point of the fallback, so the assignment mismatch is
     # expected rather than a defect to fix.
+    #
+    # The ClickException import is WRAPPED because it exceeds line-length, and the ignore
+    # must therefore sit on the statement's FIRST line: mypy does not apply a `type: ignore`
+    # found on an inner line of a parenthesised import. Adopting isort wrapped this line and
+    # left the comment inside, which silently detached the suppression -- caught by mypy in a
+    # CI-equivalent venv, not locally. Do not move it back inside the parentheses.
     from click.exceptions import Abort as _ClickAbort  # type: ignore[assignment,no-redef]
-    from click.exceptions import ClickException as _ClickException  # type: ignore[assignment,no-redef]
+    from click.exceptions import (  # type: ignore[assignment,no-redef]
+        ClickException as _ClickException,
+    )
 from typer.core import TyperGroup
 
 from .. import package_version
@@ -184,7 +192,7 @@ def synth(
     from ..sample import _encoder_rules, load_workspace
 
     try:
-        store, resolved, _t, compiled = load_workspace(
+        _store, resolved, _t, compiled = load_workspace(
             contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
         )
         result = TemplateSynthesizer(compiled).synthesize(resolved, _encoder_rules())
@@ -221,6 +229,7 @@ def gate(
     """Run the contract gate. Missing path, unreadable file, and 'no verifier
     could score' are refuses (nonzero exit). SKIPPED atoms are not a pass."""
     import pcraft.domains.image  # noqa: F401  (registers the plugin)
+
     from ..core.contract.compile_questions import compile_questions
     from ..core.gate import harness
     from ..core.plugin import get
@@ -231,7 +240,7 @@ def gate(
         from ..core.gate.preflight import preflight_image
 
         preflight_image(image)
-        store, resolved, table, _c = load_workspace(
+        _store, resolved, table, _c = load_workspace(
             contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
         )
         dag = compile_questions(resolved)
@@ -334,7 +343,7 @@ def validate(
     from ..sample import load_workspace
 
     try:
-        store, resolved, _t, _c = load_workspace(
+        _store, resolved, _t, _c = load_workspace(
             contracts_dirs=contracts_dir or None, contract_id=contract
         )
         dag = compile_questions(resolved)
@@ -394,7 +403,8 @@ def replay(
     debug: bool = typer.Option(False),
 ) -> None:
     """Replay a receipt: reconstruct its question DAG from the contract and assert no drift."""
-    from ..core.receipt.asset_record import load, replay as do_replay
+    from ..core.receipt.asset_record import load
+    from ..core.receipt.asset_record import replay as do_replay
     from ..sample import load_store
 
     try:

@@ -17,7 +17,7 @@ from ...errors import PromptCraftError
 from ..contract.schema import ResolvedContract
 from ..optimize.artifact import CompiledProgram
 from .synthesizer_iface import SynthResult
-from .visual_inventory import RENDER_BOILERPLATE, build_inventory, assert_tokens_trace
+from .visual_inventory import RENDER_BOILERPLATE, assert_tokens_trace, build_inventory
 
 try:  # the real Signature is only defined when the [synth] extra is installed
     import dspy
@@ -36,7 +36,7 @@ try:  # the real Signature is only defined when the [synth] extra is installed
         atom_coverage: str = dspy.OutputField(desc="JSON {atom_id: phrase} for every required atom")
 
     _HAS_DSPY = True
-except Exception:  # pragma: no cover - exercised only without the extra
+except Exception:  # noqa: BLE001  # pragma: no cover - exercised only without the extra
     _HAS_DSPY = False
 
 

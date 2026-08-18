@@ -4,7 +4,7 @@ import pytest
 
 from pcraft.core.synth.assert_ import assert_coverage
 from pcraft.core.synth.signature import TemplateSynthesizer
-from pcraft.core.synth.visual_inventory import build_inventory, assert_tokens_trace
+from pcraft.core.synth.visual_inventory import assert_tokens_trace, build_inventory
 from pcraft.errors import PromptCraftError
 
 

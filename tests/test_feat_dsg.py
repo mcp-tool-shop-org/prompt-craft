@@ -14,7 +14,7 @@ import pytest
 from pcraft.core.contract.compile_questions import Polarity, Question, compile_questions
 from pcraft.core.contract.schema import CheckType, Severity
 from pcraft.domains.image.verifier.dsg_expand import claim_of, template_expand
-from pcraft.domains.image.verifier.dsg_verifier import DSGVerifier, ENTITY_ABSENT
+from pcraft.domains.image.verifier.dsg_verifier import ENTITY_ABSENT, DSGVerifier
 from pcraft.sample import load_sprite_example
 
 

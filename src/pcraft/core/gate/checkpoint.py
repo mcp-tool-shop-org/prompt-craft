@@ -75,6 +75,5 @@ def build_checkpoint(transcript: GateTranscript, dag: QuestionDAG | None = None)
         thought = "You probably thought nothing needed a human."
         chose = f"I escalated ({transcript.overall.value})."
     parts = [thought, chose]
-    for line in lines:
-        parts.append(f"{line.thought}; {line.chose} — {line.claim}.")
+    parts.extend(f"{line.thought}; {line.chose} — {line.claim}." for line in lines)
     return ContrastiveCheckpoint(thought=thought, chose=chose, lines=lines, text=" ".join(parts))

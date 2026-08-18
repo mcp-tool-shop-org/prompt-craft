@@ -54,7 +54,5 @@ def test_core_source_has_no_diffusion_imports():
     offenders = []
     for py in core_dir.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
-        for bad in forbidden:
-            if bad in text:
-                offenders.append(f"{py.name}: {bad}")
+        offenders.extend(f"{py.name}: {bad}" for bad in forbidden if bad in text)
     assert not offenders, f"core/ must be GPU-free but found: {offenders}"

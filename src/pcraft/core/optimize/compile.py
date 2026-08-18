@@ -153,7 +153,7 @@ class _DspyGepaRunner:
     ) -> OptimizedPrompt:
         import dspy
 
-        from ..synth.signature import ContractToPrompt, _HAS_DSPY
+        from ..synth.signature import _HAS_DSPY, ContractToPrompt
 
         if not _HAS_DSPY:
             raise PromptCraftError(

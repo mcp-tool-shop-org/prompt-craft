@@ -12,7 +12,6 @@ plus the Director-requested `pcraft gate` / --generator-family same-family regre
 
 from __future__ import annotations
 
-
 import pytest
 from typer.testing import CliRunner
 

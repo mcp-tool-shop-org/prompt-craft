@@ -76,7 +76,7 @@ def test_the_version_fallback_matches_pyproject():
     from pcraft import _FALLBACK_VERSION
 
     declared = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert _FALLBACK_VERSION == declared, (
+    assert declared == _FALLBACK_VERSION, (
         f"pcraft._FALLBACK_VERSION is {_FALLBACK_VERSION!r} but pyproject declares {declared!r}; "
         "bump both together or an uninstalled checkout misreports its own version"
     )

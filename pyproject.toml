@@ -90,17 +90,72 @@ target-version = "py311"
 # ruff 0.15.16 locally passed clean while CI resolved 0.16.3 from an unbounded `ruff>=0.6`
 # and produced 62 errors on identical code, failing the v0.3.0 release at the verify gate.
 #
-# The 0.16 defaults are not merely stricter, they disagree with this codebase on purpose:
-# 19 of those were B008 (function call in an argument default), which is the REQUIRED Typer
-# idiom -- every `typer.Option(...)` in the CLI. Another 3 were BLE001 on `except Exception`
-# blocks that already carry a deliberate `# noqa`. Adopting a linter's new opinion is a
-# decision this repo should make deliberately, not one a transitive resolve makes for it.
+# v0.3.0 shipped the narrow historical set (E4/E7/E9/F) to buy a clean release. That was the
+# right release-time move and it did not decide what this repo lints for. This block is that
+# decision. Every count below was measured with ruff 0.16.3 in a CI-equivalent venv
+# (Python 3.13, `pip install -e ".[dev]"`) -- NOT on a dev box, which was wrong in three
+# directions on v0.3.0 (ruff 0.15.16, mypy 2.1.0, and a stale editable dist-info).
 #
-# This pins the historical default set -- pyflakes plus the pycodestyle subset -- which is
-# exactly what the tree has been passing all along. Widening it (isort, bugbear, refurb) is
-# a real cleanup worth doing on its own, not inside a release.
+# Families NOT selected. These are rejections with reasons, not oversights:
+#
+#   ARG  (47)  Unused arguments are interface conformance -- the Verifier / Generator /
+#              Synthesizer protocols. 31 are ARG002 on protocol methods. An implementation
+#              that ignores an argument it must still accept is not dead code.
+#   EM   (99)  Exception-message string literals. Mechanical churn across every raise site
+#              for no defect caught.
+#   D   (536)  Docstring style. Its own project with its own scope, not a line in this one.
+#   S   (763)  bandit -- and most of it is `assert` in tests, which is what tests are.
+#   ANN (878)  Annotation coverage. Same. mypy already types what carries contract.
+#
+# Every `ignore` entry below names the reason it is rejected. An unexplained ignore is how
+# this repo got a lint gate whose meaning nobody knew.
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = [
+    "E4", "E7", "E9", "F",  # the historical default set the tree has always passed
+    "A",     # flake8-builtins -- clean; the one shadow (`compile`) is the command's own name
+    "B",     # bugbear -- finds NOTHING once B008 is out. A free standard to hold.
+    "BLE",   # blind-except -- 11 sites already carry a deliberate per-site noqa; keep it live
+    "C4",    # comprehensions
+    "FURB",  # refurb
+    "I",     # isort
+    "N",     # pep8-naming
+    "PERF",  # perflint
+    "PL",    # pylint -- see the six carve-outs below
+    "PTH",   # pathlib over os.path
+    "RUF",   # ruff-specific
+    "SIM",   # flake8-simplify
+    "TRY",   # tryceratops -- see the two carve-outs below
+    "UP",    # pyupgrade
+]
+
+ignore = [
+    # All 19 are `typer.Option(...)` in a CLI signature -- the idiom Typer REQUIRES. The rule
+    # is correct in general and wrong here, and every future command would add another.
+    # Rejected globally rather than carried as 19 per-site suppressions.
+    "B008",
+    # This repo imports inside CLI command bodies ON PURPOSE: it keeps `pcraft --help` fast
+    # and keeps `core/` free of diffusion/torch symbols. `tests/test_core_is_gpu_free.py`
+    # exists to protect exactly that property. Adopting this would argue with the plugin
+    # boundary the package is built on. 119 findings, every one deliberate.
+    "PLC0415",
+    # 52 of the 58 are in `tests/` -- comparing against a literal is what a test does. The 6
+    # in `src/` are hex-length checks (3/6/8) in the palette verifier, where naming the
+    # constant would read worse than the digit.
+    "PLR2004",
+    # Arbitrary complexity thresholds against deliberate signatures. `orchestrate.run()` takes
+    # the orchestrator's whole protocol (synthesizer, generator, verifiers, thresholds, config,
+    # compensators); splitting it to satisfy a counter would hide the contract, not simplify
+    # it. All 23 findings are in `src/`, none in tests.
+    "PLR0913", "PLR0917", "PLR0915", "PLR0912",
+    # This repo raises `PromptCraftError(code, message, hint)` -- a deliberate structured shape
+    # with an exit-code contract behind it. TRY003 pushes toward one exception subclass per
+    # message, which would dismantle that shape. 14 findings.
+    "TRY003",
+    # The raise-inside-try in the CLI is how `typer.Exit` is routed PAST the blind-except
+    # backstop -- `except (typer.Exit, typer.Abort): raise` sits directly above it. Abstracting
+    # the raise into an inner function would hide the exit contract, not clarify it.
+    "TRY301",
+]
 
 [tool.mypy]
 # 3.12, NOT the 3.11 in requires-python -- and that gap is a known, named cost.

@@ -220,9 +220,8 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
     del child_ids  # (kept for readability of the invariant; not used)
     # Preserve base order, then append child-only atoms in declared order.
     ordered = [by_id[a.id] for a in base_atoms]
-    for atom in child_atoms:
-        if atom.id not in {b.id for b in base_atoms}:
-            ordered.append(by_id[atom.id])
+    base_ids = {b.id for b in base_atoms}
+    ordered.extend(by_id[atom.id] for atom in child_atoms if atom.id not in base_ids)
     return ordered
 
 

@@ -29,7 +29,7 @@ def test_faction_resolves_to_itself(sprite_example):
 
 
 def test_character_inherits_and_composes_identity(sprite_example):
-    store, resolved, _t, _c = sprite_example
+    _store, resolved, _t, _c = sprite_example
     # character resolves with faction atoms + its own
     ids = {a.id for a in resolved.must_have}
     assert {"tabard", "sigil", "palette"} <= ids  # inherited

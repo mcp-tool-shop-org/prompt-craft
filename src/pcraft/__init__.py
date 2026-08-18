@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-
 _FALLBACK_VERSION = "0.3.0"
 """Must equal pyproject's ``[project].version``.
 

@@ -44,8 +44,8 @@ class FluxGenerator:
         if self._pipe is not None and self._pipe_kind == kind:
             return self._pipe
         try:
-            import torch  # noqa: F401
             import diffusers  # noqa: F401
+            import torch
         except Exception as err:
             raise PromptCraftError(
                 "DEP_IMAGE_MISSING", "Flux needs the [image] extra (torch + diffusers)"

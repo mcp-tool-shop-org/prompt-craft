@@ -176,11 +176,11 @@ def test_escalation_still_credits_the_atoms_required_tier_in_the_census(sprite_e
 
 
 def _one_atom_verdict(**overrides) -> AtomVerdict:
-    base = dict(
-        atom_id="palette", polarity=Polarity.affirm, severity=Severity.required,
-        score=0.95, zone=Zone.PASS, tier_used=1, tiers_consulted=[1],
-        verifier_id="scripted.vqa.v0", reason="score 0.9500 -> PASS",
-    )
+    base = {
+        "atom_id": "palette", "polarity": Polarity.affirm, "severity": Severity.required,
+        "score": 0.95, "zone": Zone.PASS, "tier_used": 1, "tiers_consulted": [1],
+        "verifier_id": "scripted.vqa.v0", "reason": "score 0.9500 -> PASS",
+    }
     base.update(overrides)
     return AtomVerdict(**base)
 

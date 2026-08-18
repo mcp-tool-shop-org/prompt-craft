@@ -10,14 +10,14 @@ that isn't there" class of false confidence."""
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
 from .schema import CheckType, ResolvedContract, Severity, Spatial
 
 
-class Polarity(str, Enum):
+class Polarity(StrEnum):
     affirm = "affirm"  # must_have: present == good
     negate = "negate"  # must_not: present == bad (inverted probe)
 
@@ -76,39 +76,38 @@ def _negate_text(claim: str) -> str:
 
 def compile_questions(resolved: ResolvedContract) -> QuestionDAG:
     """Derive the gate's question DAG from the contract. Deterministic and order-stable."""
-    questions: list[Question] = []
 
-    for atom in resolved.must_have:
-        questions.append(
-            Question(
-                atom_id=atom.id,
-                text=_affirm_text(atom.claim),
-                check_type=atom.check_type,
-                polarity=Polarity.affirm,
-                severity=atom.severity,
-                depends_on=atom.depends_on,
-                spatial=atom.spatial,
-                enum=atom.enum,
-            )
+    questions: list[Question] = [
+        Question(
+            atom_id=atom.id,
+            text=_affirm_text(atom.claim),
+            check_type=atom.check_type,
+            polarity=Polarity.affirm,
+            severity=atom.severity,
+            depends_on=atom.depends_on,
+            spatial=atom.spatial,
+            enum=atom.enum,
         )
+        for atom in resolved.must_have
+    ]
 
-    for mn in resolved.must_not:
-        questions.append(
-            Question(
-                atom_id=mn.id,
-                text=_negate_text(mn.claim),
-                check_type=mn.check_type,
-                polarity=Polarity.negate,
-                # ⚑ CORRECTED IN PLACE. This read `Severity.required` with the comment "a violated
-                # must_not is always blocking". That was a claim about the CONTRACT that only held
-                # because the schema could not express anything else. A negation's blocking power
-                # now tracks the evidence behind the check enforcing it — see MustNot.severity.
-                # The schema default is still `required`, so no existing contract changed meaning.
-                severity=mn.severity,
-                depends_on=None,
-                spatial=mn.spatial,
-                enum=mn.enum,
-            )
+    questions.extend(
+        Question(
+            atom_id=mn.id,
+            text=_negate_text(mn.claim),
+            check_type=mn.check_type,
+            polarity=Polarity.negate,
+            # ⚑ CORRECTED IN PLACE. This read `Severity.required` with the comment "a violated
+            # must_not is always blocking". That was a claim about the CONTRACT that only held
+            # because the schema could not express anything else. A negation's blocking power
+            # now tracks the evidence behind the check enforcing it — see MustNot.severity.
+            # The schema default is still `required`, so no existing contract changed meaning.
+            severity=mn.severity,
+            depends_on=None,
+            spatial=mn.spatial,
+            enum=mn.enum,
         )
+        for mn in resolved.must_not
+    )
 
     return QuestionDAG(contract_id=resolved.id, questions=questions)

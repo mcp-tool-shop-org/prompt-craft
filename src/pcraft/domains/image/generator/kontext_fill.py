@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ....errors import PromptCraftError
 from . import conditioning as cond
-from .reference_lock import ReferenceLock, assemble, as_generate_refs
+from .reference_lock import ReferenceLock, as_generate_refs, assemble
 
 RECIPE_ID = "flux.kontext-stitch-crop-fill.v1"
 MEASURED_GRAPH = "https://cloud.comfy.org/#a3c8c6af-41a1-45f6-b8ca-dab171d9bcc0"

@@ -15,6 +15,7 @@ if either site regresses to that form.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -113,7 +114,7 @@ def test_the_scaffold_contracts_declare_their_negations_optional():
         f"{_CONTRACTS}/factions/example.faction.contract.json": {"no_rival_colours", "no_modern_gear"},
     }
     for path, ids in expected.items():
-        with open(path, encoding="utf-8") as fh:
+        with Path(path).open(encoding="utf-8") as fh:
             doc = json.load(fh)
         seen = {mn["id"]: mn.get("severity") for mn in doc["must_not"]}
         assert set(seen) == ids, f"{path} negation set changed: {sorted(seen)}"

@@ -36,8 +36,8 @@ from ..contract.hash import contract_hash
 from ..contract.schema import ResolvedContract
 from ..gate import harness
 from ..gate.checkpoint import ContrastiveCheckpoint, build_checkpoint
-from ..gate.preflight import preflight_image
 from ..gate.family_guard import assert_distinct_families
+from ..gate.preflight import preflight_image
 from ..gate.thresholds import ThresholdTable, Zone
 from ..gate.verifier_iface import Verifier, forbid_clipscore
 from ..receipt.asset_record import AssetRecord, persist
@@ -82,7 +82,7 @@ class OrchestrationResult(BaseModel):
     checkpoint: ContrastiveCheckpoint | None = None
 
 
-class _GenerationBlocked(Exception):
+class _GenerationBlockedError(Exception):
     """Internal control-flow signal only: generator.generate() raised a SEMANTIC error
     (F-83c3ad00). Raised by ``_safe_generate``, caught in ``run()``, never escapes this module.
 
@@ -141,7 +141,7 @@ def run(
             resolved, synth, synthesizer, generator, verifiers, thresholds, dag,
             conditioning, attempts, budget, chosen, config,
         )
-    except _GenerationBlocked as blocked:
+    except _GenerationBlockedError as blocked:
         # F-83c3ad00: a SEMANTIC generate() failure -- human-gated, never an automatic re-roll.
         # Mirrors the prose-dump SEMANTIC synth defect above: no gen/transcript pair ever existed
         # to build a record from, so there is nothing to persist and no "records-write" door to
@@ -195,9 +195,10 @@ def _synthesize_with_assert(resolved, synthesizer, config) -> SynthResult | None
         synth = synthesizer.synthesize(resolved, config.encoder_rules)
         try:
             assert_coverage(resolved, synth.atom_coverage)
-            return synth
         except PromptCraftError as err:
             last = err  # backtrack: re-synthesize (a real LM gets the missing-atom list injected)
+        else:
+            return synth
     del last
     return None
 
@@ -219,9 +220,10 @@ def _resynth_reweight(
             result = _front_load_failed(result, failed_ids)
         assert_coverage(resolved, result.atom_coverage)
         assert_tokens_trace(result.prompt, result.visual_inventory)
-        return result
     except PromptCraftError:
         return previous
+    else:
+        return result
 
 
 def _front_load_failed(synth: SynthResult, failed_ids: list[str]) -> SynthResult:
@@ -267,14 +269,14 @@ def _safe_generate(
     as TRANSIENT -- the same bucket a raw timeout/network error belongs in) so an uncoded crash is
     treated the same as a coded one. TRANSIENT returns None so the caller's own retry loop
     (best-of-N or the repair ladder) naturally moves on within its existing budget -- no extra
-    budget is granted. SEMANTIC raises _GenerationBlocked so run() escalates immediately: never an
+    budget is granted. SEMANTIC raises _GenerationBlockedError so run() escalates immediately: never an
     automatic re-roll for a semantic defect."""
     try:
         return generator.generate(prompt, negative_prompt, conditioning, seed)
-    except Exception as err:  # classified immediately below; never silently swallowed
+    except Exception as err:  # noqa: BLE001 - classified immediately below, never swallowed
         wrapped = wrap_error(err, "RUNTIME_GENERATE_FAILED")
         if classify_failure(wrapped.code) is OutcomeClass.SEMANTIC:
-            raise _GenerationBlocked(wrapped) from wrapped
+            raise _GenerationBlockedError(wrapped) from wrapped
         return None
 
 
@@ -285,7 +287,7 @@ def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: s
         # IO_GATE_INPUT used to escape run() as a raw coded error outside the
         # TRANSIENT/SEMANTIC envelope. Could-not-see-the-image is not a generate
         # retry; escalate like any other SEMANTIC block.
-        raise _GenerationBlocked(err) from err
+        raise _GenerationBlockedError(err) from err
     # Coordinated signature change (wave-2 core-gate sibling, F-461c4198): the family guard now
     # also runs inside harness.evaluate itself. generator_family is the orchestrator's own
     # trusted generator.family -- already validated once by assert_distinct_families in run()
@@ -314,7 +316,7 @@ def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, condition
         # every attempt in the loop above was a TRANSIENT generate() failure -- the auto-retry
         # budget (best-of-N) is now exhausted with nothing to gate. Escalate rather than hand
         # _select_best an empty list.
-        raise _GenerationBlocked(PromptCraftError(
+        raise _GenerationBlockedError(PromptCraftError(
             "RUNTIME_GENERATE_EXHAUSTED",
             f"every best-of-{n} generate() attempt raised a transient error; none produced an image",
         ))
