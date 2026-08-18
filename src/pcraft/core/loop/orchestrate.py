@@ -53,6 +53,7 @@ from .retry_policy import (
     Verdict,
     choose_repair,
     classify_failure,
+    is_unrepairable,
     verdict_from_transcript,
 )
 
@@ -197,6 +198,16 @@ def _synthesize_with_assert(resolved, synthesizer, config) -> SynthResult | None
     return None
 
 
+def _inpaint_region(dag, transcript) -> str:
+    failed = transcript.failed_required() or transcript.uncertain_required()
+    if not failed:
+        return "center"
+    question = dag.by_id(failed[0].atom_id)
+    if question is not None and question.spatial is not None and question.spatial.kind.value == "region":
+        return question.spatial.ref
+    return failed[0].atom_id
+
+
 def _assemble_conditioning(resolved: ResolvedContract, identity_weight_bump: float = 0.0) -> dict:
     cond: dict = {
         "identity_refs": [ir.model_dump() for ir in resolved.identity_refs],
@@ -286,6 +297,8 @@ def _select_best(candidates):
 
 def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, conditioning, attempts, budget, chosen):
     gen, transcript = chosen
+    if is_unrepairable(transcript):
+        return gen, transcript
     bump = 0.0
     # Hard cap guarantees termination even if one repair action keeps being chosen (e.g. an identity
     # atom that never recovers): cap = total remaining repair budget, then escalate to a human.
@@ -307,10 +320,13 @@ def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, condi
             seed = gen.seed + 1
             budget.reprompts -= 1
         elif repair is RepairAction.INPAINT_REGION:
-            # Regional inpaint is not implemented on the shipped generators.
-            # Same seed + same prompt is a byte-identical regenerate. Vary the
-            # seed so the named action is not a no-op until a real inpaint exists.
-            seed = gen.seed + 10
+            # Same seed: the mask is the variation. The generator sees inpaint_from
+            # + inpaint_region and must actually inpaint, not txt2img the same prompt.
+            cond = {
+                **conditioning,
+                "inpaint_from": gen.image_path,
+                "inpaint_region": _inpaint_region(dag, transcript),
+            }
             budget.inpaints -= 1
 
         new_gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, cond, seed)

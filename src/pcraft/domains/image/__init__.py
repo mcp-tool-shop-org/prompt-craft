@@ -25,10 +25,10 @@ class ImagePlugin:
 
     def verifiers(self) -> dict:
         from .verifier.dsg_verifier import DSGVerifier
-        from .verifier.siglip2_screen import SigLIP2Screen
+        from .verifier.palette_verifier import Tier0Router
         from .verifier.vqascore_verifier import VQAScoreVerifier
 
-        return {0: SigLIP2Screen(), 1: VQAScoreVerifier(), 2: DSGVerifier()}
+        return {0: Tier0Router(), 1: VQAScoreVerifier(), 2: DSGVerifier()}
 
     def encoder_rules_path(self) -> Path:
         return RULES_PATH

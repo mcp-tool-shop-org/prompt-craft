@@ -8,9 +8,12 @@ silent PASS — it routes the whole asset to the UNCERTAIN (human) band."""
 
 from __future__ import annotations
 
+import math
+
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..contract.compile_questions import CheckType, Polarity, QuestionDAG, Severity
+from ...errors import PromptCraftError
+from ..contract.compile_questions import CheckType, Polarity, Question, QuestionDAG, Severity
 from .family_guard import assert_distinct_families
 from .thresholds import ThresholdTable, Zone
 from .verifier_iface import Verifier, forbid_clipscore
@@ -63,6 +66,7 @@ class GateTranscript(BaseModel):
     overall: Zone
     verdicts: list[AtomVerdict]
     tier_census: TierCensus = Field(default_factory=TierCensus)
+    thresholds_version: str = ""
 
     def failed_required(self) -> list[AtomVerdict]:
         return [v for v in self.verdicts if v.zone is Zone.FAIL and _counts(v)]
@@ -150,9 +154,9 @@ def evaluate(
             verdicts[q.atom_id] = _skipped(q, "no verifier available for tier")
             continue
 
-        score = verifier.score(image_path, q)
+        score, skip_reason = _safe_score(verifier, image_path, q)
         if score is None:
-            verdicts[q.atom_id] = _skipped(q, f"{verifier.verifier_id} unavailable")
+            verdicts[q.atom_id] = _skipped(q, skip_reason or f"{verifier.verifier_id} unavailable")
             continue
 
         zone = thresholds.zone(q.check_type.value, score, q.polarity)
@@ -161,7 +165,7 @@ def evaluate(
 
         # Escalate a borderline/failed Tier-1 result to Tier-2 (DSG) for localization.
         if tier == 1 and zone in (Zone.UNCERTAIN, Zone.FAIL) and 2 in verifiers:
-            score2 = verifiers[2].score(image_path, q)
+            score2, _skip2 = _safe_score(verifiers[2], image_path, q)
             if score2 is not None:
                 score, zone = score2, thresholds.zone(q.check_type.value, score2, q.polarity)
                 used_id, used_tier = verifiers[2].verifier_id, 2
@@ -186,7 +190,32 @@ def evaluate(
         overall=_rollup(ordered),
         verdicts=ordered,
         tier_census=_tier_census(dag, ordered),
+        thresholds_version=thresholds.version,
     )
+
+
+def _safe_score(verifier: Verifier, image_path: str, question: Question) -> tuple[float | None, str | None]:
+    """Call ``verifier.score`` and reject anything that is not a finite value in [0, 1].
+
+    ``None`` (or a rejected value) is SKIPPED, never a silent PASS/FAIL/UNCERTAIN.
+    A coded ``PromptCraftError`` from the verifier is a defect, not a missing score,
+    and is left to propagate. Any other exception is treated as unavailable.
+    """
+    try:
+        raw = verifier.score(image_path, question)
+    except PromptCraftError:
+        raise
+    except Exception as err:  # instrument crash is "could not score", not a zone
+        return None, f"{verifier.verifier_id} raised {type(err).__name__}: {err}"
+    if raw is None:
+        return None, f"{verifier.verifier_id} unavailable"
+    try:
+        score = float(raw)
+    except (TypeError, ValueError):
+        return None, f"{verifier.verifier_id} rejected score {raw!r} (not numeric)"
+    if math.isnan(score) or math.isinf(score) or score < 0.0 or score > 1.0:
+        return None, f"{verifier.verifier_id} rejected score {raw!r} (need finite [0, 1])"
+    return score, None
 
 
 def _skipped(q, reason: str) -> AtomVerdict:

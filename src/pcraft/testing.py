@@ -51,7 +51,10 @@ class StubGenerator:
         self.color = color
 
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
-        path = write_solid_png(self.out_dir / f"stub_seed{seed}.png", self.color)
+        # INPAINT_REGION keeps the seed and varies the file so the named action is
+        # not a byte-identical regenerate of stub_seed{N}.png.
+        suffix = "_inpaint" if conditioning.get("inpaint_from") else ""
+        path = write_solid_png(self.out_dir / f"stub_seed{seed}{suffix}.png", self.color)
         return GenerationResult(
             image_path=str(path),
             seed=seed,

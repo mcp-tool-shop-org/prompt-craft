@@ -59,6 +59,10 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
+    "GATE_CONDITIONING_UNSUPPORTED": "SDXL applies ControlNet OpenPose and IP-Adapter. Flux, "
+    "method=lora, and InstantID still refuse. For a text-only run, omit identity_ref and pose spatials.",
+    "GATE_CONDITIONING_REF_MISSING": "Pass a real image path for every pose_ref, identity plate, "
+    "and inpaint_from. A missing plate is a refuse, not a plain text-to-image render.",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom, "
     "and may not rewrite inherited content (claim, check_type, spatial, enum, depends_on). "
     "Raise the severity, or add a new id — never substitute an existing id's content.",
@@ -67,6 +71,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",
     "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
+    "CONFIG_THRESHOLDS_INVALID": "Each band needs high >= low and both in [0, 1]. Recalibrate or fix the table.",
     "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
     "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",
     "RUNTIME_UNEXPECTED": "An unclassified error escaped the command. Re-run with --debug to see "

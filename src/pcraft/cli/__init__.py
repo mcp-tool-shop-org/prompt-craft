@@ -1,7 +1,8 @@
-"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo.
+"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
-tracebacks are gated behind --debug."""
+tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
+model to stdout and the human banner to stderr."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import typer
+from pydantic import BaseModel, ConfigDict
 
 # Typer 0.26 vendored Click as `typer._click`; 0.25 and earlier use the standalone
 # `click` package. pyproject declares `typer>=0.12`, so BOTH are inside the range this
@@ -30,6 +32,7 @@ except ModuleNotFoundError:  # typer < 0.26
     from click.exceptions import ClickException as _ClickException
 from typer.core import TyperGroup
 
+from .. import package_version
 from ..errors import PromptCraftError, wrap_error
 from ..gate_report import format_transcript  # local helper (see below)
 
@@ -92,9 +95,76 @@ app = typer.Typer(
 )
 
 
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(f"pcraft {package_version()}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="Print the installed version and exit.",
+        callback=_show_version,
+        is_eager=True,
+    ),
+) -> None:
+    """Contract-driven generative-asset production."""
+
+
 def _emit(err: PromptCraftError, debug: bool) -> None:
     typer.echo(err.to_debug_text() if debug else err.to_safe_text(), err=True)
     raise typer.Exit(code=err.exit_code)
+
+
+def _say(text: str, *, as_json: bool = False) -> None:
+    """Human text. When ``--json``, the banner goes to stderr so stdout stays a document."""
+    typer.echo(text, err=as_json)
+
+
+def _emit_model(model: BaseModel) -> None:
+    typer.echo(model.model_dump_json(indent=2))
+
+
+class ListedContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    source: str
+
+
+class StoreListing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contracts: list[ListedContract]
+
+
+class ValidateReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    lineage: list[str]
+    required: list[str]
+    must_not: list[str]
+    questions: int
+
+
+class ExtraStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    present: bool
+    modules: dict[str, bool]
+
+
+class DoctorReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: str
+    python: str
+    python_ok: bool
+    extras: list[ExtraStatus]
+    store_ok: bool
+    store_ids: list[str] = []
+    store_error: str | None = None
+    thresholds_version: str | None = None
 
 
 @app.command()
@@ -102,6 +172,7 @@ def synth(
     contract: str = typer.Option("char:ashen-reaver", help="contract id to synthesize"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
+    as_json: bool = typer.Option(False, "--json", help="emit SynthResult as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Synthesize a prompt from a contract (deterministic template synthesizer)."""
@@ -113,12 +184,14 @@ def synth(
             contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
         )
         result = TemplateSynthesizer(compiled).synthesize(resolved, _encoder_rules())
-        typer.echo(f"prompt: {result.prompt}")
-        typer.echo(f"negative: {result.negative_prompt}")
-        typer.echo(f"backend: {result.backend} (degraded={result.degraded})")
-        typer.echo("atom_coverage:")
+        _say(f"prompt: {result.prompt}", as_json=as_json)
+        _say(f"negative: {result.negative_prompt}", as_json=as_json)
+        _say(f"backend: {result.backend} (degraded={result.degraded})", as_json=as_json)
+        _say("atom_coverage:", as_json=as_json)
         for atom_id, phrase in result.atom_coverage.items():
-            typer.echo(f"  {atom_id}: {phrase}")
+            _say(f"  {atom_id}: {phrase}", as_json=as_json)
+        if as_json:
+            _emit_model(result)
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):
@@ -138,6 +211,7 @@ def gate(
         help="override the generator family the same-family gate guard checks against "
         "(defaults to the registered image domain's own generator.family)",
     ),
+    as_json: bool = typer.Option(False, "--json", help="emit GateTranscript as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Run the contract gate. Missing path, unreadable file, and 'no verifier
@@ -161,7 +235,9 @@ def gate(
         verifiers = plugin.verifiers()
         family = generator_family or plugin.generator().family
         transcript = harness.evaluate(dag, str(image), verifiers, table, generator_family=family)
-        typer.echo(format_transcript(transcript))
+        _say(format_transcript(transcript), as_json=as_json)
+        if as_json:
+            _emit_model(transcript)
         err = error_from_transcript(transcript)
         if err is not None:
             _emit(err, debug)
@@ -180,6 +256,7 @@ def bind(
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     mock: bool = typer.Option(True, help="use deterministic stubs (GPU-free); the default scaffold path"),
     records_dir: str = typer.Option("records"),
+    as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Run the full synth->generate->gate->retry->bind loop and report the decision."""
@@ -195,7 +272,7 @@ def bind(
             contracts_dirs=contracts_dir or None,
             thresholds=thresholds,
         )
-        _print_result(result)
+        _print_result(result, as_json=as_json)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same
         # number to a caller — the merge the four-way contract exists to prevent.
@@ -211,6 +288,7 @@ def bind(
 @app.command(name="list")
 def list_contracts(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    as_json: bool = typer.Option(False, "--json", help="emit StoreListing as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """List contract ids in the store."""
@@ -218,8 +296,15 @@ def list_contracts(
 
     try:
         store = load_store(contracts_dir or None)
-        for cid in store.ids():
-            typer.echo(f"{cid}  {store.source_path(cid)}")
+        listing = StoreListing(
+            contracts=[
+                ListedContract(id=cid, source=str(store.source_path(cid))) for cid in store.ids()
+            ]
+        )
+        for item in listing.contracts:
+            _say(f"{item.id}  {item.source}", as_json=as_json)
+        if as_json:
+            _emit_model(listing)
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):
@@ -232,6 +317,7 @@ def list_contracts(
 def validate(
     contract: str = typer.Option("char:ashen-reaver", help="contract id to lint and resolve"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    as_json: bool = typer.Option(False, "--json", help="emit ValidateReport as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Resolve a contract and compile its question DAG. No generate, no gate."""
@@ -243,11 +329,20 @@ def validate(
             contracts_dirs=contracts_dir or None, contract_id=contract
         )
         dag = compile_questions(resolved)
-        typer.echo(f"ok  {resolved.id}")
-        typer.echo(f"lineage: {' -> '.join(resolved.lineage)}")
-        typer.echo(f"required: {[a.id for a in resolved.required_atoms()]}")
-        typer.echo(f"must_not: {[m.id for m in resolved.must_not]}")
-        typer.echo(f"questions: {len(dag.questions)}")
+        report = ValidateReport(
+            id=resolved.id,
+            lineage=list(resolved.lineage),
+            required=[a.id for a in resolved.required_atoms()],
+            must_not=[m.id for m in resolved.must_not],
+            questions=len(dag.questions),
+        )
+        _say(f"ok  {resolved.id}", as_json=as_json)
+        _say(f"lineage: {' -> '.join(resolved.lineage)}", as_json=as_json)
+        _say(f"required: {report.required}", as_json=as_json)
+        _say(f"must_not: {report.must_not}", as_json=as_json)
+        _say(f"questions: {len(dag.questions)}", as_json=as_json)
+        if as_json:
+            _emit_model(report)
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):
@@ -257,18 +352,22 @@ def validate(
 
 
 @app.command()
-def demo(records_dir: str = typer.Option("records"), debug: bool = typer.Option(False)) -> None:
+def demo(
+    records_dir: str = typer.Option("records"),
+    as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
+    debug: bool = typer.Option(False),
+) -> None:
     """End-to-end sample run on the generic example contract (GPU-free)."""
     from ..sample import load_sprite_example, run_mock_loop
 
     try:
         _s, resolved, _t, _c = load_sprite_example()
-        typer.echo(f"contract: {resolved.id}  lineage: {' -> '.join(resolved.lineage)}")
-        typer.echo(f"required atoms: {[a.id for a in resolved.required_atoms()]}")
-        typer.echo(f"must_not: {[m.id for m in resolved.must_not]}")
-        typer.echo("")
+        _say(f"contract: {resolved.id}  lineage: {' -> '.join(resolved.lineage)}", as_json=as_json)
+        _say(f"required atoms: {[a.id for a in resolved.required_atoms()]}", as_json=as_json)
+        _say(f"must_not: {[m.id for m in resolved.must_not]}", as_json=as_json)
+        _say("", as_json=as_json)
         result = run_mock_loop(records_dir=records_dir)
-        _print_result(result)
+        _print_result(result, as_json=as_json)
         _exit_from_result(result, debug)
     except PromptCraftError as err:
         _emit(err, debug)
@@ -282,6 +381,7 @@ def demo(records_dir: str = typer.Option("records"), debug: bool = typer.Option(
 def replay(
     record: Path = typer.Argument(...),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    as_json: bool = typer.Option(False, "--json", help="emit AssetRecord as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Replay a receipt: reconstruct its question DAG from the contract and assert no drift."""
@@ -293,13 +393,89 @@ def replay(
         store = load_store(contracts_dir or None)
         resolved = store.resolve(rec.contract_id)
         do_replay(rec, resolved)
-        typer.echo(f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)")
+        _say(
+            f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)",
+            as_json=as_json,
+        )
+        if as_json:
+            _emit_model(rec)
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):
         raise
     except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
         _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+@app.command()
+def doctor(
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
+    as_json: bool = typer.Option(False, "--json", help="emit DoctorReport as JSON on stdout"),
+    debug: bool = typer.Option(False),
+) -> None:
+    """Check python, optional extras, and that the contract store loads. GPU-free."""
+    try:
+        report = _run_doctor(contracts_dir or None, thresholds)
+        _say(f"pcraft {report.version}", as_json=as_json)
+        py_mark = "ok" if report.python_ok else "FAIL"
+        _say(f"python {report.python}  ({py_mark}; need >= 3.11)", as_json=as_json)
+        for extra in report.extras:
+            mark = "present" if extra.present else "missing"
+            missing = [name for name, ok in extra.modules.items() if not ok]
+            detail = f"  missing {missing}" if missing else ""
+            _say(f"[{extra.name}] {mark}{detail}", as_json=as_json)
+        if report.store_ok:
+            _say(
+                f"store ok  {len(report.store_ids)} contracts"
+                + (f"  thresholds={report.thresholds_version}" if report.thresholds_version else ""),
+                as_json=as_json,
+            )
+        else:
+            _say(f"store FAIL  {report.store_error}", as_json=as_json)
+        if as_json:
+            _emit_model(report)
+        if not report.python_ok or not report.store_ok:
+            raise typer.Exit(code=1)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+def _extra_status(name: str, modules: tuple[str, ...]) -> ExtraStatus:
+    found = {mod: importlib.util.find_spec(mod) is not None for mod in modules}
+    return ExtraStatus(name=name, present=all(found.values()), modules=found)
+
+
+def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> DoctorReport:
+    from ..core.gate.thresholds import load_thresholds
+    from ..domains.image.subdomains.sprite import THRESHOLDS_PATH
+    from ..sample import load_store
+
+    py = sys.version.split()[0]
+    extras = [
+        _extra_status("image", ("torch", "diffusers", "transformers", "PIL")),
+        _extra_status("synth", ("dspy",)),
+    ]
+    report = DoctorReport(
+        version=package_version(),
+        python=py,
+        python_ok=sys.version_info >= (3, 11),
+        extras=extras,
+        store_ok=False,
+    )
+    try:
+        store = load_store(contracts_dirs)
+        report.store_ids = list(store.ids())
+        table = load_thresholds(thresholds or THRESHOLDS_PATH)
+        report.thresholds_version = table.version
+        report.store_ok = True
+    except PromptCraftError as err:
+        report.store_error = err.to_safe_text()
+    return report
 
 
 @app.command()
@@ -398,19 +574,24 @@ def _exit_from_result(result, debug: bool) -> None:
     )
 
 
-def _print_result(result) -> None:
+def _print_result(result, *, as_json: bool = False) -> None:
     # CLI-C-001: demo/bind --mock used to print BOUND + a wall of [PASS] 0.950
     # with no indication the scores never touched pixels.
-    typer.echo("mock: scores are scripted constants; the image pixels were not read.")
-    typer.echo(f"decision: {result.decision.upper()}  ({result.reason})")
-    typer.echo(f"attempts: {len(result.attempts)}")
+    _say("mock: scores are scripted constants; the image pixels were not read.", as_json=as_json)
+    _say(f"decision: {result.decision.upper()}  ({result.reason})", as_json=as_json)
+    _say(f"attempts: {len(result.attempts)}", as_json=as_json)
     for a in result.attempts:
         extra = f" repair={a.repair.value}" if a.repair else ""
-        typer.echo(f"  #{a.attempt} seed={a.seed} -> {a.overall.value} ({a.verdict.value}){extra}")
+        _say(f"  #{a.attempt} seed={a.seed} -> {a.overall.value} ({a.verdict.value}){extra}", as_json=as_json)
     if result.record is not None:
-        typer.echo("")
-        typer.echo(format_transcript(result.record.gate_transcript))
-        typer.echo(f"receipt: records/{result.record.record_id}.json  hash={result.record.contract_hash[:19]}...")
+        _say("", as_json=as_json)
+        _say(format_transcript(result.record.gate_transcript), as_json=as_json)
+        _say(
+            f"receipt: records/{result.record.record_id}.json  hash={result.record.contract_hash[:19]}...",
+            as_json=as_json,
+        )
+    if as_json:
+        _emit_model(result)
 
 
 if __name__ == "__main__":

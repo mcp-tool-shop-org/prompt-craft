@@ -54,15 +54,16 @@ def test_preflight_accepts_a_readable_file(tmp_path):
     assert preflight_image(path) == path
 
 
-def test_unavailable_verifiers_on_a_real_file_are_not_exit_zero(tmp_path):
-    """Extras missing is GATE_UNAVAILABLE (4), not FAIL (2) and not a pass (0)."""
+def test_missing_vlm_extras_on_a_real_file_are_not_exit_zero(tmp_path):
+    """Palette scores without the [image] extra. VQA/SigLIP2 still SKIP.
+    That is PARTIAL (3), not a pass (0) and not a required-atom FAIL (2)."""
     image = write_solid_png(tmp_path / "present.png")
     result = CliRunner().invoke(app, ["gate", str(image)])
-    assert result.exit_code == 4
+    assert result.exit_code in {2, 3}
     text = (result.stdout or "") + (result.stderr or "")
-    assert "GATE_UNAVAILABLE" in text
-    assert "UNAVAILABLE" in text
+    assert "GATE_UNAVAILABLE" not in text
     assert "tiers executed:" in text
+    assert "palette" in text.lower()
 
 
 def test_could_not_run_when_every_required_atom_is_skipped(sprite_example):

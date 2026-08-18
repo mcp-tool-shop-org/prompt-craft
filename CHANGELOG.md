@@ -11,6 +11,38 @@ every entry below concerns the GPU-free core.
 
 ## [Unreleased]
 
+### Added
+
+- **`--json`** on `synth`, `gate`, `bind`, `demo`, `replay`, `list`, and `validate`.
+  The pydantic model is the stdout document; the human banner moves to stderr.
+- **`--version`** and **`pcraft doctor`**. Doctor reports python, `[image]`/`[synth]`
+  extras, and whether the contract store (plus threshold table) loads. GPU-free.
+- The gate **rejects NaN / non-finite / out-of-range verifier scores** as SKIPPED
+  instead of zoning them. A crashing `score()` is the same, not a traceback.
+- **Band invariants:** `high >= low`, both in `[0, 1]`. The thresholds version
+  rides the gate transcript. An inverted table is `CONFIG_THRESHOLDS_INVALID`.
+- The **repair ladder is not run** when the transcript is unrepairable
+  (`UNAVAILABLE`, no required score, or a short tier census).
+- **SDXL pose-lock** via ControlNet OpenPose. A missing pose plate is
+  `GATE_CONDITIONING_REF_MISSING`, not a silent txt2img. Flux still refuses
+  (unmeasured).
+- **SDXL IP-Adapter** identity-bind for `method=ip_adapter`. `lora` /
+  `instantid` still refuse. `method=none` skips the plate.
+- **`INPAINT_REGION` is a real inpaint.** Same seed, region mask, previous
+  image in `inpaint_from`. The stub writes `stub_seed{N}_inpaint.png` so
+  the named action is not a byte-identical regenerate.
+- **Shipped plates.** OpenPose maps (two-hand weapon + 8-view turnaround)
+  are drawn as BODY_25 ControlNet maps. Identity plates for ashen-reaver
+  (face) and ashen-pact (costume) ship under the sprite subdomain.
+  Contract refs resolve against that tree, not cwd. The example faction
+  plate is `method=ip_adapter` so both plates can actually bind.
+- **Palette histogram** at Tier-0 for hex `enum` colours. Text enums still
+  SKIP (they belong to SigLIP2). A taupe studio backdrop is not required
+  to live inside the palette.
+- **Reference lock pack.** Identity + OpenPose in one reference-conditioned
+  edit moved the axe to a two-hand grip. Identity + costume did not move
+  pose. `method=reference` is reserved for that Cloud/Imagine path.
+
 ### Fixed
 
 - **A one-character typo emptied a contract.** `Contract` was the only model set to

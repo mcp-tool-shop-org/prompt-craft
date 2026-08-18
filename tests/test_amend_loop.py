@@ -23,7 +23,7 @@ from pcraft.core.gate.thresholds import Zone
 from pcraft.core.loop import orchestrate
 from pcraft.core.loop.compensators import Compensator, CompensatorRegistry
 from pcraft.core.loop.orchestrate import LoopConfig
-from pcraft.core.loop.retry_policy import Verdict, verdict_from_transcript
+from pcraft.core.loop.retry_policy import Verdict, is_unrepairable, verdict_from_transcript
 from pcraft.core.synth.signature import TemplateSynthesizer
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example
@@ -44,22 +44,20 @@ def _run(tmp_path, *, verifier_scores=None, generator=None, compensators=None):
     )
 
 
-def test_inpaint_repair_does_not_reuse_the_same_seed(tmp_path):
-    """LOOP-B-001: INPAINT_REGION used the same seed; regional inpaint is not implemented."""
+def test_inpaint_repair_keeps_the_seed_and_names_the_region(tmp_path):
+    """INPAINT_REGION is a real inpaint: same seed, mask is the variation.
+
+    The stub writes stub_seed{N}_inpaint.png so the named action is not a
+    byte-identical regenerate. choose_repair still picks INPAINT for a lone leaf.
+    """
     from pcraft.core.loop.retry_policy import RepairAction, choose_repair
 
     result = _run(tmp_path, verifier_scores={"weapon": 0.05})
     inpaint_attempts = [a for a in result.attempts if a.repair is RepairAction.INPAINT_REGION]
     if not inpaint_attempts:
-        # If choose_repair never picked INPAINT for this atom, the seed-vary
-        # still has to be the branch body. Pin the helper's own default pick.
         dag = __import__("pcraft.core.contract.compile_questions", fromlist=["compile_questions"]).compile_questions
         _s, resolved, _t, _c = load_sprite_example()
         compiled = dag(resolved)
-        from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
-        from pcraft.core.contract.compile_questions import Polarity
-        from pcraft.core.contract.schema import Severity
-        from pcraft.core.gate.thresholds import Zone
         from pcraft.core.loop.retry_policy import RetryBudget
         t = GateTranscript(
             contract_id=resolved.id,
@@ -75,7 +73,9 @@ def test_inpaint_repair_does_not_reuse_the_same_seed(tmp_path):
         assert choose_repair(t, RetryBudget(), compiled) is RepairAction.INPAINT_REGION
         return
     first_seed = result.attempts[0].seed
-    assert any(a.seed != first_seed for a in inpaint_attempts)
+    assert any(a.seed == first_seed for a in inpaint_attempts)
+    inpaint_pngs = list((tmp_path / "_stub_images").glob("stub_seed*_inpaint.png"))
+    assert inpaint_pngs, "INPAINT_REGION must write a distinct file, not reuse stub_seed{N}.png"
 
 
 def test_default_run_actually_binds(tmp_path):
@@ -235,6 +235,63 @@ def test_semantic_generate_error_escalates_without_reroll(tmp_path):
     result = _run(tmp_path, generator=gen)
     assert result.decision == "escalated"
     assert gen.calls == 1  # never re-rolled -- a semantic defect is not retried
+
+
+# --------------------------------------------------------------------------- F-LOOP-FEAT-004 skip the ladder when the gate could not run
+
+
+def test_unavailable_gate_does_not_burn_the_repair_ladder(tmp_path):
+    """Every required atom SKIPPED / overall UNAVAILABLE: another seed will not help."""
+    result = _run(tmp_path, verifier_scores=lambda _q: None)
+    assert result.decision == "escalated"
+    assert result.attempts, "best-of-N still ran"
+    assert all(a.repair is None for a in result.attempts)
+    assert all(a.note == "best-of-N" for a in result.attempts)
+
+
+def test_incomplete_census_does_not_burn_the_repair_ladder(tmp_path):
+    """Only Tier-1 registered: some atoms score, a required tier never ran. Unrepairable."""
+    from pcraft.sample import load_sprite_example
+    from pcraft.testing import ScriptedVerifier, StubGenerator
+
+    _store, resolved, thresholds, compiled = load_sprite_example()
+    synth = TemplateSynthesizer(compiled)
+    gen = StubGenerator(out_dir=tmp_path / "_stub_images")
+    # lone Tier-1: palette/siglip2 atoms SKIP, vqa atoms score, census 1 of 2
+    verifiers = {1: ScriptedVerifier({"face": 0.05})}
+    result = orchestrate.run(
+        resolved, synth, gen, verifiers, thresholds,
+        config=LoopConfig(thresholds_version=thresholds.version, records_dir=str(tmp_path)),
+    )
+    assert result.decision == "escalated"
+    assert all(a.repair is None for a in result.attempts)
+
+
+def test_a_scored_fail_with_a_complete_census_still_repairs(tmp_path):
+    """The other half: a real FAIL on a fully-run gate still climbs the ladder."""
+    result = _run(tmp_path, verifier_scores={"face": 0.05})
+    assert result.decision == "escalated"
+    assert any(a.repair for a in result.attempts)
+
+
+def test_is_unrepairable_names_the_three_unrepairable_shapes():
+    skipped = _atom_verdict(score=None, zone=Zone.SKIPPED, tier_used=None, verifier_id=None)
+    unavailable = GateTranscript(
+        contract_id="c", overall=Zone.UNAVAILABLE, verdicts=[skipped],
+        tier_census=TierCensus(required=[1], executed=[]),
+    )
+    short = GateTranscript(
+        contract_id="c", overall=Zone.UNCERTAIN, verdicts=[_atom_verdict()],
+        tier_census=TierCensus(required=[0, 1], executed=[1]),
+    )
+    scored_fail = GateTranscript(
+        contract_id="c", overall=Zone.FAIL,
+        verdicts=[_atom_verdict(score=0.05, zone=Zone.FAIL)],
+        tier_census=TierCensus(required=[1], executed=[1]),
+    )
+    assert is_unrepairable(unavailable) is True
+    assert is_unrepairable(short) is True
+    assert is_unrepairable(scored_fail) is False
 
 
 def test_bare_exception_from_generate_is_treated_as_transient(tmp_path):

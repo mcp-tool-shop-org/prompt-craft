@@ -11,7 +11,7 @@ import json
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ...errors import PromptCraftError
 from ..contract.compile_questions import Polarity
@@ -28,8 +28,14 @@ class Zone(str, Enum):
 
 class Band(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    high: float  # score >= high  -> PASS
-    low: float  # score <= low   -> FAIL
+    high: float = Field(ge=0.0, le=1.0)  # score >= high  -> PASS
+    low: float = Field(ge=0.0, le=1.0)  # score <= low   -> FAIL
+
+    @model_validator(mode="after")
+    def high_at_least_low(self) -> Band:
+        if self.high < self.low:
+            raise ValueError(f"band high ({self.high}) must be >= low ({self.low})")
+        return self
 
 
 class ThresholdTable(BaseModel):
@@ -67,4 +73,11 @@ def load_thresholds(path: str | Path) -> ThresholdTable:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as err:
         raise PromptCraftError("IO_THRESHOLDS_READ", f"could not read thresholds {p}", cause=err) from err
-    return ThresholdTable.model_validate(data)
+    try:
+        return ThresholdTable.model_validate(data)
+    except ValidationError as err:
+        raise PromptCraftError(
+            "CONFIG_THRESHOLDS_INVALID",
+            f"threshold table {p} failed band invariants (high >= low, values in [0, 1])",
+            cause=err,
+        ) from err

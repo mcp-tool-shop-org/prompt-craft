@@ -97,6 +97,12 @@ class _FakePipe:
         self.device = device
         return self
 
+    def load_ip_adapter(self, *args, **kwargs):
+        self.ip_adapter = {"args": args, "kwargs": kwargs}
+
+    def set_ip_adapter_scale(self, scale):
+        self.ip_scale = scale
+
     def __call__(self, **kwargs):
         self.call_kwargs = kwargs
         return types.SimpleNamespace(images=[_FakeImage()])
@@ -151,19 +157,22 @@ def _install_fake_t2v_metrics(monkeypatch, vqascore_cls) -> None:
 # needed for the refusal cases: the check fires before _load() is ever called.
 
 
-def test_sdxl_refuses_nonempty_pose_refs():
+def test_sdxl_refuses_a_missing_pose_ref():
+    """Feature pass: SDXL implements ControlNet, but a missing plate is still a refuse
+    (not a silent txt2img). The Stage A code was GATE_CONDITIONING_UNSUPPORTED for any
+    nonempty list; the capability exists now, the unreadability does not."""
     gen = SDXLGenerator()
     with pytest.raises(PromptCraftError) as exc:
         gen.generate("p", "n", {"pose_refs": ["poses/front.openpose.png"]}, seed=1)
-    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
 
 
-def test_sdxl_refuses_nonempty_identity_refs():
+def test_sdxl_refuses_a_missing_identity_plate():
     gen = SDXLGenerator()
     with pytest.raises(PromptCraftError) as exc:
-        gen.generate("p", "n", {"identity_refs": [{"plate": "ref.png"}]}, seed=1)
-    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
-    assert "identity_ref" in (exc.value.hint or "")
+        gen.generate("p", "n", {"identity_refs": [{"plate": "ref.png", "method": "ip_adapter"}]}, seed=1)
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
+    assert "identity" in (exc.value.hint or "").lower()
     assert "Drop pose_refs" not in (exc.value.hint or "")
 
 
@@ -206,6 +215,7 @@ def test_conditioning_refusal_names_the_generator_that_refused():
     with pytest.raises(PromptCraftError) as exc:
         gen.generate("p", "n", {"pose_refs": ["x"]}, seed=1)
     assert gen.generator_id in str(exc.value)
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
 
 
 # =========================================================================== F-10b380ba

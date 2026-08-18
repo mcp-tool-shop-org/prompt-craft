@@ -15,6 +15,7 @@ def format_transcript(t: GateTranscript) -> str:
     census = t.tier_census
     lines = [
         f"gate overall: {t.overall.value}  (contract {t.contract_id})",
+        f"thresholds: {t.thresholds_version or 'unversioned'}",
         f"tiers executed: {census.n} of {census.m}  "
         f"(executed {census.executed}; required {census.required})",
     ]

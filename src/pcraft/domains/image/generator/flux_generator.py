@@ -4,16 +4,17 @@ Same plugin contract as SDXL; ``family = "flux"``. A sibling to ``SDXLGenerator`
 the generator is the swappable secret -- the core loop, contract, gate, and optimizer are unchanged
 when the encoder changes. torch/diffusers are lazy ``[image]`` deps.
 
-STAGE A HONESTY NOTE (F-d628ec97): same defect and same fix as ``SDXLGenerator`` -- see that file's
-module docstring. ``FluxPipeline`` here is the plain txt2img pipeline; no ControlNet, no IP-Adapter.
-``generate()`` refuses rather than silently accepting conditioning it cannot apply."""
+UNMEASURED FAMILY: pose-lock, IP-Adapter, and inpaint stay refused here. SDXL is the
+implemented encoder. ``generate()`` still refuses rather than silently accepting
+conditioning it cannot apply."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from ....errors import PromptCraftError
 from ....core.loop.generator_iface import GenerationResult
+from ....errors import PromptCraftError
+from . import conditioning as cond
 from ._device import select_device, select_dtype
 
 
@@ -55,18 +56,9 @@ class FluxGenerator:
         return self._pipe
 
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
-        # F-d628ec97: same refusal as SDXLGenerator.generate() -- see that file for the full comment.
-        if conditioning.get("pose_refs") or conditioning.get("identity_refs"):
-            raise PromptCraftError(
-                "GATE_CONDITIONING_UNSUPPORTED",
-                f"{self.generator_id} cannot apply pose_refs/identity_refs conditioning: "
-                "ControlNet pose-lock and IP-Adapter identity binding are not implemented by this "
-                "generator (plain FluxPipeline txt2img only)",
-                hint="The loop assembled those keys from the contract's identity_ref plate "
-                "and any spatial.kind=pose atom. They are not contract JSON keys. For a "
-                "text-only run, omit identity_ref and pose spatials. Pose-lock and "
-                "identity-binding are unimplemented on this generator.",
-            )
+        # Unmeasured family: pose-lock / identity-bind / inpaint stay refused until a
+        # Director-gated measurement says Flux may apply them. SDXL is the implemented encoder.
+        cond.refuse_unmeasured_family(self.generator_id, self.family, conditioning)
 
         pipe = self._load()
         try:
