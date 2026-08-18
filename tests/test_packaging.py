@@ -61,3 +61,22 @@ def test_installed_package_ships_the_py_typed_marker():
 
     marker = Path(pcraft.__file__).resolve().parent / "py.typed"
     assert marker.is_file(), f"missing py.typed next to {pcraft.__file__}"
+
+
+def test_the_version_fallback_matches_pyproject():
+    """The uninstalled-checkout fallback may not drift from the declared version.
+
+    ``package_version()`` prefers installed distribution metadata, so this literal is only
+    reached when the package is NOT installed -- a checkout run with PYTHONPATH=src. That is
+    precisely the path nobody exercises before a release, and it sat at 0.2.1 through the
+    0.3.0 bump: `pcraft --version` and `pcraft doctor` would have reported the previous
+    release's number while running the new tree. A version that disagrees with its own source
+    is this repo's own defect class wearing a different hat.
+    """
+    from pcraft import _FALLBACK_VERSION
+
+    declared = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert _FALLBACK_VERSION == declared, (
+        f"pcraft._FALLBACK_VERSION is {_FALLBACK_VERSION!r} but pyproject declares {declared!r}; "
+        "bump both together or an uninstalled checkout misreports its own version"
+    )

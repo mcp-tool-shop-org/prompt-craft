@@ -100,7 +100,7 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v0.2.1 — o núcleo é real. O condicionamento SDXL está implementado no código. Uma instância local 5090 `generate()` já foi executada. Um script do Cloud foi executado ao vivo.**
+**v0.3.0 – o núcleo está pronto. O condicionamento do SDXL foi implementado no código. Uma placa gráfica local 5090 `generate()` já foi testada. Um modelo na nuvem foi executado em tempo real.**
 
 | | |
 |---|---|

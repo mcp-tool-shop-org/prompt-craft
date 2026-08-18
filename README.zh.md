@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
 </p>
 
-#
+#请提供您需要翻译的英文文本
 
 **说明图片必须包含什么。检查它是否确实包含了这些内容。如果未包含，则拒绝。**
 
@@ -100,7 +100,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## 诚实的状态
 
-**v0.2.1——核心功能已实现。SDXL条件控制已在代码中组装完毕。现在已经在一台本地的5090 `generate()`设备上进行了测试。一个云端配方也已进行实时测试。**
+**v0.3.0 版本——核心功能已实现。SDXL 条件控制已通过代码整合。现在已经在一台本地的 5090 `generate()` 上进行了测试。一个云端配方也已进行实时测试。**
 
 | | |
 |---|---|

@@ -130,7 +130,7 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.2.1 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
+**v0.3.0 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
 
 | | |
 |---|---|

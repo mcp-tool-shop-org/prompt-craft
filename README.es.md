@@ -100,11 +100,11 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v0.2.1: el núcleo es real. El condicionamiento de SDXL se ha implementado en el código. Ahora se ha ejecutado una versión local con una 5090 `generate()`. Se ha probado una receta en la nube.**
+**v0.3.0: el núcleo ya es funcional. El condicionamiento de SDXL se ha implementado en el código. Se ha ejecutado una prueba local con una tarjeta gráfica 5090 `generate()`. Se ha probado una configuración en la nube.**
 
 | | |
 |---|---|
-| Núcleo | **338 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
+| Núcleo | **319 pruebas superadas** (contadas el 2026-08-18), sin GPU, determinista. `verify` ejecuta la suite, la suite de nuevo bajo `-O` y se crea un paquete. |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
 | Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **conectados y cubiertos por las pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. Dos imágenes de IP-Adapter permanecen en un mismo adaptador (todas las imágenes; la escala es la restricción más fuerte). La versión local `generate()` se ejecutó en la 5090 (18 de agosto de 2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma tiene un estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. |
 | Codificador Flux | El modo solo texto y el **relleno** están conectados (fake-torch). ControlNet pose e IP-Adapter siguen rechazados (familia incorrecta). `method=reference` escribe el gráfico de la receta en la nube y se niega a simular que Kontext se ejecuta localmente (`GATE_CLOUD_SUBMIT`). |
@@ -124,7 +124,7 @@ Tres afirmaciones que las versiones anteriores de este documento hicieron y que 
 
 | | |
 |---|---|
-| Python | **3.11+** (el entorno de integración continua ejecuta las versiones 3.11 y 3.13 en el núcleo + `[dev]`. El `[image]` adicional no se incluye en la versión 3.11). |
+| Python | **3.11+:** (el sistema de integración continua ejecuta las versiones 3.11 y 3.13 en el núcleo + `[dev]`. La mejora adicional `[image]` no se aplica a la versión 3.11). |
 | Plataformas | Python puro, sin extensiones compiladas en el núcleo; desarrollado en Windows 11, la integración continua se realiza en `ubuntu-latest`. |
 | Dependencias | el núcleo solo necesita `pydantic`. El trabajo con GPU se encuentra detrás de complementos opcionales. |
 

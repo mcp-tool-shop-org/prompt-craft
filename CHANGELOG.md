@@ -11,6 +11,22 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
+### Added
+
+### Fixed
+
+### Changed
+
+## [0.3.0] — 2026-08-18
+
+**The encoders landed and a 5090 ran them. The frame did not carry the plate, and the
+typecheck had stopped checking.**
+
+Every conditioning encoder the contract could express is now wired and covered. Two of them
+were run for real rather than mocked, and both live runs are recorded with what they failed
+to do. The suite went 105 -> 338 across the swarm; the version stays pre-1.0 because a
+generate that ran is not a stability claim.
+
 ### Measured
 
 - **Local 5090 SDXL `generate()` ran** (2026-08-18). CUDA

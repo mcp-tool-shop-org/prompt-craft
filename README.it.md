@@ -100,7 +100,7 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 ## Stato corretto
 
-**v0.2.1: il nucleo è operativo. Il condizionamento SDXL è stato implementato nel codice. È stata eseguita una prova locale con una scheda grafica 5090 `generate()`. Una ricetta Cloud è stata eseguita in diretta.**
+**v0.3.0: il nucleo è operativo. Il sistema di condizionamento SDXL è stato implementato tramite codice. È stata eseguita una prova su una scheda grafica locale 5090 `generate()`. È stata eseguita una dimostrazione dal vivo con un modello Cloud.**
 
 | | |
 |---|---|
@@ -124,7 +124,7 @@ Tre affermazioni che le versioni precedenti di questo documento hanno fatto e ch
 
 | | |
 |---|---|
-| Python | **3.11+** (il sistema di integrazione continua esegue le versioni 3.11 e 3.13 sul nucleo principale + `[dev]`. Il valore aggiuntivo `[image]` non viene conteggiato per la versione 3.11). |
+| Python | **3.11+:** (il sistema di integrazione continua esegue le versioni 3.11 e 3.13 sul nucleo + `[dev]`. Il vantaggio aggiuntivo `[image]` non è garantito con la versione 3.11). |
 | Piattaforme | solo Python, nessuna estensione compilata nel core: sviluppato su Windows 11, test CI su `ubuntu-latest` |
 | Dipendenze | il core necessita solo di `pydantic`. Le operazioni GPU sono implementate tramite moduli opzionali. |
 

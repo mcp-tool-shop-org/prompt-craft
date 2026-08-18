@@ -18,7 +18,7 @@ Measured against `pcraft --help` on 2026-08-18. Flags that do not appear here do
 | `pcraft gate <image>` | score an image against a contract. Missing path is exit 4, not a failed atom |
 | `pcraft bind` | the full loop. `--mock` is the GPU-free path; scores are scripted constants. `--no-mock` is the live door when `[image]` is installed |
 | `pcraft replay <record>` | reconstruct the question DAG and refuse on drift |
-| `pcraft doctor` | python, extras, store load. Reports `pcraft 0.2.1` |
+| `pcraft doctor` | python, extras, store load. Reports `pcraft 0.3.0` |
 | `pcraft schema` | JSON Schema for the authoring contract |
 | `pcraft --json` | on the dumpable commands, the pydantic model is stdout |
 

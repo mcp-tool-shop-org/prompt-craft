@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 # registered for this exact name with workflow release.yml, and both are matched
 # byte-for-byte at authentication time.
 name = "prompt-crafter"
-version = "0.2.1"
+version = "0.3.0"
 description = "Say what the picture must contain, check that it does, and refuse when it does not. A typed contract of depictable claims drives both the prompt and the gate that verifies the pixels."
 # PyPI-specific. The GitHub README opens with a logo at a repo-relative path and a
 # seven-language nav bar of sibling files — both render as broken links on PyPI, which

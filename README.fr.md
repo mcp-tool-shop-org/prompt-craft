@@ -100,7 +100,7 @@ Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et 
 
 ## Statut honnête
 
-**v0.2.1 — le noyau est opérationnel. Le conditionnement SDXL est intégré dans le code. Une instance locale 5090 `generate()` a été exécutée. Un script Cloud a été exécuté en direct.**
+**Version 0.3.0 : le noyau est opérationnel. Le conditionnement SDXL est intégré dans le code. Un modèle local 5090 `generate()` a été testé. Une recette Cloud a été exécutée en direct.**
 
 | | |
 |---|---|
