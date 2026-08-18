@@ -21,7 +21,7 @@ def preflight_image(path: str | Path) -> Path:
         raise PromptCraftError(
             "IO_GATE_INPUT",
             f"image does not exist: {p}",
-            hint="Pass a readable image file. A missing path is not an UNCERTAIN score.",
+            hint="Pass a readable image file. A missing path is exit 4, not a failed atom.",
         )
     if not p.is_file():
         raise PromptCraftError(

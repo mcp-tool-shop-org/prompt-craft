@@ -14,7 +14,15 @@ Error-code namespaces (prefix → CLI exit code):
     IO_      filesystem read/write failure                          -> exit 2
     RUNTIME_ unexpected runtime crash                               -> exit 2
     STATE_   illegal state transition in the loop                  -> exit 2
-    PARTIAL_ partial success (some atoms unverified)                -> exit 3
+    PARTIAL_ ran, required atom unconfirmed (human band)            -> exit 3
+
+Per-code overrides (win over the prefix). Practice, not a paper: Nagios
+0 OK / 1 WARNING / 2 CRITICAL / 3 UNKNOWN never overloads CRITICAL with
+"could not run." We already spent 3 on PARTIAL_ (the WARNING analog).
+Could-not-run therefore sits at 4, not 2:
+
+    GATE_UNAVAILABLE  no required atom produced a score              -> exit 4
+    IO_GATE_INPUT     path missing / not a file / unreadable         -> exit 4
 """
 
 from __future__ import annotations
@@ -36,6 +44,13 @@ _EXIT_BY_PREFIX: Final[dict[str, int]] = {
     "PARTIAL_": 3,
 }
 
+# Could-not-run is not GATE_FAIL. The codes already differ; only the number
+# a CI branch reads was collapsing them onto 2.
+_EXIT_BY_CODE: Final[dict[str, int]] = {
+    "GATE_UNAVAILABLE": 4,
+    "IO_GATE_INPUT": 4,
+}
+
 DEFAULT_HINTS: Final[dict[str, str]] = {
     "DEP_IMAGE_MISSING": "Install the GPU extra: pip install -e '.[image]' (torch + diffusers).",
     "DEP_SYNTH_MISSING": "Install the synth extra: pip install -e '.[synth]' (DSPy + an LM backend).",
@@ -45,16 +60,18 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom. "
     "Raise the severity/threshold, or override the atom — never weaken inherited requirements.",
-    "IO_GATE_INPUT": "Pass a readable image file. A missing or unreadable path is not UNCERTAIN.",
-    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score.",
-    "GATE_FAIL": "A required contract atom failed. Identity still gates nothing.",
-    "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band.",
+    "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom. Exit 4.",
+    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score. Exit 4, not 2 — this is not a failed atom.",
+    "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",
+    "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
 }
 
 
 def exit_code_for(code: str) -> int:
-    """Map an error code to its CLI exit code via its namespace prefix (default 2)."""
+    """Map an error code to its CLI exit code. Per-code overrides win; then prefix."""
+    if code in _EXIT_BY_CODE:
+        return _EXIT_BY_CODE[code]
     for prefix, exit_code in _EXIT_BY_PREFIX.items():
         if code.startswith(prefix):
             return exit_code

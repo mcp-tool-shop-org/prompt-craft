@@ -174,7 +174,9 @@ def _select_best(candidates):
     # The VERIFIER is the selector: prefer PASS, then fewest required failures, then most passes.
     def key(item):
         _gen, t = item
-        rank = {Zone.PASS: 0, Zone.UNCERTAIN: 1, Zone.FAIL: 2}.get(t.overall, 3)
+        rank = {Zone.PASS: 0, Zone.UNCERTAIN: 1, Zone.FAIL: 2, Zone.UNAVAILABLE: 3}.get(
+            t.overall, 4
+        )
         n_fail = len(t.failed_required())
         n_pass = sum(1 for v in t.verdicts if v.zone is Zone.PASS)
         return (rank, n_fail, -n_pass)

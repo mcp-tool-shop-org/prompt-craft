@@ -22,6 +22,19 @@ def test_distinct_families_pass():
     assert_distinct_families("stable-diffusion", ["siglip", "clip-flant5", "dsg-qg"])  # no raise
 
 
+def test_a_generative_vlm_may_score_a_diffusion_image():
+    """Rule (2): different family. Not a blanket ban on generative verifiers."""
+    assert_distinct_families("stable-diffusion", ["llava", "qwen-vl"])
+
+
+def test_two_generative_vlms_share_a_family_token_today():
+    """LLaVA generating and Qwen-VL scoring both normalize to generative-vlm."""
+    with pytest.raises(PromptCraftError) as exc:
+        assert_distinct_families("llava", ["qwen-vl"])
+    assert exc.value.code == "GATE_SAME_FAMILY"
+    assert normalize_family("llava") == normalize_family("qwen-vl") == "generative-vlm"
+
+
 def test_clipscore_is_banned_as_gate_metric():
     class _ClipScore:
         verifier_id = "clipscore.v0"

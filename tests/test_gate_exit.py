@@ -1,6 +1,6 @@
 """The gate's process-exit contract.
 
-Nominated chip: a missing image must not exit 0.
+Nominated chip: could-not-run and ran-and-failed are different exit codes.
 """
 
 from __future__ import annotations
@@ -18,11 +18,26 @@ from pcraft.errors import PromptCraftError
 from pcraft.testing import ScriptedVerifier, write_solid_png
 
 
+def test_could_not_run_and_ran_and_failed_are_different_exits(sprite_example):
+    """Nominated chip. GATE_UNAVAILABLE must not share an exit code with GATE_FAIL."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    skipped = harness.evaluate(dag, "x.png", {1: ScriptedVerifier(lambda _q: None)}, thresholds)
+    failed = harness.evaluate(dag, "x.png", {1: ScriptedVerifier({"tabard": 0.05})}, thresholds)
+    err_skip = error_from_transcript(skipped)
+    err_fail = error_from_transcript(failed)
+    assert err_skip is not None and err_fail is not None
+    assert err_skip.code == "GATE_UNAVAILABLE"
+    assert err_fail.code == "GATE_FAIL"
+    assert err_skip.exit_code == 4
+    assert err_fail.exit_code == 2
+    assert err_skip.exit_code != err_fail.exit_code
+
+
 def test_a_missing_image_is_not_exit_zero():
-    """Nominated chip. pcraft gate on a path that does not exist must refuse."""
+    """Could not see the input is exit 4, same bucket as GATE_UNAVAILABLE, not GATE_FAIL."""
     result = CliRunner().invoke(app, ["gate", "E:/nope/does-not-exist.png"])
-    assert result.exit_code != 0
-    assert result.exit_code == 2
+    assert result.exit_code == 4
     text = (result.stdout or "") + (result.stderr or "")
     assert "IO_GATE_INPUT" in text
     assert "gate overall:" not in text
@@ -40,13 +55,14 @@ def test_preflight_accepts_a_readable_file(tmp_path):
 
 
 def test_unavailable_verifiers_on_a_real_file_are_not_exit_zero(tmp_path):
-    """Extras missing is GATE_UNAVAILABLE (2), not UNCERTAIN-as-success (0)."""
+    """Extras missing is GATE_UNAVAILABLE (4), not FAIL (2) and not a pass (0)."""
     image = write_solid_png(tmp_path / "present.png")
     result = CliRunner().invoke(app, ["gate", str(image)])
-    assert result.exit_code == 2
+    assert result.exit_code == 4
     text = (result.stdout or "") + (result.stderr or "")
     assert "GATE_UNAVAILABLE" in text
-    assert "UNCERTAIN" in text  # the transcript line stays honest
+    assert "UNAVAILABLE" in text
+    assert "tiers executed:" in text
 
 
 def test_could_not_run_when_every_required_atom_is_skipped(sprite_example):
@@ -55,8 +71,10 @@ def test_could_not_run_when_every_required_atom_is_skipped(sprite_example):
     v = ScriptedVerifier(lambda _q: None)
     t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds)
     assert t.could_not_run() is True
+    assert t.overall is Zone.UNAVAILABLE
     err = error_from_transcript(t)
     assert err is not None and err.code == "GATE_UNAVAILABLE"
+    assert err.exit_code == 4
 
 
 def test_a_required_fail_is_gate_fail_not_uncertain(sprite_example):
@@ -67,6 +85,7 @@ def test_a_required_fail_is_gate_fail_not_uncertain(sprite_example):
     assert t.overall is Zone.FAIL
     err = error_from_transcript(t)
     assert err is not None and err.code == "GATE_FAIL"
+    assert err.exit_code == 2
 
 
 def test_an_uncertain_score_after_a_real_run_is_partial(sprite_example):

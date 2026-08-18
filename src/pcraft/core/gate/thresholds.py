@@ -23,6 +23,7 @@ class Zone(str, Enum):
     FAIL = "FAIL"
     NA = "NA"  # a parent failed; this atom was not evaluated
     SKIPPED = "SKIPPED"  # verifier unavailable (e.g. SigLIP2 not installed) — never silently a pass
+    UNAVAILABLE = "UNAVAILABLE"  # roll-up only: no required atom produced a score
 
 
 class Band(BaseModel):

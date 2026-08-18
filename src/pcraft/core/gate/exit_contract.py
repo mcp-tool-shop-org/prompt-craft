@@ -41,6 +41,6 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
         return PromptCraftError(
             "PARTIAL_UNCONFIRMED",
             "required atom(s) unconfirmed after a real score: " + ", ".join(unconfirmed),
-            hint="This is the human band, not a pass. Exit 3 (PARTIAL_), not 0.",
+            hint="This is the human band, not a pass. Exit 3 (PARTIAL_), not 0, not 4.",
         )
     return None

@@ -8,7 +8,7 @@ silent PASS — it routes the whole asset to the UNCERTAIN (human) band."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..contract.compile_questions import CheckType, Polarity, QuestionDAG, Severity
 from .thresholds import ThresholdTable, Zone
@@ -30,11 +30,33 @@ class AtomVerdict(BaseModel):
     reason: str
 
 
+class TierCensus(BaseModel):
+    """N of M required tiers actually executed. Independent of the verdict.
+
+    M is the set of tiers the contract's required / must_not atoms map to.
+    N is how many of those produced at least one score. A PASS with 1/2
+    is a pass whose Tier-0 never ran — the watchdog, not a second verdict.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    required: list[int] = Field(default_factory=list)
+    executed: list[int] = Field(default_factory=list)
+
+    @property
+    def n(self) -> int:
+        return len(self.executed)
+
+    @property
+    def m(self) -> int:
+        return len(self.required)
+
+
 class GateTranscript(BaseModel):
     model_config = ConfigDict(extra="forbid")
     contract_id: str
     overall: Zone
     verdicts: list[AtomVerdict]
+    tier_census: TierCensus = Field(default_factory=TierCensus)
 
     def failed_required(self) -> list[AtomVerdict]:
         return [v for v in self.verdicts if v.zone is Zone.FAIL and _counts(v)]
@@ -112,7 +134,12 @@ def evaluate(
         )
 
     ordered = [verdicts[q.atom_id] for q in dag.questions]
-    return GateTranscript(contract_id=dag.contract_id, overall=_rollup(ordered), verdicts=ordered)
+    return GateTranscript(
+        contract_id=dag.contract_id,
+        overall=_rollup(ordered),
+        verdicts=ordered,
+        tier_census=_tier_census(dag, ordered),
+    )
 
 
 def _skipped(q, reason: str) -> AtomVerdict:
@@ -122,11 +149,38 @@ def _skipped(q, reason: str) -> AtomVerdict:
     )
 
 
+def _required_tiers(dag: QuestionDAG) -> list[int]:
+    tiers: set[int] = set()
+    for q in dag.questions:
+        if q.severity is Severity.required or q.polarity is Polarity.negate:
+            tiers.add(_TIER_FOR_CHECK[q.check_type])
+    return sorted(tiers)
+
+
+def _tier_census(dag: QuestionDAG, verdicts: list[AtomVerdict]) -> TierCensus:
+    required = _required_tiers(dag)
+    executed = sorted({
+        v.tier_used for v in verdicts
+        if v.score is not None and v.tier_used is not None and v.tier_used in required
+    })
+    return TierCensus(required=required, executed=executed)
+
+
 def _rollup(verdicts: list[AtomVerdict]) -> Zone:
+    """The gate's own abstention, not a max over tier confidences.
+
+    A mid-band score is UNCERTAIN (the atom was checked). A missing score is
+    not UNCERTAIN — if nothing scored, the roll-up is UNAVAILABLE. Mixing
+    those two into one Zone was the same merge the exit contract had to split.
+    """
     relevant = [v for v in verdicts if _counts(v)]
-    zones = {v.zone for v in relevant}
-    if Zone.FAIL in zones:
+    scored = [v for v in relevant if v.score is not None]
+    if any(v.zone is Zone.FAIL for v in scored):
         return Zone.FAIL
-    if zones & {Zone.UNCERTAIN, Zone.SKIPPED, Zone.NA}:
-        return Zone.UNCERTAIN  # a required atom we could not confirm — never a silent pass
+    if not scored:
+        return Zone.UNAVAILABLE
+    if any(v.zone is Zone.UNCERTAIN for v in scored):
+        return Zone.UNCERTAIN
+    if any(v.zone in (Zone.SKIPPED, Zone.NA) for v in relevant):
+        return Zone.UNCERTAIN
     return Zone.PASS

@@ -1,9 +1,20 @@
-"""EXTERNAL_VERIFIER hard guard: a model must never be its own gate.
+"""EXTERNAL_VERIFIER hard guard: never the same family, which includes never the same weights.
 
-``assert_distinct_families`` hard-refuses to run if the generator family equals any gate verifier
-family. Earned on this rig: a generative VLM (LLaVA-13B) hallucinated greatswords on unarmed cooks
-at 0.90 confidence (P=0.26); the discriminative, different-family SigLIP2 scored P=0.909. The whole
-``google/siglip2-*`` line normalizes to one family so a sibling checkpoint can't sneak past."""
+``assert_distinct_families`` hard-refuses if the generator family equals any gate
+verifier family after ``normalize_family``. That is rule (2) in
+``verifier_iface.py`` — sibling checkpoints cannot sneak past (the
+``google/siglip2-*`` line is one family for that reason).
+
+It is not a ban on generative verifiers. A generative VLM scoring an SDXL
+image is a different family and passes this guard. Two generative VLMs
+currently share the ``generative-vlm`` token, so they do not pass. See
+``verifier_iface.py`` for the slogan-vs-rule writeup.
+
+Earned on this rig: a generative VLM (LLaVA-13B) hallucinated greatswords on
+unarmed cooks at 0.90 confidence (P=0.26); the discriminative, different-family
+SigLIP2 scored P=0.909. That measurement is same-object-presence, two families
+— it supports (2), not a blanket ban on generative scoring of diffusion output.
+"""
 
 from __future__ import annotations
 
