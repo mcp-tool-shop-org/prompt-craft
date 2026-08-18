@@ -56,6 +56,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "DEP_SYNTH_MISSING": "Install the synth extra: pip install -e '.[synth]' (DSPy + an LM backend).",
     "GATE_SAME_FAMILY": "The generator and the gate verifier are the same model family. "
     "Use a different-family verifier — a model must never be its own gate.",
+    "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom. "

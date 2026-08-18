@@ -71,8 +71,13 @@ def assert_tokens_trace(prompt: str, inventory: list[InventoryRow]) -> None:
             continue
         if norm in allowed:
             continue
-        # tolerate a segment that is contained in (or contains) a known token
-        if any(norm in tok or tok in norm for tok in allowed):
+        # A segment that is a fragment of a known token (norm in tok) is the
+        # intended looseness: "tabard" traces to "a grey-ash tabard worn…".
+        # tok in norm is the other direction — extra words around a full claim.
+        # That arm is the same shape as the _is_identity_atom substring defect:
+        # a short token ("a", "or", "art") is a substring of almost any English
+        # segment. Only tokens long enough to be a phrase may match that way.
+        if any(norm in tok or (len(tok) >= 8 and tok in norm) for tok in allowed):
             continue
         untraceable.append(seg.strip())
     if untraceable:

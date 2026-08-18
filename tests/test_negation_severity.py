@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from pcraft.core.contract.compile_questions import compile_questions
 from pcraft.core.contract.schema import MustNot, Severity
 from pcraft.core.gate import harness
@@ -116,3 +118,46 @@ def test_the_scaffold_contracts_declare_their_negations_optional():
         seen = {mn["id"]: mn.get("severity") for mn in doc["must_not"]}
         assert set(seen) == ids, f"{path} negation set changed: {sorted(seen)}"
         assert all(v == "optional" for v in seen.values()), f"{path}: {seen}"
+
+
+def _faction_child(base_sev: Severity, child_sev: Severity):
+    from pcraft.core.contract.loader import resolve
+    from pcraft.core.contract.schema import Contract
+
+    faction = Contract(
+        id="f:test", level="faction",
+        must_not=[MustNot(id="no_gun", claim="a firearm", severity=base_sev)],
+    )
+    child = Contract(
+        id="c:test", level="character", extends="f:test",
+        must_not=[MustNot(id="no_gun", claim="a firearm", severity=child_sev)],
+    )
+    return resolve(child, lambda i: faction if i == "f:test" else None)
+
+
+def test_a_character_may_not_relax_an_inherited_negation():
+    """⚑ The hole the severity field opened, closed.
+
+    Fail-closed inheritance already forbade a character lowering a faction atom's severity. It did
+    not cover must_not, because until MustNot carried a severity there was nothing to lower.
+    Measured before the guard: faction `required` + child `optional` resolved to optional, silently.
+
+    What this looks like if wrong: a faction forbids firearms as a blocking rule and any character
+    contract can quietly demote it to a warning.
+    """
+    from pcraft.errors import PromptCraftError
+
+    with pytest.raises(PromptCraftError) as exc:
+        _faction_child(Severity.required, Severity.optional)
+    assert exc.value.code == "CONTRACT_RELAXATION"
+
+
+def test_a_character_may_raise_an_inherited_negation():
+    """The permitted direction. Fail-closed must not mean frozen."""
+    r = _faction_child(Severity.optional, Severity.required)
+    assert [mn.severity for mn in r.must_not] == [Severity.required]
+
+
+def test_an_unchanged_inherited_negation_survives_resolution():
+    r = _faction_child(Severity.required, Severity.required)
+    assert [mn.severity for mn in r.must_not] == [Severity.required]

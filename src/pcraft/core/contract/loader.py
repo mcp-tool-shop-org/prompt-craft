@@ -80,7 +80,7 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     base = resolve(base_contract, lookup)  # recurse: support multi-level chains
 
     merged_must_have = _merge_atoms_fail_closed(base.must_have, contract.must_have, child_id=contract.id)
-    merged_must_not = _merge_must_not(base.must_not, contract.must_not)
+    merged_must_not = _merge_must_not(base.must_not, contract.must_not, child_id=contract.id)
     identity_refs: list[IdentityRef] = list(base.identity_refs)
     if contract.identity_ref:
         identity_refs.append(contract.identity_ref)
@@ -125,8 +125,27 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
     return ordered
 
 
-def _merge_must_not(base, child):
+def _merge_must_not(base, child, *, child_id: str):
+    """Union by id, fail-closed on severity — the same rule ``_merge_atoms_fail_closed`` enforces.
+
+    ⚑ This guard was ADDED when ``MustNot`` gained a severity, and it closes a hole that change
+    opened. Before the field existed every negation was required by construction, so a plain
+    override could not relax anything and none was needed. The moment a negation can be
+    ``optional``, a character contract could override an inherited ``required`` negation down to
+    ``optional`` and the loader would allow it — silently relaxing the exact kind of inherited
+    requirement this module exists to protect.
+
+    Measured before the fix: a faction declaring ``no_gun`` required and a character re-declaring
+    it optional resolved to optional, no error.
+    """
     by_id = {m.id: m for m in base}
     for m in child:
+        base_mn = by_id.get(m.id)
+        if base_mn is not None and _SEVERITY_RANK[m.severity] < _SEVERITY_RANK[base_mn.severity]:
+            raise PromptCraftError(
+                "CONTRACT_RELAXATION",
+                f"character {child_id!r} relaxes faction must_not {m.id!r} "
+                f"({base_mn.severity.value} -> {m.severity.value})",
+            )
         by_id[m.id] = m
     return list(by_id.values())

@@ -1,4 +1,8 @@
-# prompt-craft
+<p align="center">
+  <img src="docs/assets/logo.png" alt="prompt-craft" width="820">
+</p>
+
+#
 
 > **Contract-driven generative-asset production.** A typed, depictable **contract** →
 > a constrained **synthesizer** (every token traces to a depictable atom) → **generate** →
@@ -7,8 +11,8 @@
 
 **Status: SCAFFOLD (v0.1.0).** The GPU-free `core/` and the `image/sprite` reference plugin
 are wired and mock-tested; the loop runs end-to-end on a **generic, non-canon** example contract.
-Binding to any real game canon is **gated on the Director** (see *Gates* below). Private repo
-under `mcp-tool-shop-org` — it references internal pipeline infra.
+Binding to any real game canon is **gated on the Director** (see *Gates* below). Public repo
+under `mcp-tool-shop-org`.
 
 ---
 

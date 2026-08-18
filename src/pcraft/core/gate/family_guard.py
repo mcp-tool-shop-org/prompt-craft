@@ -43,7 +43,18 @@ def normalize_family(name: str) -> str:
 
 
 def assert_distinct_families(generator_family: str, verifier_families: list[str]) -> None:
-    """Raise GATE_SAME_FAMILY if the generator shares a normalized family with any gate verifier."""
+    """Raise GATE_SAME_FAMILY if the generator shares a normalized family with any gate verifier.
+
+    ``verifier_families`` must be a sequence of names, not a bare string. Iterating a
+    string checks characters (``'sdxl'`` → ``s,d,x,l``), none of which normalize to
+    the generator family, so the one case this guard exists to refuse would pass.
+    """
+    if isinstance(verifier_families, (str, bytes)):
+        raise PromptCraftError(
+            "GATE_FAMILIES_NOT_A_LIST",
+            f"verifier_families must be a list of family names, not {type(verifier_families).__name__} "
+            f"{verifier_families!r} — iterating a string checks characters and the guard cannot fire",
+        )
     gen = normalize_family(generator_family)
     for vf in verifier_families:
         if normalize_family(vf) == gen:

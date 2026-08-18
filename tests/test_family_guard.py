@@ -12,6 +12,17 @@ def test_siglip2_siblings_normalize_to_one_family():
     assert normalize_family("google/siglip2-so400m-patch16-512") == "siglip"
 
 
+def test_a_bare_string_of_the_same_family_is_refused():
+    """Nominated chip. A string is iterated as characters; none normalize to sdxl.
+
+    What this looks like if wrong: assert_distinct_families('sdxl', 'sdxl') returns
+    None and the one case the guard exists to refuse goes through.
+    """
+    with pytest.raises(PromptCraftError) as exc:
+        assert_distinct_families("sdxl", "sdxl")
+    assert exc.value.code == "GATE_FAMILIES_NOT_A_LIST"
+
+
 def test_same_family_generator_and_verifier_is_refused():
     with pytest.raises(PromptCraftError) as exc:
         assert_distinct_families("stable-diffusion", ["clip-flant5", "stable-diffusion"])
