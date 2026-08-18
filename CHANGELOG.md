@@ -22,6 +22,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   one adapter refuse (`Cannot assign 2 scale_configs to 1
   IP-Adapter`). `bind --no-mock` still raises `DEP_IMAGE_MISSING`.
   Flux text-only / Fill not run — weights not on disk.
+- Suite **337 → 338** after the 3.11 CI floor pin.
 - Suite **332 → 337** after Phase 9 (typecheck restored, `verify.py` legs).
 - Suite **328 → 332** after two-plate IP-Adapter + live `bind --no-mock`.
 - Suite **325 → 328** after the GEPA pin and the extra-installed test doors.
@@ -61,6 +62,11 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   suite so a type error does not queue behind a full run plus two builds. Both
   already ship in the `[dev]` extra the script documents, so this adds no
   dependency.
+- **The 3.11 floor is now a CI leg, not metadata.** `requires-python`
+  stays `>=3.11`. CI runs 3.11 and 3.13 on the core + `[dev]` extra.
+  The `[image]` extra (numpy 2.5) is not claimed on 3.11. Floor was
+  not raised: we had never measured 3.11, and dropping the promise
+  would have hidden that.
 - **Two IP-Adapter plates stay on one adapter.** Costume + face
   images are all passed. One `load_ip_adapter` takes one scale (the
   strongest requested lock). The assembled ashen-reaver contract

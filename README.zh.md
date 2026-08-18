@@ -104,7 +104,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| 核心 | **337 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
+| 核心 | **338 个测试通过**（统计日期为 2026-08-18），无需 GPU，结果可重复。`verify` 执行代码风格检查、类型检查、以及完整的测试套件，并在 `-O` 环境下再次运行该测试套件，并构建一个软件包。 |
 | 谓词 | `core/` 中的十一个复合决策点都经过了**突变测试**——21 个突变体中有 20 个被杀死，并且[幸存者已命名](scripts/mutate_predicates.py)，而不是隐藏。 |
 | SDXL 条件 | ControlNet OpenPose、IP-Adapter、LoRA、《InstantID》和区域修复功能均已连接并使用“假torch”测试覆盖。InstantID和IP-Adapter不能共享一次生成过程。两个IP-Adapter图层停留在同一个适配器上（所有图像；比例是最强的限制）。本地`generate()`在5090设备上运行（2026-08-18，种子`169405236028824`，类型`controlnet_ip`）。生成的画面带有兽人的风格；握持、标志和护腕没有正确呈现。 |
 | Flux 编码器 | 仅文本和“填充修复”功能已连接（fake-torch）。ControlNet 姿势、IP-Adapter 和 LoRA 仍被拒绝（家族类型错误）。`method=reference` 会写入云端配方图，并拒绝模拟在本地运行（`GATE_CLOUD_SUBMIT`）。 |
@@ -124,7 +124,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| Python | **3.11+**（CI运行3.13） |
+| Python | **3.11+**（持续集成环境同时运行 3.11 和 3.13 版本，以及 `[dev]`。在 3.11 版本中，额外的 `[image]` 功能未被声明。） |
 | 平台 | 纯Python，核心中没有编译的扩展——在Windows 11上开发，CI在`ubuntu-latest`上进行。 |
 | 依赖项 | 核心只需要`pydantic`。GPU相关的工作位于可选的附加组件中。 |
 

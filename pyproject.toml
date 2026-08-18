@@ -92,9 +92,8 @@ target-version = "py311"
 # module policy applies (verified against a cleared .mypy_cache).
 #
 # What this costs: mypy no longer catches 3.12-only syntax that would break on the
-# declared 3.11 floor. Nothing else covers that either -- CI runs 3.13 only. So the 3.11
-# floor is currently asserted by requires-python and verified by no gate. Closing that
-# needs a 3.11 CI leg or a raised floor; it is not closed here.
+# declared 3.11 floor. ruff still targets py311. CI now runs the core+[dev] extra
+# on 3.11 and 3.13. [image] (numpy 2.5) is not claimed on 3.11.
 python_version = "3.12"
 packages = ["pcraft"]
 ignore_missing_imports = true

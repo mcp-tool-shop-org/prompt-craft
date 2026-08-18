@@ -31,7 +31,9 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-Requires **Python 3.11+**. CI runs 3.13. The core's only runtime dependency is `pydantic`.
+Requires **Python 3.11+**. CI runs 3.11 and 3.13 on the core + `[dev]`.
+The `[image]` extra is not claimed on 3.11. The core's only runtime
+dependency is `pydantic`.
 
 ## Run the loop
 

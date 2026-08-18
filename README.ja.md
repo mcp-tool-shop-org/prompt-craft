@@ -104,7 +104,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| コア | **337 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
+| コア | **338 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
 | 述語 | `core/`内の11個の複合的な決定ポイントは**ミューテーションテストされています。** 21個のうち20個のミュータントが排除され、[残りの1つは](scripts/mutate_predicates.py)という名前で、隠されていません。 |
 | SDXLの条件設定 | ControlNet OpenPose、IP-Adapter、LoRA、「**InstantID**」、および領域ごとのインペイントは、**fake-torchテストによって統合され、その動作が検証されています**。InstantIDとIP-Adapterは、同じ生成プロセスを共有できません。2つのIP-Adapterレイヤーは、1つのアダプターに配置されます（すべての画像；スケールが最も重要な要素です）。ローカルの`generate()`は、5090で実行されました（2026年8月18日、シード値`169405236028824`、種類`controlnet_ip`）。フレームはオーク風ですが、グリップ、紋章、および腕当ては適切に表示されませんでした。 |
 | Fluxエンコーダー | テキストのみと**塗りつぶしインペイント**が接続されました（fake-torch）。ControlNetポーズとIP-Adapterは拒否されたままです（異なるファミリー）。`method=reference`がクラウドレシピグラフを記述し、Kontextがローカルで実行されているかのように装うことを拒否します（`GATE_CLOUD_SUBMIT`）。 |
@@ -124,7 +124,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| Python | **3.11以上**（CIでは3.13を使用） |
+| Python | **3.11+** (CI runs 3.11 and 3.13 on the core + `[dev]`. The `[image]` extra is not claimed on 3.11.) |
 | プラットフォーム | 純粋なPythonで、コアにはコンパイルされた拡張機能はありません。Windows 11で開発され、CIは`ubuntu-latest`で行われます。 |
 | 依存関係 | コアに必要なのは、ただ一つ、`pydantic`だけです。GPU関連の処理は、オプションの追加モジュールに委ねられています。 |
 

@@ -10,7 +10,7 @@ Identity sub-gate stays unwired. Version stays **0.2.1**.
 ## Where you are
 
 Repo: `E:\AI\prompt-craft`
-HEAD at handoff write: measure. Suite last counted **337**. Re-count.
+HEAD at handoff write: measure. Suite last counted **338**. Re-count.
 
 ```
 cd E:\AI\prompt-craft
@@ -32,7 +32,7 @@ a run.
 
 | thing | state |
 |---|---|
-| GPU-free suite | 337 |
+| GPU-free suite | 338 |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. Frame: orcish; crossed arms, no two-hand axe, no triple-bar, no bone bracer. Notes in `records/_control_experiments/NOTES.md` (gitignored). |
 | Two IP-Adapter plates | both images on one adapter; scale is the strongest lock |
@@ -57,8 +57,10 @@ Still out, only if asked:
 
 3. Local Flux text-only / Fill — weights not on disk.
 4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
-5. 3.11 CI leg or raise `requires-python` to 3.12.
-6. Phase 10 full treatment / publish.
+5. Phase 10 full treatment / publish.
+
+The 3.11 floor is closed: CI runs 3.11 and 3.13 on core+`[dev]`.
+`[image]` is not claimed on 3.11.
 
 Do **not** start InstantID rewrites or identity-sub-gate wiring
 unless the Director asks.

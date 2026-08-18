@@ -70,7 +70,7 @@ from a test.
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **337**. Re-count before quoting.
+- Suite last counted **338**. Re-count before quoting.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional
   inpaint — wired, fake-torch tested. InstantID and IP-Adapter cannot
   share one generate. Local `generate()` **ran** on the 5090

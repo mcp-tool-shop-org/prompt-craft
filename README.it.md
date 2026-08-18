@@ -124,7 +124,7 @@ Tre affermazioni che le versioni precedenti di questo documento hanno fatto e ch
 
 | | |
 |---|---|
-| Python | **3.11+** (i test CI utilizzano la versione 3.13) |
+| Python | **3.11+** (il sistema di integrazione continua esegue le versioni 3.11 e 3.13 sul nucleo principale + `[dev]`. Il valore aggiuntivo `[image]` non viene conteggiato per la versione 3.11). |
 | Piattaforme | solo Python, nessuna estensione compilata nel core: sviluppato su Windows 11, test CI su `ubuntu-latest` |
 | Dipendenze | il core necessita solo di `pydantic`. Le operazioni GPU sono implementate tramite moduli opzionali. |
 

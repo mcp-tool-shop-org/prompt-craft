@@ -6,7 +6,7 @@
 **Executor:** Claude
 **Repo:** `E:\AI\prompt-craft`
 **HEAD at write:** `e42ce2f` on `origin/main`
-**Suite last counted:** **337** (re-count before quoting)
+**Suite last counted:** **338** (re-count before quoting)
 
 Read **`grok.md`**, then this file, then **`HANDOFF.md`**. Measure HEAD
 and the suite. Do not reconstruct from chat.
@@ -89,7 +89,7 @@ it. Do not fire a live generate from pytest.
 
 | thing | state |
 |---|---|
-| GPU-free suite | **337** (re-count) |
+| GPU-free suite | **338** (re-count) |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`. CUDA `torch 2.13.0+cu130`, RTX 5090, 31.84 GB. |
 | That frame (looked at) | Orcish tusks. Crossed arms. Scythe, not a two-hand axe. No triple-bar. No bone-spike bracer. Same species, different character. Notes: `records/_control_experiments/NOTES.md` (gitignored). |
@@ -139,11 +139,9 @@ writing to it.
 
 ## Recommended next increment (Advisor ruling)
 
-Increments 1 and 2 landed. Phase 9 **landed** (Executor): typecheck
-restored, 7 hidden errors fixed, ruff+mypy are hard `verify.py` legs,
-suite **337**. Named leftover: `requires-python >=3.11` is metadata
-only — mypy targets 3.12, CI is 3.13. Needs a 3.11 CI leg or a
-raised floor. Not closed.
+Increments 1 and 2 landed. Phase 9 landed. The 3.11 floor is
+**closed** by a CI matrix (3.11 + 3.13) on core+`[dev]`, not by
+raising the floor. `[image]` is not claimed on 3.11. Suite **338**.
 
 If the Director does **not** name a job: measure HEAD, re-count, stop.
 
@@ -151,8 +149,7 @@ Still out, only if asked:
 
 3. Local Flux text-only / Fill — weights are not on disk.
 4. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
-5. 3.11 CI leg or raise `requires-python` to 3.12.
-6. Phase 10 full treatment / publish.
+5. Phase 10 full treatment / publish.
 
 Do **not** start identity-sub-gate wiring or InstantID rewrites
 as a "next obvious step." They are not.

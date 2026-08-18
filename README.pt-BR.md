@@ -127,7 +127,7 @@ estudo único realiza a comparação direta. A regra é válida; a certeza foi e
 
 | | |
 |---|---|
-| Python | **3.11+** (o CI executa a versão 3.13) |
+| Python | **3.11+** (o sistema de integração contínua executa as versões 3.11 e 3.13 no núcleo + `[dev]`. O benefício adicional `[image]` não se aplica à versão 3.11). |
 | Plataformas | Python puro, sem extensões compiladas no núcleo — desenvolvido no Windows 11, CI em `ubuntu-latest` |
 | Dependências | o núcleo precisa apenas de `pydantic`. O trabalho com GPU está disponível por meio de módulos opcionais |
 

@@ -42,7 +42,7 @@ the features.
 
 | | |
 |---|---|
-| The core | **337 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
+| The core | **338 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
 | SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and fake-torch tested**. InstantID and IP-Adapter cannot share one generate. Two IP-Adapter plates stay on one adapter. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`). The frame is orcish; grip, sigil, and bracer did not land |

@@ -27,12 +27,20 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the declared requires-python floor. It was metadata only
+        # (CI ran 3.13; mypy targets 3.12). This job is the core extra,
+        # not [image]. numpy 2.5 from [image] needs 3.12; that extra is
+        # not claimed on 3.11.
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
 
       # The documented install path. If this fails, the README's
       # `pip install -e ".[dev]"` is still a claim the tree cannot support.

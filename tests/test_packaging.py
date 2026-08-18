@@ -41,6 +41,15 @@ def test_version_is_pre_one_and_the_readme_agrees():
     assert f"v{version}" in readme, f"README does not state v{version}"
 
 
+def test_ci_runs_the_declared_python_floor():
+    """requires-python >=3.11 was metadata only. The 3.11 CI leg is the proof."""
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["requires-python"] == ">=3.11"
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert '"3.11"' in ci
+    assert '"3.13"' in ci
+
+
 def test_installed_package_ships_the_py_typed_marker():
     """A typed-contracts package that installs without py.typed is a packaging lie.
 
