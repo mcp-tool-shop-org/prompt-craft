@@ -11,13 +11,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...errors import PromptCraftError
 from ..contract.compile_questions import QuestionDAG, compile_questions
 from ..contract.hash import contract_hash
 from ..contract.schema import ResolvedContract
+from ..gate.checkpoint import ContrastiveCheckpoint
 from ..gate.harness import GateTranscript
+from ..loop.retry_policy import Attempt
 
 
 class AssetRecord(BaseModel):
@@ -39,6 +41,8 @@ class AssetRecord(BaseModel):
     gate_transcript: GateTranscript
     retry_count: int
     decision: str  # "bound" | "escalated" | "blocked"
+    attempts: list[Attempt] = Field(default_factory=list)
+    checkpoint: ContrastiveCheckpoint | None = None
 
 
 def persist(record: AssetRecord, records_dir: str | Path) -> Path:

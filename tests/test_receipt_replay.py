@@ -43,6 +43,41 @@ def test_load_rejects_valid_json_that_fails_the_schema(tmp_path):
     assert "ValidationError" not in exc.value.to_safe_text()
 
 
+def test_receipt_stores_the_attempt_story(tmp_path):
+    """A bind is not just retry_count. The receipt names each generate+gate step."""
+    res = run_mock_loop(records_dir=str(tmp_path))
+    assert res.record is not None
+    assert res.record.attempts
+    assert res.record.attempts[0].note == "best-of-N"
+    loaded = load(tmp_path / f"{res.record.record_id}.json")
+    assert loaded.attempts[0].seed == res.record.attempts[0].seed
+    assert loaded.attempts[0].repair is None
+
+
+def test_escalated_receipt_keeps_repairs_and_the_checkpoint(tmp_path):
+    from pcraft.core.loop import orchestrate
+    from pcraft.core.loop.orchestrate import LoopConfig
+    from pcraft.core.synth.signature import TemplateSynthesizer
+    from pcraft.testing import StubGenerator, passing_verifiers
+
+    _s, resolved, thresholds, compiled = load_sprite_example()
+    result = orchestrate.run(
+        resolved,
+        TemplateSynthesizer(compiled),
+        StubGenerator(out_dir=tmp_path / "_stub_images"),
+        passing_verifiers(scores={"weapon": 0.05}),
+        thresholds,
+        config=LoopConfig(thresholds_version=thresholds.version, records_dir=str(tmp_path)),
+    )
+    assert result.decision == "escalated"
+    assert result.record is not None
+    assert any(a.repair is not None for a in result.record.attempts)
+    assert result.record.checkpoint is not None
+    loaded = load(tmp_path / f"{result.record.record_id}.json")
+    assert loaded.checkpoint is not None
+    assert loaded.checkpoint.text == result.record.checkpoint.text
+
+
 def test_replay_detects_contract_drift(tmp_path):
     res = run_mock_loop(records_dir=str(tmp_path))
     store, _r, _t, _c = load_sprite_example()

@@ -47,6 +47,7 @@ from ..synth.visual_inventory import assert_tokens_trace
 from .compensators import CompensatorRegistry, default_registry
 from .generator_iface import GenerationResult, Generator
 from .retry_policy import (
+    Attempt,
     OutcomeClass,
     RepairAction,
     RetryBudget,
@@ -66,16 +67,6 @@ class LoopConfig(BaseModel):
     base_seed: int = 1000
     max_resynth: int = 3  # coverage-assert backtrack cap
     budget: RetryBudget = RetryBudget()
-
-
-class Attempt(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    attempt: int
-    seed: int
-    overall: Zone
-    verdict: Verdict
-    repair: RepairAction | None = None
-    note: str = ""
 
 
 class OrchestrationResult(BaseModel):
@@ -165,7 +156,10 @@ def run(
     if verdict is Verdict.ADVANCE:
         compensators.require("records-write")
         compensators.require("bind-to-canon")  # no-skip gate BEFORE the irreversible action
-        record = _build_record(resolved, synth, gen, transcript, thresholds, dag, len(attempts), "bound")
+        record = _build_record(
+            resolved, synth, gen, transcript, thresholds, dag, len(attempts), "bound",
+            attempts=attempts,
+        )
         persist(record, config.records_dir)
         return OrchestrationResult(decision="bound", reason="all required atoms passed", attempts=attempts, record=record)
 
@@ -177,7 +171,10 @@ def run(
     compensators.require("records-write")
     compensators.require("escalation-ticket")
     checkpoint = build_checkpoint(transcript, dag)
-    record = _build_record(resolved, synth, gen, transcript, thresholds, dag, len(attempts), "escalated")
+    record = _build_record(
+        resolved, synth, gen, transcript, thresholds, dag, len(attempts), "escalated",
+        attempts=attempts, checkpoint=checkpoint,
+    )
     persist(record, config.records_dir)
     reason = checkpoint.text
     return OrchestrationResult(
@@ -397,7 +394,10 @@ def _repair_ladder(
     return gen, transcript
 
 
-def _build_record(resolved, synth, gen, transcript, thresholds, dag, retry_count, decision) -> AssetRecord:
+def _build_record(
+    resolved, synth, gen, transcript, thresholds, dag, retry_count, decision,
+    *, attempts=None, checkpoint=None,
+) -> AssetRecord:
     verifier_ids = sorted({v.verifier_id for v in transcript.verdicts if v.verifier_id})
     return AssetRecord(
         record_id=f"{resolved.id.replace(':', '_')}-seed{gen.seed}",
@@ -417,4 +417,6 @@ def _build_record(resolved, synth, gen, transcript, thresholds, dag, retry_count
         gate_transcript=transcript,
         retry_count=retry_count,
         decision=decision,
+        attempts=list(attempts or []),
+        checkpoint=checkpoint,
     )

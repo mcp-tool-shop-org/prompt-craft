@@ -49,6 +49,18 @@ class RepairAction(str, Enum):
     STRENGTHEN_IDENTITY = "strengthen_identity"  # identity/uniform atom failing -> raise IP-Adapter weight
 
 
+class Attempt(BaseModel):
+    """One generate+gate step. The receipt stores the list so a bind is not just a count."""
+
+    model_config = ConfigDict(extra="forbid")
+    attempt: int
+    seed: int
+    overall: Zone
+    verdict: Verdict
+    repair: RepairAction | None = None
+    note: str = ""
+
+
 class RetryBudget(BaseModel):
     model_config = ConfigDict(extra="forbid")
     inpaints: int = 1
