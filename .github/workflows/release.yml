@@ -1,0 +1,147 @@
+# Publishing prompt-craft — PyPI and npm, from a tag, by OIDC.
+#
+# WHY THIS RUNS ON `release: published` AND NOTHING ELSE. Publishing is irreversible: a
+# version number, once taken on either registry, is taken forever. A push trigger would
+# make every commit a candidate for that. The release event is a deliberate human act,
+# which is the only thing that should be able to reach a registry.
+#
+# WHY THERE ARE NO TOKENS HERE. Both jobs authenticate by OIDC (Trusted Publishing), so no
+# long-lived credential exists to leak from this repository or any developer's machine.
+# `id-token: write` mints the short-lived one, per job, at publish time.
+#
+# THE NAMES, AND WHY THEY DIFFER FROM THE REPO. `pcraft` and `prompt-craft` were both
+# taken on PyPI, so the DISTRIBUTION is `prompt-crafter` while the import package and the
+# console script stay `pcraft` — `pip install prompt-crafter` gives you `import pcraft`
+# and a `pcraft` command. npm matches the distribution rather than the repo so the two
+# install lines rhyme.
+#
+# ONE-TIME SETUP, on the registries themselves — until both are done this workflow fails
+# at the publish step by design rather than falling back to a token:
+#   PyPI  → pending publisher for project `prompt-crafter`:
+#           owner mcp-tool-shop-org · repo prompt-craft · workflow release.yml   [DONE]
+#   npm   → trusted publisher for `@mcptoolshop/prompt-crafter`: same three values.
+#           npm accepts a publisher for a name with zero published versions, so the first
+#           OIDC run CREATES the package. An E404 on that first publish means the trusted
+#           publisher is not configured yet — npm masks a missing publisher as 404, never
+#           as an auth error. Configure it, then `gh run rerun <id> --failed`.
+#
+# The publisher's project name and workflow FILENAME are both matched byte-for-byte at
+# authentication time. That is why this file is `release.yml` and not `publish.yml`.
+
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The gate. Neither registry is reached until the suite passes on the tagged tree and
+  # the built artifacts have been checked — a broken publish cannot be taken back.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        # The documented install path, same as ci.yml. If this fails, the README's
+        # `pip install -e ".[dev]"` is a claim the tree cannot support, and that is worth
+        # failing a release over.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" build twine
+
+      - name: Verify
+        # Suite, suite again under -O, and a build — one command, the same one a developer
+        # runs. The -O pass is not ceremony: `assert` is stripped under -O, so a refusal
+        # written as an assertion silently disappears. Every gate here raises, and this
+        # proves it still does on the tagged tree.
+        run: python verify.py --installed
+
+      - name: Build
+        run: python -m build
+
+      - name: Check metadata
+        run: python -m twine check dist/*
+
+      - name: The version in the tag must equal the version in the package
+        # A tag that disagrees with the metadata publishes a version nobody asked for.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          NPM=$(node -p "require('./npm/package.json').version")
+          echo "tag=$TAG pyproject=$PKG npm=$NPM"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            [ "$TAG" = "$PKG" ] || { echo "::error::tag $TAG != pyproject $PKG"; exit 1; }
+          fi
+          [ "$PKG" = "$NPM" ] || { echo "::error::pyproject $PKG != npm $NPM"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm for OIDC
+        # Trusted publishing on npm needs npm >= 11.5.1; Node 22 ships npm 10, which would
+        # look for a token that deliberately does not exist here and fail as an auth error
+        # rather than as the version problem it actually is.
+        run: npm install -g npm@latest
+
+      - name: Launcher self-test
+        # Runs where Python is irrelevant: it proves the launcher parses, resolves its
+        # interpreter candidates, and reports honestly — the half that must work before
+        # Python is even looked for.
+        run: npm test
+        working-directory: npm
+
+      # A release workflow gets re-run — because a sibling job failed, because a gate
+      # caught something, because a step was fixed. Publishing is the one step that cannot
+      # be repeated: npm refuses a version that already exists, so on a second run the job
+      # would fail red for the sound reason that it already succeeded. This asks the
+      # registry first and reports the honest outcome either way.
+      - name: Publish
+        working-directory: npm
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VER" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VER is already on the registry — nothing to publish."
+          else
+            npm publish --provenance --access public
+          fi

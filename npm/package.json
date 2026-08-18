@@ -1,0 +1,42 @@
+{
+  "name": "@mcptoolshop/prompt-crafter",
+  "version": "0.2.0",
+  "description": "Say what the picture must contain, check that it does, and refuse when it does not. Node launcher for the prompt-crafter Python toolkit.",
+  "keywords": [
+    "generative-ai",
+    "text-to-image",
+    "diffusion",
+    "verification",
+    "quality-gate",
+    "contract",
+    "prompt-engineering",
+    "sprite",
+    "asset-pipeline"
+  ],
+  "homepage": "https://mcp-tool-shop-org.github.io/prompt-craft/",
+  "bugs": "https://github.com/mcp-tool-shop-org/prompt-craft/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcp-tool-shop-org/prompt-craft.git",
+    "directory": "npm"
+  },
+  "license": "MIT",
+  "author": "mcp-tool-shop <64996768+mcp-tool-shop@users.noreply.github.com>",
+  "type": "module",
+  "bin": {
+    "pcraft": "bin/pcraft.mjs"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node bin/pcraft.mjs --node-selftest"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

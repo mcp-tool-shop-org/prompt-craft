@@ -41,3 +41,13 @@ jobs:
 
       - name: verify
         run: python verify.py --installed
+
+      # Dependency scanning. pip-audit resolves the installed set against the
+      # Python Packaging Advisory Database. It runs AFTER verify deliberately: a
+      # red audit on a tree whose suite is already broken tells you nothing about
+      # the dependency.
+      - name: install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: dependency audit
+        run: python -m pip_audit --strict --progress-spinner off

@@ -3,9 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pcraft"
-version = "0.1.0"
-description = "Contract-driven generative-asset production template: typed depictable contracts -> constrained synthesizer -> different-family gate -> retry/repair -> bind. Domain-agnostic core + per-domain plugins (image/video/workflow)."
+# The DISTRIBUTION name. `pcraft` was taken on PyPI, and it is also the import
+# package and the console script — those stay `pcraft`, so `pip install prompt-crafter`
+# gives you `import pcraft` and a `pcraft` command. The PyPI pending publisher is
+# registered for this exact name with workflow release.yml, and both are matched
+# byte-for-byte at authentication time.
+name = "prompt-crafter"
+version = "0.2.0"
+description = "Say what the picture must contain, check that it does, and refuse when it does not. A typed contract of depictable claims drives both the prompt and the gate that verifies the pixels."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"

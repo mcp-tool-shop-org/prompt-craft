@@ -1,191 +1,210 @@
 <p align="center">
+  <a href="README.ja.md">日本語</a> | <a href="README.zh.md">中文</a> | <a href="README.es.md">Español</a> | <a href="README.fr.md">Français</a> | <a href="README.hi.md">हिन्दी</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português (BR)</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/logo.png" alt="prompt-craft" width="820">
+</p>
+
+<p align="center">
+  <a href="https://github.com/mcp-tool-shop-org/prompt-craft/actions/workflows/ci.yml"><img src="https://github.com/mcp-tool-shop-org/prompt-craft/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
 </p>
 
 #
 
-> **Contract-driven generative-asset production.** A typed, depictable **contract** →
-> a constrained **synthesizer** (every token traces to a depictable atom) → **generate** →
-> a **different-family gate** (verifies the contract on the pixels) → **retry/repair** →
-> **bind**. Domain-agnostic core + per-domain plugins (image · video · workflow).
+**Say what the picture must contain. Check that it does. Refuse when it doesn't.**
 
-**Status: SCAFFOLD (v0.1.0).** The GPU-free `core/` and the `image/sprite` reference plugin
-are wired and mock-tested; the loop runs end-to-end on a **generic, non-canon** example contract.
-Binding to any real game canon is **gated on the Director** (see *Gates* below). Public repo
-under `mcp-tool-shop-org`.
-
----
-
-## Why this exists (the motivating failure)
-
-A hero character was generated as a washed-out, faceless, generic nobody, and the operator
-burned a loop tweaking tonemaps and re-rolling. **Root cause:** an opaque prose prompt fed the
-text encoder a narrative it cannot ground, checked by *one* coarse advisory weapon-presence
-test. The character lost its face, palette, and faction identity — and shipped clean, because
-nothing verified those things.
-
-The repo it supersedes (`trellis-sprite-pipeline`) modelled a character as:
-
-```json
-{ "name": "orc_berserker", "prompt": "hulking muscular orc … war axe … green skin, tusks …", "weapon_class": "axe" }
-```
-
-`weapon_class` was the **only** machine-checkable attribute, the gate was advisory, and it was
-skipped entirely for the 4 of 6 sample characters with no weapon. prompt-craft replaces this
-with a typed contract where face, palette, sigil, and silhouette are first-class, verified,
-and blocking.
-
-## The one idea, applied six ways
-
-The asset pipeline is a **compiled program** (DSPy, arXiv:2310.03714): a declarative **contract**
-is separated from the imperative **synthesize** module, separated from the offline **optimizer**.
-The contract's atom list is **the same list used twice** — once to synthesize the prompt, once to
-gate the pixels (DSG arXiv:2310.18235; TIFA arXiv:2303.11897). That single fact is what closes the
-loop the opaque prompt left open.
+A generative image pipeline will happily hand you a hero with the wrong face, the wrong palette
+and none of the faction's markings — and report success, because nothing looked. prompt-craft
+replaces the opaque prose prompt with a **typed contract of depictable claims**, uses that same
+list twice — once to write the prompt, once to check the pixels — and **blocks the asset when a
+required claim is not there**.
 
 ```
-        ┌─────────────┐   atoms    ┌──────────────┐  prompt   ┌───────────┐
-        │  CONTRACT    │──────────▶│  SYNTHESIZE   │─────────▶│ GENERATE  │
-        │ (typed       │            │ (600B, every  │           │ (diffusion│
-        │  depictable  │            │  token traces │           │  + Control│
-        │  atoms)      │            │  to an atom)  │           │  Net/IPA) │
-        └─────┬────────┘            └──────────────┘           └─────┬─────┘
-              │ same atoms                                            │ pixels
-              ▼                                                       ▼
-        ┌──────────────────────────────────────────────────────────────┐
-        │  GATE  — a DIFFERENT VLM family verifies the contract on the   │
-        │  pixels. 3 tiers, cheapest decides first. CLIPScore is BANNED. │
-        └─────┬──────────────────────────────────────────────────┬─────┘
-              │ PASS                                              │ FAIL / UNCERTAIN
-              ▼                                                    ▼
-          BIND to canon                                  RETRY / REPAIR ladder
-       (only after every required                    (verifier is the selector;
-        Assert passes — andon)                         uncertainty → human gate)
+   CONTRACT  ──atoms──▶  SYNTHESIZE  ──prompt──▶  GENERATE
+   typed, depictable     every token traces      diffusion + control
+        │                to an atom                     │
+        │ the same atoms                                │ pixels
+        └──────────────────────▶  GATE  ◀───────────────┘
+                    a DIFFERENT model family checks the
+                    contract against the image, cheapest
+                    tier deciding first
+                         │                    │
+                       PASS                FAIL / UNCERTAIN
+                         ▼                    ▼
+                    BIND to canon      REPAIR ladder, or a
+                  (only when every     human checkpoint when
+                   required atom       the gate is unsure
+                   actually passed)
 ```
 
-## Architecture — the CORE / PLUGIN boundary
+**The one idea:** the contract's atom list is *the same list used twice.* Writing the prompt and
+checking the result read from one source, so the thing you asked for is the thing that gets
+verified. That is what closes the loop an opaque prompt leaves open.
 
-The split is **by Parnas secret** (DECOMPOSE_BY_SECRETS): *what stays the same across
-image/video/workflow lives in `core/`; what changes per generator/verifier lives in a plugin.*
-`core/` imports **zero** diffusion/torch symbols, so the whole core test suite runs with a **mock**
-Generator + Verifier on any machine — that GPU-free test **is the proof the boundary holds**.
+## Install
+
+```bash
+pip install prompt-crafter
+pcraft --help
+```
+
+```bash
+npm install -g @mcptoolshop/prompt-crafter   # the same command, as a launcher
+```
+
+The distribution is **`prompt-crafter`** because `pcraft` and `prompt-craft` are both taken on
+PyPI; the import package and the command stay `pcraft`. The npm package is a **launcher, not a
+port** — reimplementing a threshold in a second language is how a threshold drifts, so it forwards
+to the Python that holds the truth and inherits its exit code.
+
+For development:
+
+```bash
+pip install -e ".[dev]"
+```
+
+The core is **GPU-free and runs anywhere** — the whole test suite executes against a mock
+generator and verifier, which is what proves the plugin boundary actually holds. The `[image]`
+extra (torch/diffusers) and `[synth]` extra (DSPy + a hosted LM) wire the real generator,
+verifiers and synthesizer. **Neither is needed to run, test, or evaluate the core.**
+
+```bash
+pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
+pcraft gate <image>      # check an image against a contract
+pcraft replay <record>   # re-read a bound asset's provenance receipt
+```
+
+## What a contract looks like
+
+Not a prose prompt. A list of **atomic, depictable, individually checkable** claims:
+
+- **`must_have`** — a garment, a palette, a silhouette, a sigil. Each carries a `check_type`
+  (which gate tier verifies it), a `severity`, and optionally a `depends_on` edge so a claim is
+  only meaningful when its parent passed. There is no point verifying the colour of an axe that
+  is not there.
+- **`must_not`** — anti-constraints, verified as **absence on the pixels**. Not a negative
+  prompt: negative prompts leave residual features and fall to paraphrase.
+- **`identity_ref`** — a reference plate. **Identity is conditioning, not tokens.** Anatomical
+  text makes a diffusion model render a specimen; a reference image binds the specific face.
+
+Contracts inherit — a character extends a faction — and inheritance is **fail-closed**: a child
+may *raise* a requirement, never relax or silently drop one it inherited.
+
+## The gate
+
+Three tiers, cheapest deciding first, escalating only when a cheap answer is unclear. A
+dependency-ordered pass means a failed parent marks its children N/A rather than scoring
+nonsense.
+
+**The verifier is always a different model family from the generator**, enforced by a guard that
+refuses to run otherwise. A model is a poor judge of its own output, and that is the least
+speculative part of this design.
+
+**Exit codes distinguish four different things**, because a caller reading one number needs to
+tell them apart:
+
+| exit | meaning |
+|---|---|
+| `0` | the gate ran and every required atom passed |
+| `1` | bad arguments or a malformed contract |
+| `2` | it ran, and a required atom **failed** |
+| `3` | it ran, and the result is **unconfirmed** — the human band |
+| `4` | it **could not run** — no readable input, or no required tier available |
+
+That last row is the one that matters. "I could not check" and "I checked and it is bad" are
+different facts, and collapsing them is a documented source of real harm — it is why browsers
+soft-fail certificate revocation, and why monitoring standards have carried a distinct *unknown*
+verdict since the 1990s. Every gate transcript also reports **how many required tiers actually
+executed**, independently of the verdict, so a gate that quietly stopped checking cannot read as
+a pass.
+
+**CLIPScore is not used as the gate metric.** It behaves as a bag of concepts — blind to which
+attribute belongs to which object, to counts, and to relations. It is documented as known-broken
+in the verifier interface so nobody reintroduces it.
+
+## Honest status
+
+**v0.2.0 — the core is real; the GPU path has never run here.**
+
+| | |
+|---|---|
+| Core | **105 tests passing**, GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
+| Coverage | 81% overall; GPU-bound generator and verifier adapters are the untested remainder |
+| The `[image]` path | **never executed on this machine.** `bind --no-mock` refuses with a missing-dependency error. Everything below the plugin boundary is unproven by measurement |
+| Thresholds | the sprite sub-gate's floor and variance limits are **hardcoded defaults with no recorded calibration** — no holdout, no citation. Treat them as placeholders |
+| Real canon | the shipped example contract is a **generic invention**, not any real project's canon. Binding real canon is a deliberate, human decision |
+
+Two claims that earlier versions of this document made and that measurement did not support,
+corrected here rather than quietly dropped:
+
+- The three-zone thresholds were described as *calibrated against a human-labelled holdout*. They
+  are not. They are defaults.
+- The rule that a generative model is never its own gate was stated as though a study had
+  established it. The supporting evidence is **convergent rather than direct** — discriminative
+  yes/no polling is measurably more stable than open-ended captioning, models cannot reliably
+  self-correct without external feedback, and self-recognition tracks self-preference bias. No
+  single study runs the head-to-head. The rule is sound; the certainty was overstated.
+
+## Requirements
+
+| | |
+|---|---|
+| Python | **3.11+** (CI runs 3.13) |
+| Platforms | pure Python, no compiled extensions in the core — developed on Windows 11, CI on `ubuntu-latest` |
+| Dependencies | the core needs only `pydantic`. GPU work lives behind optional extras |
+
+## Trust and threat model
+
+- **Data touched** — contract JSON you point it at, the images you pass it, and provenance
+  records written under the directory you name. Nothing else is read.
+- **Data NOT touched** — no credentials of any kind are read, stored or transmitted. **No
+  telemetry, analytics or usage counting**: there is no opt-out because there is nothing to opt
+  out of. The core imports no networking library at all.
+- **Network egress** — none from the core. The optional `[image]` and `[synth]` extras reach a
+  model host by their nature; that is the only network path, and installing them is a choice.
+- **Permissions** — ordinary user permissions. No elevation, no service installation, no registry
+  or system-settings writes.
+- **The sharp edge, disclosed rather than claimed away** — **file operations are not sandboxed.**
+  `--records-dir` and `--db` write wherever you point them, deliberately, because this is a
+  local-first tool. Point them somewhere you intend.
+- **Errors** — deliberate refusals carry a code, a message and a hint, and **raise rather than
+  `assert`**, so `-O` cannot delete them; the suite runs a second time under `-O` to prove it.
+  Unexpected failures print a traceback only under `--debug`.
+
+## Support status
+
+`main` is the only supported state. No release channel, no backport policy, no SLA. This is
+studio infrastructure published in the open, not a product with a support contract.
+
+## How the pieces are arranged
+
+`core/` is domain-agnostic and imports zero diffusion or torch symbols — a domain plugin exports
+exactly three things: a generator, a list of verifiers, and an encoder ruleset. Adding a new
+domain is a new sibling under `domains/`; nothing in `core/` changes. The GPU-free suite is what
+keeps that claim honest.
 
 ```
 src/pcraft/
-  core/                      DOMAIN-AGNOSTIC, GPU-free, mock-testable
-    contract/                pydantic Contract; fail-closed faction→character loader;
-                             atoms → DSG question-DAG; canonical provenance hash
-    loop/                    synth→generate→verify→retry→bind state machine
-                             (BLOCK/AMEND/VERIFY/ADVANCE verdicts); retry/repair ladder;
-                             NAMED_COMPENSATORS registry
-    gate/                    dependency-ordered harness; Verifier protocol (CLIPScore BANNED);
-                             family_guard (hard-refuse same-family); 3-zone thresholds
-    synth/                   DSPy Signature; visual_inventory anti-prose-dump guard;
-                             pre-gen coverage Assert
-    optimize/                OFFLINE GEPA compile; PINNED compiled artifact
-    receipt/                 per-asset provenance record (replayable)
-  cli/                       pcraft: synth | gate | bind | compile | replay | sync-rules
-  domains/                   ── PLUGIN BOUNDARY ──
-    image/                   a plugin exports Generator, Verifier[], encoder-craft rules
-      generator/             SDXL (+ControlNet/IP-Adapter), Flux
-      verifier/              siglip2 screen (Tier-0) · vqascore (Tier-1) · dsg (Tier-2)
-      rules/encoder_craft.md GENERATED from the readouts prompt-craft lane (never hand-edited)
-      compiled/              PINNED compiled synthesizer artifact
-      subdomains/sprite/     8-dir CLIP-I consistency sub-gate; pose ControlNet; foot-anchor;
-                             a GENERIC example faction→character contract; calibration
-scripts/sync_rules_from_readouts.py   reads recipes.db (prompt-craft lane) → writes encoder_craft.md
+  core/          contract · loop · gate · synth · optimize · receipt   (GPU-free)
+  cli/           pcraft: synth | gate | bind | demo | replay | compile | sync-rules
+  domains/       ── PLUGIN BOUNDARY ──
+    image/       generators, the three verifier tiers, encoder rules, sprite subdomain
 ```
 
-A domain plugin exports exactly three secrets — a `Generator`, a list of `Verifier`s, and an
-`encoder-craft` ruleset — plus optional subdomain refinements. Adding **video** or **workflow**
-is a new sibling under `domains/`; **nothing in `core/` changes**.
+Encoder rules under `domains/image/rules/` are **generated** from a verified recipe database, not
+hand-written, and carry a generation header. Every bound asset writes a **replayable provenance
+receipt** pinning the contract hash, the synthesizer artifact, the generator and seed, the
+verifier version, and the full per-atom gate transcript.
 
-## The gate — 3 tiers, cheapest decides first
-
-| Tier | Verifier | Decides | Family |
-|------|----------|---------|--------|
-| 0 | **SigLIP2** zero-shot (sigmoid, per-query) | closed-set / presence atoms (palette, garment, silhouette) | `google/siglip2-*` |
-| 1 | **VQAScore** (CLIP-FlanT5 `P('Yes')`) | compositional atoms + whole-contract screen | `clip-flant5` |
-| 2 | **DSG** DAG (per-atom, dependency-ordered) | *localizes which atom failed* on a tier-1 fail/borderline | (QG LM, distinct) |
-
-- **`family_guard` hard-refuses** to run if `generator_family == verifier_family`
-  (EXTERNAL_VERIFIER). The gate sees only `{rendered asset, contract clauses}` — never the
-  synthesizer's prompt or rationale. Doctrine, earned on this rig: a **generative VLM is never its
-  own gate** (LLaVA-13B hallucinated greatswords on unarmed cooks at 0.90 confidence, P=0.26;
-  discriminative SigLIP2 scored P=0.909).
-- **CLIPScore is BANNED** as the gate metric — bag-of-concepts, blind to attribute binding /
-  counts / relations. Documented as known-broken in `core/gate/verifier_iface.py`.
-- **Dependency-ordered:** a NO parent forces N/A on its descendants (no "verify the colour of an
-  axe that isn't there").
-- **3-zone thresholds** per clause (`PASS` / `UNCERTAIN` / `FAIL`), calibrated against a
-  human-labelled holdout; only the `UNCERTAIN` band routes to a contrastively-framed human
-  checkpoint (UNCERTAINTY_GATED_HUMANS).
-- **Sprite sub-gate:** after per-view gating, **CLIP-I** cross-view consistency (floor + low
-  variance) catches silhouette/palette drift across the 8-direction turnaround (AnyCrowd
-  arXiv:2603.15415).
-
-## The synthesizer — constrained, compiled, anti-prose-dump
-
-- A **`visual_inventory` scratchpad runs first**: each atom → `{depictable?, front_load_rank,
-  token}`, pruning the un-depictable (backstory, intent). **Every token in the final prompt must
-  trace to a row marked `depictable=true`** — the single strongest guard against the 600B's
-  prose-dumping (RePrompt arXiv:2505.17540).
-- **Two-stage emit:** Stage 1 free-form prose under the encoder rules (no grammar on the prose —
-  token selection is a reasoning task, JSON-mode degrades it, "Let Me Speak Freely?"
-  arXiv:2408.02442); Stage 2 a separate constrained pass wraps only the JSON envelope.
-- **Pre-generation Assert** before any GPU spend: every `required` atom must have a non-empty
-  coverage phrase, else backtrack (DSPy Assertions arXiv:2312.13382).
-- **Identity is conditioning, not tokens** — LoRA / IP-Adapter on a reference plate binds the
-  exact face/insignia that text cannot specify (IP-Adapter arXiv:2308.06721). The gate then
-  verifies it rendered.
-- **Compiled offline, run cheap:** GEPA (arXiv:2507.19457; >10% over MIPROv2, +6% avg up to +20%
-  over GRPO) evolves the prompt against the gate's per-atom failure text **offline**; the frozen,
-  **pinned** artifact runs on a cheap local model per asset. *Scale at optimize-time, small at
-  run-time.*
-
-## Standards & provenance
-
-prompt-craft scores itself against the six mcp-tool-shop **workflow standards** — see
-[`STANDARDS.md`](STANDARDS.md). Every irreversible action has a named undo with an owner — see
-[`COMPENSATORS.md`](COMPENSATORS.md) (no-skip; the `gh repo create` of this repo is logged). Every
-bound asset writes a replayable provenance receipt pinning the contract hash, the compiled
-synthesizer id, the generator id+seed+sampler, the verifier id+version, and the full per-atom gate
-transcript (PIN_PER_STEP).
-
-## Encoder rules are generated, not authored
-
-`domains/image/rules/encoder_craft.md` is **generated** by `scripts/sync_rules_from_readouts.py`
-from the `prompt-craft` lane of the readouts sprites-knowledge DB (103 verified, source-cited
-recipes; debunked folklore rendered as explicit DON'T rules). It is never hand-edited — the DB is
-the single source of truth, and the file carries a generation header for replayability.
-
-## Quickstart (GPU-free core)
-
-```bash
-python -m venv .venv && . .venv/Scripts/activate    # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-pytest                       # the GPU-free core suite — the proof the plugin boundary holds
-pcraft gate --help
-pcraft replay --help
-```
-
-The `[image]` extra (torch/diffusers) and `[synth]` extra (DSPy + an Ollama-Cloud LM) wire the
-real generator, verifiers, and 600B synthesizer. They are **not** needed to run or test the core.
-
-## Gates (human-in-the-loop)
-
-- **Repo-first** is satisfied (private org repo, `main`, scaffold pushed).
-- The **Director** gates: the first **real canon contract** (which game/faction — *not decided*;
-  the scaffold ships only a generic `ashen_pact` example), any **canon binding**, and pushes of
-  substantive content beyond the scaffold.
-- **Watchdog up** before any GPU run; **look at every generated output**.
-
-## Citations (corrected)
-
-Self-critique limits = Valmeekam **arXiv:2310.08118** (not 2402.01817); CLIP-I-over-views =
-AnyCrowd **arXiv:2603.15415** (drop 2411.13536); GEPA = ">10% / +6% avg, up to +20%"; DOMINO =
-**arXiv:2403.06988**.
+Design rationale, the standards this repo scores itself against, and the named undo for every
+irreversible action live in [`STANDARDS.md`](STANDARDS.md) and
+[`COMPENSATORS.md`](COMPENSATORS.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The licence of any *model* used through this tool is a separate
+question and is not covered by it.
