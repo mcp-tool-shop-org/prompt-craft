@@ -6,10 +6,15 @@ re-explain these.
 
 `AGENTS.md` points here so the harness loads it.
 
-## You are the only seat
+## Seats (2026-08-18)
 
-Advisor-owns-README is a **multi-seat** fence. It is off unless another
-agent is editing this tree at the same time.
+This tree is **multi-seat** again. Advisor is Grok. Executor is
+Claude. Advisor-owns-README is **on**.
+
+Executor lands code + tests + CHANGELOG Unreleased. Advisor moves
+README / handbook / landing / PyPI / npm / translations.
+
+If the tree is solo again, this fence turns off. See `ADVISOR.md`.
 
 When you land code, in the **same sitting**:
 

@@ -1,9 +1,10 @@
 # Next session — start here
 
-Read `grok.md` first. Then this file. Then measure HEAD and the suite.
-Do not reconstruct this from chat.
+Read `grok.md` first. Then **`ADVISOR.md`**. Then this file. Then
+measure HEAD and the suite. Do not reconstruct this from chat.
 
-**Director 2026-08-18 (this sitting, done):** both live-onlys ran.
+**Seats (2026-08-18):** Advisor is Grok. Executor is Claude.
+Advisor-owns-README is **on**. Both live-onlys already ran.
 Identity sub-gate stays unwired. Version stays **0.2.1**.
 
 ## Where you are
@@ -19,10 +20,10 @@ $env:PYTHONPATH = "src"
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`
 
-You are the **only seat**. Advisor-owns-README is off. Same sitting as
-code: tests, honest-status (README / handbook / PyPI / npm),
-CHANGELOG Unreleased, translations if README.md changed, memory
-`topics/prompt-craft-feature-pass.md`.
+You are the **Executor**. Advisor owns README / handbook / landing /
+PyPI / npm / translations. You own the code + tests + CHANGELOG
+Unreleased. Same sitting as code: tests. Quote the count only after
+a run.
 
 ## What is already true (re-measure)
 
@@ -44,19 +45,18 @@ CHANGELOG Unreleased, translations if README.md changed, memory
 
 ## This session's job
 
-The two live-onlys are done. Do **not** start InstantID rewrites or
-identity-sub-gate wiring unless the Director asks.
+The two live-onlys are done. Full dispatch, ranked leftovers, and
+fences live in **`ADVISOR.md`**.
 
-If the Director does not name a job, stop after measuring HEAD.
+If the Director does not name a job: measure HEAD, re-count, stop.
 
-Open leftovers, only if asked:
+If the Director says continue, Advisor's first increment is:
 
-1. Two IP-Adapter plates on one adapter (the assembled ashen-reaver
-   contract cannot generate without dropping a plate).
+1. Two IP-Adapter plates on one adapter (do not silently drop a plate).
 2. `bind --no-mock` is not a door.
-3. Local Flux text-only / Fill if the weights are pulled.
-4. Swap the per-asset loop onto `DSPySynthesizer` + the GEPA pin.
-5. GPU-free leftovers that are still actually out (re-measure first).
+
+Do **not** start InstantID rewrites or identity-sub-gate wiring
+unless the Director asks.
 
 ## Fences
 

@@ -1,15 +1,18 @@
 # prompt-craft
 
-Follow **`grok.md`** in this directory. It is the operating file for a
-solo Grok seat on this repo. Next session: read **`HANDOFF.md`**.
+Follow **`grok.md`**, then **`ADVISOR.md`**, then **`HANDOFF.md`**.
+
+This tree is **multi-seat** (2026-08-18): Advisor = Grok, Executor =
+Claude. Advisor-owns-README is **on**.
 
 Load-bearing:
 
-- You own README / handbook / landing in the same sitting as the code.
-  Advisor-owns-README is multi-seat only.
+- Executor: code + tests + CHANGELOG Unreleased.
+- Advisor: README / handbook / landing / PyPI / npm / translations.
 - Tests ride the change-set. Quote counts only after a run.
 - Version 0.2.1. `identity_subgate.py` stays unwired.
-- Cloud Comfy default. Local 5090 only if asked.
+- Cloud Comfy default. Local 5090 only if asked. The greened live
+  generate already ran.
 - GEPA offline, never on the per-asset hot path.
 
 ```
