@@ -1,9 +1,9 @@
 # Next session — start here
 
-Read this file, then **`ADVISOR.md`**. Then measure HEAD and the suite. Do not
-reconstruct this from chat. `grok.md` is the older Grok-seat operating file; where it
-disagrees with this file or `ADVISOR.md` on seats, version, or counts, **this file
-wins** (see the seat note below).
+You should have read **`grok.md`** (the harness loads it via `AGENTS.md`: run rules,
+lint-gate rules, the CI-equivalent verify method) and **`ADVISOR.md`** (standing state
+and fences) before this file. All three are current as of 2026-08-18. This one carries
+the job. Then measure HEAD and the suite yourself — do not reconstruct from chat.
 
 **Seats (2026-08-18, Director's live word):** Advisor is **Claude**. Executor is a
 **new seat — you**. Advisor-owns-README is **on**. You own code, tests, and CHANGELOG

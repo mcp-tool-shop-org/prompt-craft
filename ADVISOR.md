@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-18
 **Advisor:** Claude (this file). Seat changed by the Director's live word on 2026-08-18;
-the prior Advisor seat was Grok, and `grok.md` still reads from that arrangement.
+the prior Advisor seat was Grok. `grok.md` and `AGENTS.md` were brought current the same
+day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
 **HEAD at write:** `f41d46b` on `origin/main`, tree clean
