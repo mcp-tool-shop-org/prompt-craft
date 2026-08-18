@@ -1,5 +1,13 @@
 # prompt-craft — Grok operating file
 
+> **⚠ SUPERSEDED IN PART — 2026-08-18.** The Director moved the Advisor seat to Claude
+> on 2026-08-18. This file still reads from the earlier arrangement (Advisor = Grok,
+> Executor = Claude) and still carries the pre-0.3.0 facts. **`ADVISOR.md` and
+> `HANDOFF.md` are authoritative** for seats, version, suite count, and the current job.
+> Corrected below in place: version is **0.3.0** (shipped 2026-08-18), suite is **339**.
+> Everything else here — the how-to-run rules, the honest-language block, the fences —
+> still holds. Left otherwise intact because it is the Grok seat's own file to rewrite.
+
 This file is the system for a **solo Grok seat** on this repo. Do not
 wait for an advisor seat that is not here. Do not make the Director
 re-explain these.
@@ -8,8 +16,8 @@ re-explain these.
 
 ## Seats (2026-08-18)
 
-This tree is **multi-seat** again. Advisor is Grok. Executor is
-Claude. Advisor-owns-README is **on**.
+This tree is **multi-seat**. Advisor is **Claude** (Director's word,
+2026-08-18; was Grok). Executor is a new seat. Advisor-owns-README is **on**.
 
 Executor lands code + tests + CHANGELOG Unreleased. Advisor moves
 README / handbook / landing / PyPI / npm / translations.
@@ -55,7 +63,8 @@ from a test.
 
 ## Fences
 
-- Version stays **0.2.1** unless the Director says bump.
+- Version stays **0.3.0** unless the Director says bump. (Was 0.2.1; v0.3.0
+  shipped to PyPI + npm 2026-08-18.)
 - `identity_subgate.py`: no delete, no promote, no wire.
 - No mutmut, no dependabot.
 - Cloud Comfy is the default generate path. Local 5090 only if asked.
@@ -70,7 +79,7 @@ from a test.
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **338**. Re-count before quoting.
+- Suite last counted **339**. Re-count before quoting.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional
   inpaint — wired, fake-torch tested. InstantID and IP-Adapter cannot
   share one generate. Local `generate()` **ran** on the 5090
