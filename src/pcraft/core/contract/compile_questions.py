@@ -106,7 +106,7 @@ def compile_questions(resolved: ResolvedContract) -> QuestionDAG:
                 # The schema default is still `required`, so no existing contract changed meaning.
                 severity=mn.severity,
                 depends_on=None,
-                spatial=None,
+                spatial=mn.spatial,
                 enum=mn.enum,
             )
         )

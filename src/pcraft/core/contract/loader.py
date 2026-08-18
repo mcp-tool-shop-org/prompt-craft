@@ -178,6 +178,8 @@ def _rewritten_must_not_fields(base, child) -> list[str]:
         changed.append("check_type")
     if child.enum is not None and child.enum != base.enum:
         changed.append("enum")
+    if child.spatial is not None and child.spatial != base.spatial:
+        changed.append("spatial")
     return changed
 
 

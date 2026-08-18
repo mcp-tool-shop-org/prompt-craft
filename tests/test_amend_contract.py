@@ -387,6 +387,38 @@ def test_raising_severity_without_restating_spatial_keeps_the_inherited_lock():
     assert atom.spatial.ref == "chest"
 
 
+def test_must_not_spatial_is_frozen_on_redeclaration():
+    from pcraft.core.contract.schema import Spatial, SpatialKind
+
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_not=[
+            MustNot(
+                id="no_gun",
+                claim="a firearm",
+                spatial=Spatial(kind=SpatialKind.region, ref="hands"),
+            )
+        ],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_not=[
+            MustNot(
+                id="no_gun",
+                claim="a firearm",
+                spatial=Spatial(kind=SpatialKind.region, ref="head"),
+            )
+        ],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_RELAXATION"
+    assert "spatial" in exc.value.message
+
+
 def test_must_not_enum_is_frozen_on_redeclaration():
     faction = Contract(
         id="faction:x",

@@ -53,6 +53,9 @@ every entry below concerns the GPU-free core.
 - **Receipts store the attempt story.** Each generate+gate step (seed,
   zone, repair) rides the record, not just `retry_count`.
 - **`pcraft schema`** dumps JSON Schema for the authoring contract.
+- **`MustNot` accepts `spatial`.** A negation can name a region. The
+  compiled question carries it. Inherited spatial is frozen the same
+  way enum already was.
 
 ### Fixed
 

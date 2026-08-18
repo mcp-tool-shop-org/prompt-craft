@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pcraft.core.contract.compile_questions import Polarity, compile_questions
-from pcraft.core.contract.schema import Atom, CheckType, ResolvedContract
+from pcraft.core.contract.schema import Atom, CheckType, MustNot, ResolvedContract, Spatial, SpatialKind
 
 
 def test_atoms_and_must_not_become_questions(sprite_example):
@@ -33,6 +33,29 @@ def test_topological_orders_parents_first(sprite_example):
     dag = compile_questions(resolved)
     order = [q.atom_id for q in dag.topological()]
     assert order.index("tabard") < order.index("sigil")
+
+
+def test_must_not_spatial_reaches_the_question():
+    resolved = ResolvedContract(
+        id="c",
+        level="character",
+        lineage=["c"],
+        identity_refs=[],
+        must_have=[],
+        must_not=[
+            MustNot(
+                id="no_shield",
+                claim="a shield",
+                spatial=Spatial(kind=SpatialKind.region, ref="torso"),
+            )
+        ],
+    )
+    dag = compile_questions(resolved)
+    q = dag.by_id("no_shield")
+    assert q is not None
+    assert q.spatial is not None
+    assert q.spatial.ref == "torso"
+    assert q.polarity is Polarity.negate
 
 
 def test_cycle_raises():

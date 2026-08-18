@@ -89,6 +89,7 @@ class MustNot(BaseModel):
     claim: str
     check_type: CheckType = CheckType.vqa
     severity: Severity = Severity.required
+    spatial: Spatial | None = None
     enum: list[str] | None = None
 
 
