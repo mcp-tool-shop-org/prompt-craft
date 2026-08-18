@@ -44,7 +44,11 @@ image = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.6",
+    # Upper-bounded because lint is a hard release gate (verify.py). Unbounded, CI
+    # resolved 0.16.3 against a local 0.15.16 and the same tree linted clean here and
+    # failed there. `[tool.ruff.lint] select` already fixes the rule set; this stops the
+    # TOOL from moving under a gate that can block a publish. Raise it deliberately.
+    "ruff>=0.6,<0.17",
     "mypy>=1.11",
 ]
 
@@ -77,6 +81,23 @@ addopts = "-m 'not gpu and not network'"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# Declared, not inherited. With no `select`, ruff lints against whatever its DEFAULT rule
+# set happens to be in the version that resolved -- so the gate's meaning changed under us:
+# ruff 0.15.16 locally passed clean while CI resolved 0.16.3 from an unbounded `ruff>=0.6`
+# and produced 62 errors on identical code, failing the v0.3.0 release at the verify gate.
+#
+# The 0.16 defaults are not merely stricter, they disagree with this codebase on purpose:
+# 19 of those were B008 (function call in an argument default), which is the REQUIRED Typer
+# idiom -- every `typer.Option(...)` in the CLI. Another 3 were BLE001 on `except Exception`
+# blocks that already carry a deliberate `# noqa`. Adopting a linter's new opinion is a
+# decision this repo should make deliberately, not one a transitive resolve makes for it.
+#
+# This pins the historical default set -- pyflakes plus the pycodestyle subset -- which is
+# exactly what the tree has been passing all along. Widening it (isort, bugbear, refurb) is
+# a real cleanup worth doing on its own, not inside a release.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 
 [tool.mypy]
 # 3.12, NOT the 3.11 in requires-python -- and that gap is a known, named cost.

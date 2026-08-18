@@ -27,6 +27,19 @@ were run for real rather than mocked, and both live runs are recorded with what 
 to do. The suite went 105 -> 338 across the swarm; the version stays pre-1.0 because a
 generate that ran is not a stability claim.
 
+### Fixed
+
+- **The lint gate's meaning was inherited, not declared.** `[tool.ruff]` set no `select`, so
+  ruff linted against whatever DEFAULT rule set the resolved version carried. Local 0.15.16
+  passed clean; CI resolved 0.16.3 from an unbounded `ruff>=0.6` and produced 62 errors on
+  identical code, failing this release at the verify gate. The 0.16 defaults are not simply
+  stricter — 19 of the 62 were `B008` (call in an argument default), which is the *required*
+  Typer idiom, and 3 were `BLE001` on `except Exception` blocks that already carry a
+  deliberate `# noqa`. `[tool.ruff.lint] select` now pins the historical set the tree has
+  always passed, and `ruff` is upper-bounded so the tool cannot move under a gate that can
+  block a publish. Verified against both 0.15.16 and 0.16.3. Widening the rule set (isort,
+  bugbear, refurb) is a real cleanup, to be done deliberately rather than inside a release.
+
 ### Measured
 
 - **Local 5090 SDXL `generate()` ran** (2026-08-18). CUDA
