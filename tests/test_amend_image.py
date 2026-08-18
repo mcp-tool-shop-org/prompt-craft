@@ -574,11 +574,9 @@ def test_dsg_happy_path_still_scores_normally(monkeypatch):
     assert v.score("x.png", _question()) == pytest.approx(0.91)
 
 
-# =========================================================================== F-721a7139
-# DSGVerifier's answerer_model defaults to the SAME model id VQAScoreVerifier uses, and qg_model is
-# never read by scoring -- no real question decomposition happens. Real decomposition is
-# feature-pass work (a pinned QG LM) out of scope for this pass; instead the shared model is
-# surfaced via `shares_model_with` rather than hidden behind the distinct-looking `family` label.
+# =========================================================================== F-721a7139 / F-IMG-FEAT-005
+# Answerer still defaults to the Tier-1 VQAScore model; that sharing stays on
+# shares_model_with. Decomposition is real now (template QG / injected qg).
 
 
 def test_default_dsg_shares_the_tier1_default_model():
@@ -593,10 +591,11 @@ def test_a_genuinely_distinct_answerer_model_reports_no_sharing():
     assert dsg.shares_model_with is None
 
 
-def test_qg_model_is_stored_but_confirmed_unused_by_scoring(monkeypatch):
-    """Documents the current reality rather than asserting it should be different: qg_model does
-    not change what question gets asked of the answerer. If this starts failing, someone changed
-    DSGVerifier to actually read qg_model -- update the shares_model_with/family story to match."""
+def test_qg_slot_is_read_by_scoring(monkeypatch):
+    """F-IMG-FEAT-005: qg_model used to be stored and ignored. The QG slot now
+    expands the atom. An injected qg is what the answerer sees."""
+    from pcraft.domains.image.verifier.dsg_expand import SubProbe
+
     seen_texts: list[str] = []
 
     class _Answerer:
@@ -610,10 +609,11 @@ def test_qg_model_is_stored_but_confirmed_unused_by_scoring(monkeypatch):
     _install_fake_t2v_metrics(monkeypatch, _Answerer)
     q = _question()
 
-    DSGVerifier(qg_model="qg-lm-alpha").score("x.png", q)
-    DSGVerifier(qg_model="an-entirely-different-qg-lm").score("x.png", q)
+    def qg(_question):
+        return [SubProbe(id="one", text="Does this image show the QG probe?", kind="entity")]
 
-    assert seen_texts == [q.text, q.text]  # identical single top-level claim both times
+    DSGVerifier(qg_model="test-qg", qg=qg).score("x.png", q)
+    assert seen_texts == ["Does this image show the QG probe?"]
 
 
 def test_dsg_family_label_is_unchanged():

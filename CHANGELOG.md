@@ -59,6 +59,10 @@ every entry below concerns the GPU-free core.
 - **Cloud math slots are dotted.** `ComfyMathExpression` uses
   `values.a`, not a nested map. Nested form dry-ran and 400'd live.
   `--image-name local=cloud` remaps LoadImage to an uploaded plate.
+- **Tier-2 is a real DSG.** The atom expands into entity / attribute /
+  relation probes. A missing entity skips dependents. The QG slot is
+  read (template by default). The answerer may still share Tier-1's
+  VQAScore weights; that sharing stays on `shares_model_with`.
 
 ### Fixed
 
