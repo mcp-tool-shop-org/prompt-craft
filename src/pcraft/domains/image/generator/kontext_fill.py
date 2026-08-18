@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ....errors import PromptCraftError
 from . import conditioning as cond
@@ -69,6 +69,7 @@ class RecipeReport(BaseModel):
     seed: int
     measured_graph: str = MEASURED_GRAPH
     graph_path: str = ""
+    cloud_names: dict[str, str] = Field(default_factory=dict)
 
 
 class _Graph:
@@ -89,8 +90,28 @@ class _Graph:
 
 
 def _math(graph: _Graph, key: str, expression: str, **values) -> str:
-    """ComfyMathExpression: FLOAT / INT / BOOLEAN. Use slot 1 for the INT."""
-    return graph.add(key, "ComfyMathExpression", expression=expression, values=values)
+    """ComfyMathExpression: FLOAT / INT / BOOLEAN. Use slot 1 for the INT.
+
+    Cloud validates autogrow slots as dotted keys (``values.a``), not a nested
+    ``values`` map. Dry-run accepted the nested form; a live submit 400'd.
+    """
+    inputs: dict = {"expression": expression}
+    for name, val in values.items():
+        inputs[f"values.{name}"] = val
+    return graph.add(key, "ComfyMathExpression", **inputs)
+
+
+def bind_cloud_names(graph: dict, names: dict[str, str]) -> dict:
+    """Rewrite LoadImage filenames to Cloud upload names. Missing keys stay."""
+    out = {}
+    for nid, node in graph.items():
+        copied = {"class_type": node["class_type"], "inputs": dict(node.get("inputs") or {})}
+        if copied["class_type"] == "LoadImage":
+            current = copied["inputs"].get("image")
+            if current in names:
+                copied["inputs"]["image"] = names[current]
+        out[nid] = copied
+    return out
 
 
 def build_graph(

@@ -75,6 +75,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
     "CONFIG_THRESHOLDS_INVALID": "Each band needs high >= low and both in [0, 1]. Recalibrate or fix the table.",
     "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
+    "INPUT_IMAGE_NAME": "Pass --image-name as local.png=cloud-hash.png (repeatable).",
     "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",
     "RUNTIME_UNEXPECTED": "An unclassified error escaped the command. Re-run with --debug to see "
     "the underlying traceback; this code is the backstop, not a diagnosis.",

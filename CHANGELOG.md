@@ -56,6 +56,9 @@ every entry below concerns the GPU-free core.
 - **`MustNot` accepts `spatial`.** A negation can name a region. The
   compiled question carries it. Inherited spatial is frozen the same
   way enum already was.
+- **Cloud math slots are dotted.** `ComfyMathExpression` uses
+  `values.a`, not a nested map. Nested form dry-ran and 400'd live.
+  `--image-name local=cloud` remaps LoadImage to an uploaded plate.
 
 ### Fixed
 

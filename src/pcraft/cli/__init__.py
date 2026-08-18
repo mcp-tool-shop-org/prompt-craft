@@ -501,6 +501,28 @@ def schema_cmd(
         _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
+def _parse_image_names(pairs: list[str]) -> dict[str, str]:
+    """``local.png=cloud-hash.png`` pairs from --image-name."""
+    out: dict[str, str] = {}
+    for raw in pairs:
+        if "=" not in raw:
+            raise PromptCraftError(
+                "INPUT_IMAGE_NAME",
+                f"--image-name {raw!r} is not local=cloud",
+                hint="Pass --image-name ashen-reaver-front.png=<cloud upload name>.",
+            )
+        local, cloud = raw.split("=", 1)
+        local, cloud = local.strip(), cloud.strip()
+        if not local or not cloud:
+            raise PromptCraftError(
+                "INPUT_IMAGE_NAME",
+                f"--image-name {raw!r} is not local=cloud",
+                hint="Both sides of the = must be non-empty.",
+            )
+        out[local] = cloud
+    return out
+
+
 @app.command()
 def recipe(
     contract: str = typer.Option("char:ashen-reaver", help="contract id whose plates feed the stitch"),
@@ -509,6 +531,11 @@ def recipe(
     fill_region: str = typer.Option("fist", help="Fill mask region. fist only — hands/weapon ate the bracer"),
     fill_mask: Path | None = typer.Option(None, help="optional painted fist-only mask (overrides --fill-region)"),
     seed: int = typer.Option(169405236028824, help="KSampler seed (the measured stitch used this)"),
+    image_name: list[str] = typer.Option(
+        [],
+        "--image-name",
+        help="remap a LoadImage filename to a Cloud upload name (local=cloud, repeatable)",
+    ),
     as_json: bool = typer.Option(False, "--json", help="emit RecipeReport as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
@@ -527,6 +554,10 @@ def recipe(
             fill_mask=fill_mask,
             seed=seed,
         )
+        names = _parse_image_names(image_name)
+        if names:
+            graph = kontext_fill.bind_cloud_names(graph, names)
+            report = report.model_copy(update={"cloud_names": names})
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(graph, indent=2), encoding="utf-8")
         report = report.model_copy(update={"graph_path": str(out.resolve())})

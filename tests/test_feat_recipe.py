@@ -104,6 +104,19 @@ def test_graph_stitches_then_crops_left_then_fills_the_fist(tmp_path):
     # width is half the diptych, linked from ComfyMathExpression "a / 2"
     math_id = str(box["width"][0])
     assert graph[math_id]["inputs"]["expression"] == "a / 2"
+    # Cloud wants dotted autogrow keys. Nested values: {a: ...} 400s live.
+    assert "values.a" in graph[math_id]["inputs"]
+    assert "values" not in graph[math_id]["inputs"]
+
+
+def test_bind_cloud_names_rewrites_loadimage_only(tmp_path):
+    graph, _report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    loads = [n for n in graph.values() if n["class_type"] == "LoadImage"]
+    original = loads[0]["inputs"]["image"]
+    mapped = kontext_fill.bind_cloud_names(graph, {original: "cloud-hash.png"})
+    new_loads = [n for n in mapped.values() if n["class_type"] == "LoadImage"]
+    assert "cloud-hash.png" in {n["inputs"]["image"] for n in new_loads}
+    assert original in {n["inputs"]["image"] for n in loads}
 
 
 def test_hands_fill_region_is_refused_because_it_eats_the_bracer(tmp_path):
@@ -147,6 +160,24 @@ def test_cli_recipe_json_is_a_document(tmp_path):
     assert data["do_not_mask_bracer"] is True
     assert data["graph_path"]
     assert "recipe " not in result.stdout.split("{", 1)[0]
+
+
+def test_cli_recipe_image_name_rewrites_the_graph(tmp_path):
+    out = tmp_path / "recipe.json"
+    result = runner.invoke(
+        app,
+        [
+            "recipe",
+            "--out",
+            str(out),
+            "--image-name",
+            "ashen-reaver-front.png=cloud-face.png",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    graph = json.loads(out.read_text(encoding="utf-8"))
+    loads = {n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"}
+    assert "cloud-face.png" in loads
 
 
 def test_cli_recipe_hands_is_a_refuse(tmp_path):
