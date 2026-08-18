@@ -39,9 +39,10 @@ class FluxGenerator:
         # F-10b380ba: FLUX.1-dev is a 12B-parameter model; the official usage snippet loads bf16
         # specifically because float32 roughly doubles the ~24GB bf16 footprint. prefer_bf16=True on
         # CUDA reflects that; CPU still gets float32 (bf16-on-CPU support varies by torch build).
-        device = select_device(torch)
-        dtype = select_dtype(torch, device, prefer_bf16=True)
+        # F-02ff1a21: keep select_device/select_dtype inside the classified load try.
         try:
+            device = select_device(torch)
+            dtype = select_dtype(torch, device, prefer_bf16=True)
             pipe = FluxPipeline.from_pretrained(self.model_id, torch_dtype=dtype)
             self._pipe = pipe.to(device)
         except Exception as err:

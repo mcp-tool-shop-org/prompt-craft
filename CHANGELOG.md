@@ -49,6 +49,11 @@ every entry below concerns the GPU-free core.
   verifier tiers registered).
 - A child cannot neutralize an inherited identity plate (same plate, `method=none`
   / lower weight). Distinct plates still compose.
+- `sync-rules` no longer searches cwd first (a planted script would have been exec'd).
+- A missing/unreadable gate image escalates through the loop envelope instead of
+  escaping `run()`.
+- `INPAINT_REGION` varies the seed; regional inpaint is not implemented.
+- Device/dtype selection sits inside the classified generator-load try.
 
 ## [0.2.1] — 2026-08-18
 

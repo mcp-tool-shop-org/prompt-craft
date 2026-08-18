@@ -228,7 +228,13 @@ def _safe_generate(
 
 
 def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: str):
-    preflight_image(gen.image_path)
+    try:
+        preflight_image(gen.image_path)
+    except PromptCraftError as err:
+        # IO_GATE_INPUT used to escape run() as a raw coded error outside the
+        # TRANSIENT/SEMANTIC envelope. Could-not-see-the-image is not a generate
+        # retry; escalate like any other SEMANTIC block.
+        raise _GenerationBlocked(err) from err
     # Coordinated signature change (wave-2 core-gate sibling, F-461c4198): the family guard now
     # also runs inside harness.evaluate itself. generator_family is the orchestrator's own
     # trusted generator.family -- already validated once by assert_distinct_families in run()
@@ -301,7 +307,11 @@ def _repair_ladder(resolved, synth, generator, verifiers, thresholds, dag, condi
             seed = gen.seed + 1
             budget.reprompts -= 1
         elif repair is RepairAction.INPAINT_REGION:
-            budget.inpaints -= 1  # same seed (regional inpaint)
+            # Regional inpaint is not implemented on the shipped generators.
+            # Same seed + same prompt is a byte-identical regenerate. Vary the
+            # seed so the named action is not a no-op until a real inpaint exists.
+            seed = gen.seed + 10
+            budget.inpaints -= 1
 
         new_gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, cond, seed)
         if new_gen is None:

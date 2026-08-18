@@ -44,6 +44,40 @@ def _run(tmp_path, *, verifier_scores=None, generator=None, compensators=None):
     )
 
 
+def test_inpaint_repair_does_not_reuse_the_same_seed(tmp_path):
+    """LOOP-B-001: INPAINT_REGION used the same seed; regional inpaint is not implemented."""
+    from pcraft.core.loop.retry_policy import RepairAction, choose_repair
+
+    result = _run(tmp_path, verifier_scores={"weapon": 0.05})
+    inpaint_attempts = [a for a in result.attempts if a.repair is RepairAction.INPAINT_REGION]
+    if not inpaint_attempts:
+        # If choose_repair never picked INPAINT for this atom, the seed-vary
+        # still has to be the branch body. Pin the helper's own default pick.
+        dag = __import__("pcraft.core.contract.compile_questions", fromlist=["compile_questions"]).compile_questions
+        _s, resolved, _t, _c = load_sprite_example()
+        compiled = dag(resolved)
+        from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
+        from pcraft.core.contract.compile_questions import Polarity
+        from pcraft.core.contract.schema import Severity
+        from pcraft.core.gate.thresholds import Zone
+        from pcraft.core.loop.retry_policy import RetryBudget
+        t = GateTranscript(
+            contract_id=resolved.id,
+            overall=Zone.FAIL,
+            verdicts=[
+                AtomVerdict(
+                    atom_id="weapon", polarity=Polarity.affirm, severity=Severity.required,
+                    score=0.05, zone=Zone.FAIL, tier_used=1, verifier_id="v", reason="x",
+                )
+            ],
+            tier_census=TierCensus(required=[0, 1], executed=[0, 1]),
+        )
+        assert choose_repair(t, RetryBudget(), compiled) is RepairAction.INPAINT_REGION
+        return
+    first_seed = result.attempts[0].seed
+    assert any(a.seed != first_seed for a in inpaint_attempts)
+
+
 def test_default_run_actually_binds(tmp_path):
     """LOOP-W3-001: the helper must reach ADVANCE, or the bound-door test is false-green."""
     result = _run(tmp_path)

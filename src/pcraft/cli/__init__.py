@@ -288,7 +288,9 @@ def sync_rules(
 
 
 def _find_sync_script() -> Path | None:
-    for base in (Path.cwd(), *Path(__file__).resolve().parents):
+    # Search only from this package upward. Cwd-first would exec the first
+    # scripts/sync_rules_from_readouts.py a caller can plant (CLI-B-001).
+    for base in Path(__file__).resolve().parents:
         cand = base / "scripts" / "sync_rules_from_readouts.py"
         if cand.exists():
             return cand

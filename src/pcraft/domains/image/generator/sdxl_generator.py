@@ -63,9 +63,11 @@ class SDXLGenerator:
 
         # F-10b380ba: previously neither device nor dtype were selected, so the pipeline loaded to
         # CPU in float32 by default (documented diffusers behaviour) with nothing logging that fact.
-        device = select_device(torch)
-        dtype = select_dtype(torch, device)
+        # F-02ff1a21: select_device/select_dtype used to sit between the two try blocks, so a
+        # surprise from the torch stand-in escaped unclassified.
         try:
+            device = select_device(torch)
+            dtype = select_dtype(torch, device)
             pipe = StableDiffusionXLPipeline.from_pretrained(self.model_id, torch_dtype=dtype)
             self._pipe = pipe.to(device)
         except Exception as err:

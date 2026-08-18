@@ -76,6 +76,18 @@ def test_help_still_exits_0():
     assert result.exit_code == 0
 
 
+def test_sync_rules_does_not_exec_a_cwd_planted_script(tmp_path, monkeypatch):
+    """CLI-B-001: cwd-first search would exec a planted scripts/sync_rules_from_readouts.py."""
+    planted = tmp_path / "scripts"
+    planted.mkdir()
+    planted.joinpath("sync_rules_from_readouts.py").write_text("raise SystemExit('planted')\n")
+    monkeypatch.chdir(tmp_path)
+    from pcraft.cli import _find_sync_script
+
+    found = _find_sync_script()
+    assert found is None or found.resolve() != (planted / "sync_rules_from_readouts.py").resolve()
+
+
 def test_bind_honours_the_contract_flag(tmp_path):
     """CLI-W3-001: --contract used to be accepted and ignored; bind always resolved ashen-reaver."""
     result = runner.invoke(
