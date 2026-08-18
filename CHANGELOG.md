@@ -76,6 +76,11 @@ every entry below concerns the GPU-free core.
   PyPI README, and npm README no longer claim 205 tests or that
   pose-lock is unimplemented. The Starlight title is `prompt-craft`,
   not `my-package`. The landing badge is v0.2.1.
+- **`grok.md`** is the solo-seat operating file. `AGENTS.md` points at
+  it so the harness loads it.
+- **Flux Fill inpaint** is wired (fake-torch). `method=reference` writes
+  the Cloud recipe and raises `GATE_CLOUD_SUBMIT` instead of pretending
+  Kontext ran locally. Pose / IP-Adapter stay refused on Flux.
 
 ### Fixed
 

@@ -104,9 +104,10 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 | | |
 |---|---|
-| 核心 | **318 个测试通过**（于 2026-08-18 在 `d36aa28` 上计数），无需 GPU，确定性。`verify` 运行该套件，然后在 `-O` 下再次运行该套件，并构建一个软件包。 |
+| 核心 | **319 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | 谓词 | `core/` 中的十一个复合决策点都经过了**突变测试**——21 个突变体中有 20 个被杀死，并且[幸存者已命名](scripts/mutate_predicates.py)，而不是隐藏。 |
-| SDXL 条件 | ControlNet OpenPose、IP-Adapter（`method=ip_adapter`）和区域修复都**连接在一起，并通过模拟 torch 测试进行了覆盖**。尚未在本地 5090 上运行 `generate()`。Flux 仍然拒绝姿势/身份/修复（未测量的系列）。 |
+| SDXL 条件 | ControlNet OpenPose、IP-Adapter（`method=ip_adapter`）以及区域修复功能均已通过“伪 Torch”测试，并已完成连接和覆盖。尚未在配备 5090 的本地设备上运行本地 `generate()` 测试。 |
+| Flux 编码器 | 仅文本模式以及“填充修复”功能均已通过“伪 Torch”测试并完成连接。ControlNet 姿态和 IP-Adapter 功能仍然无法使用（家族不匹配）。`method=reference` 用于编写云端配方图，并且拒绝模拟在本地运行（`GATE_CLOUD_SUBMIT`）。 |
 | 云端配方 | `pcraft recipe` 输出 Kontext stitch + 图形中左侧裁剪 + 仅限拳头的 Flux Fill。`method=reference` 是该路径。一个实时云端提交（任务 `06668d4c`，2026-08-18）生成了一个单面板裁剪图并保留了护腕。 |
 | 验证门 | 第二层是一个真实的 DSG 扩展（实体/属性/关系）。升级是一个对比检查点。收据存储尝试历史，而不仅仅是重试计数。 |
 | 离线合成 | `compile_synthesizer` 与**外部**验证门指标进行比较（安装 `[synth]` 时为 `dspy.GEPA`）。`DSPySynthesizer` 运行该比较。尚未运行任何实时 600B 编译。每个资产的循环仍然使用 `TemplateSynthesizer`。 |

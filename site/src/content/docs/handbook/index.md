@@ -42,10 +42,11 @@ the features.
 
 | | |
 |---|---|
-| The core | **318 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
+| The core | **319 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
-| SDXL conditioning | ControlNet OpenPose, IP-Adapter, and regional inpaint are **wired and fake-torch tested**. Local `generate()` on a 5090 has not been run. Flux still refuses those refs |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter, and regional inpaint are **wired and fake-torch tested**. Local `generate()` on a 5090 has not been run |
+| Flux encoder | Fill inpaint is wired. Pose / IP-Adapter stay refused. `method=reference` writes the Cloud recipe and will not pretend Kontext ran locally |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + left crop + fist-only Fill. A live Cloud submit (job `06668d4c`) produced a single-panel crop and kept the bracer |
 | Gate / synth | Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. Offline GEPA is a Python door; no live 600B compile has been run |
 | Identity sub-gate | **not wired** into `orchestrate`. Thresholds 0.55 / 0.05 have no holdout |

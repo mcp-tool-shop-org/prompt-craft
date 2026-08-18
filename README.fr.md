@@ -104,9 +104,10 @@ Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et 
 
 | | |
 |---|---|
-| Cœur du système | **318 tests réussis** (comptés le 2026-08-18 sur `d36aa28`), sans GPU, déterministe. `verify` exécute la suite, puis à nouveau sous `-O`, et enfin une construction du paquet. |
+| Cœur du système | **319 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que caché. |
-| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) et le repinting régional sont **connectés et couverts par des tests simulés avec torch**. L’exécution locale sur `generate()` avec une 5090 n’a pas encore été effectuée. Flux refuse toujours la pose / l’identité / le repinting (famille non mesurée). |
+| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) et le remplissage régional sont **intégrés et couverts par des tests « fake-torch »**. Le test local `generate()` sur une carte 5090 n’a pas été exécuté. |
+| Encodeur Flux | Les options « texte uniquement » et « remplissage » sont intégrées (fake-torch). ControlNet pose et IP-Adapter restent refusés (famille incorrecte). `method=reference` écrit le graphe de la recette Cloud et refuse de prétendre que Kontext a été exécuté localement (`GATE_CLOUD_SUBMIT`). |
 | Recette Cloud | `pcraft recipe` émet un assemblage Kontext, une découpe à gauche dans le graphique et un remplissage Flux avec uniquement le poing. `method=reference` est ce chemin. Une soumission Cloud en direct (tâche `06668d4c`, 2026-08-18) a produit une seule image découpée et a conservé le bracelet. |
 | Porte d’entrée | Le niveau 2 est une expansion DSG réelle (entité / attribut / relation). L’escalade est un point de contrôle contrastif. Les reçus stockent l’historique des tentatives, et pas seulement le nombre de nouvelles tentatives. |
 | Synthèse hors ligne | `compile_synthesizer` se compare à une **métrique de porte d’entrée externe** (`dspy.GEPA` lorsque `[synth]` est installé). `DSPySynthesizer` exécute la comparaison. Aucune compilation en direct avec 600B n’a été effectuée. La boucle par élément utilise toujours `TemplateSynthesizer`. |

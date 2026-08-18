@@ -70,8 +70,10 @@ concepts, blind to which attribute belongs to which object.
 
 **v0.2.1 — the core is real. SDXL conditioning is assembled in code. Local GPU generate is still unexercised. One Cloud recipe has been run live.**
 
-- **318 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
+- **319 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
   against a mock generator and verifier, which is what proves the plugin boundary holds.
+- Flux Fill inpaint is wired. `method=reference` writes the Cloud recipe (`GATE_CLOUD_SUBMIT`).
+  ControlNet pose and IP-Adapter stay refused on Flux.
 - The eleven compound decision points in the core are **mutation-tested** — 20 of 21 mutants
   killed, and the survivor is named rather than hidden.
 - SDXL ControlNet OpenPose, IP-Adapter, and regional inpaint are **wired and covered by

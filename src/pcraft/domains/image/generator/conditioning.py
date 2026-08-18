@@ -179,15 +179,20 @@ def refuse_reference_identity(generator_id: str, conditioning: dict) -> None:
 
 
 def refuse_unmeasured_family(generator_id: str, family: str, conditioning: dict) -> None:
-    """Flux (and any unmeasured encoder) still refuse pose / identity / inpaint."""
-    if pose_paths(conditioning) or identity_refs(conditioning) or inpaint_from(conditioning):
+    """Flux refuses SDXL-shaped pose / IP-Adapter. Fill inpaint and method=reference are Flux's."""
+    if pose_paths(conditioning):
         raise PromptCraftError(
             "GATE_CONDITIONING_UNSUPPORTED",
-            f"{generator_id} (family={family}) cannot apply pose_refs / "
-            "identity_refs / inpaint: that encoder is unmeasured. SDXL is the "
-            "implemented family.",
-            hint="Use the image plugin's SDXL generator, or omit identity_ref "
-            "and pose spatials for a text-only Flux run.",
+            f"{generator_id} (family={family}) cannot apply pose_refs as ControlNet. "
+            "That is the SDXL encoder.",
+            hint="Two-hand pose on Flux is the Cloud recipe (method=reference / pcraft recipe).",
+        )
+    if ip_adapter_refs(conditioning):
+        raise PromptCraftError(
+            "GATE_CONDITIONING_UNSUPPORTED",
+            f"{generator_id} (family={family}) cannot apply method=ip_adapter. "
+            "That is the SDXL encoder.",
+            hint="Flux identity is method=reference (Cloud Kontext stitch + Fill).",
         )
 
 

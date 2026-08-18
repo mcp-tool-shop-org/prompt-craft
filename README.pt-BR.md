@@ -104,9 +104,10 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 | | |
 |---|---|
-| Núcleo | **318 testes aprovados** (contados em 2026-08-18 em `d36aa28`), sem uso da GPU, determinístico. `verify` executa o conjunto de testes, o mesmo conjunto novamente sob `-O` e a construção de um pacote. |
+| Núcleo | **319 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
-| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) e preenchimento regional estão **conectados e cobertos por testes "fake-torch"**. O teste local `generate()` em uma 5090 ainda não foi executado. O Flux ainda se recusa a processar pose/identidade/preenchimento (família não medida). |
+| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) e o preenchimento regional estão **conectados e cobertos por testes fake-torch**. O teste local `generate()` numa placa de vídeo 5090 não foi executado. |
+| Codificador Flux | O modo apenas texto e o preenchimento (Fill Inpaint) estão conectados (fake-torch). O ControlNet pose e o IP-Adapter continuam a ser rejeitados (família incorreta). `method=reference` escreve o gráfico da receita do Cloud e recusa-se a simular que o Kontext foi executado localmente (`GATE_CLOUD_SUBMIT`). |
 | Receita para a nuvem | `pcraft recipe` gera o "Kontext stitch" + recorte à esquerda no gráfico + preenchimento do Flux apenas na mão. `method=reference` é esse caminho. Um envio ao vivo para a nuvem (tarefa `06668d4c`, 2026-08-18) produziu um recorte de painel único e manteve o suporte. |
 | Portão | O nível 2 é uma expansão DSG real (entidade/atributo/relação). A escalada é um ponto de verificação contrastivo. Os registros armazenam a história da tentativa, não apenas a contagem de tentativas. |
 | Síntese offline | `compile_synthesizer` compara com uma métrica de portão **externa** (`dspy.GEPA` quando `[synth]` está instalado). `DSPySynthesizer` executa a comparação. Nenhuma compilação ao vivo de 600B foi executada. O loop por ativo ainda usa `TemplateSynthesizer`. |

@@ -63,6 +63,8 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
+    "GATE_CLOUD_SUBMIT": "Flux wrote the Cloud recipe graph. Submit it with pcraft recipe "
+    "--image-name; it does not run Kontext locally.",
     "GATE_CONDITIONING_UNSUPPORTED": "SDXL applies ControlNet OpenPose and IP-Adapter. "
     "method=reference is the Cloud Kontext stitch + left crop + fist-only Fill recipe "
     "(`pcraft recipe`). Flux, method=lora, and InstantID still refuse. For a text-only "

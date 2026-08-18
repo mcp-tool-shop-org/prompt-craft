@@ -48,7 +48,7 @@ an adapter can. The text describes what is nameable; the plate carries what is n
 `method` names the encoder:
 
 - `ip_adapter` — SDXL IP-Adapter (wired; local generate unexercised)
-- `reference` — the Cloud Kontext stitch + left crop + fist-only Fill recipe (`pcraft recipe`)
+- `reference` — the Cloud Kontext stitch + left crop + fist-only Fill recipe (`pcraft recipe`). On the Flux generator this writes the graph and raises `GATE_CLOUD_SUBMIT` rather than pretending Kontext ran locally.
 - `lora` / `instantid` — still refuse
 - `none` — skip the plate
 

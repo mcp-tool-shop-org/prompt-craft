@@ -134,9 +134,10 @@ in the verifier interface so nobody reintroduces it.
 
 | | |
 |---|---|
-| Core | **318 tests passing** (counted 2026-08-18 on `d36aa28`), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Core | **319 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
-| SDXL conditioning | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), and regional inpaint are **wired and covered by fake-torch tests**. Local `generate()` on a 5090 has not been run. Flux still refuses pose / identity / inpaint (unmeasured family). |
+| SDXL conditioning | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`), and regional inpaint are **wired and covered by fake-torch tests**. Local `generate()` on a 5090 has not been run. |
+| Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose and IP-Adapter stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + in-graph left crop + fist-only Flux Fill. `method=reference` is that path. A live Cloud submit (job `06668d4c`, 2026-08-18) produced a single-panel crop and kept the bracer. |
 | Gate | Tier-2 is a real DSG expansion (entity / attribute / relation). Escalation is a contrastive checkpoint. Receipts store the attempt story, not just a retry count. |
 | Offline synth | `compile_synthesizer` pins against an **external** gate metric (`dspy.GEPA` when `[synth]` is installed). `DSPySynthesizer` runs the pin. No live 600B compile has been run. The per-asset loop still uses `TemplateSynthesizer`. |

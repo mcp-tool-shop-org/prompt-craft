@@ -69,16 +69,16 @@ def test_sdxl_refuses_method_reference(tmp_path):
     assert "pcraft recipe" in (exc.value.hint or "")
 
 
-def test_flux_still_refuses_reference(tmp_path):
+def test_flux_reference_without_pose_still_needs_the_map(tmp_path):
     plate = write_solid_png(tmp_path / "face.png")
     with pytest.raises(PromptCraftError) as exc:
-        FluxGenerator().generate(
+        FluxGenerator(out_dir=tmp_path / "out").generate(
             "p",
             "n",
-            {"identity_refs": [{"plate": str(plate), "method": "reference"}]},
+            {"identity_refs": [{"plate": str(plate), "method": "reference", "scope": "face"}]},
             seed=1,
         )
-    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert exc.value.code == "GATE_CONDITIONING_REF_MISSING"
 
 
 def test_graph_stitches_then_crops_left_then_fills_the_fist(tmp_path):

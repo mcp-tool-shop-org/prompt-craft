@@ -1,12 +1,16 @@
 """Flux generator (swappable encoder per the system-architecture reuse slot).
 
-Same plugin contract as SDXL; ``family = "flux"``. A sibling to ``SDXLGenerator`` demonstrating that
-the generator is the swappable secret -- the core loop, contract, gate, and optimizer are unchanged
-when the encoder changes. torch/diffusers are lazy ``[image]`` deps.
+Same plugin contract as SDXL; ``family = "flux"``.
 
-UNMEASURED FAMILY: pose-lock, IP-Adapter, and inpaint stay refused here. SDXL is the
-implemented encoder. ``generate()`` still refuses rather than silently accepting
-conditioning it cannot apply."""
+What this encoder applies:
+
+- text-only ``FluxPipeline`` (FLUX.1-dev)
+- regional inpaint via ``FluxFillPipeline`` (FLUX.1-Fill-dev)
+- ``method=reference`` writes the Cloud Kontext + fist-only Fill graph
+  (does not run Kontext locally)
+
+What it refuses: ControlNet pose, IP-Adapter, LoRA, InstantID. Those are
+the SDXL family. torch/diffusers are lazy ``[image]`` deps."""
 
 from __future__ import annotations
 
@@ -22,55 +26,107 @@ class FluxGenerator:
     generator_id = "flux.1-dev.v1"
     family = "flux"
 
-    def __init__(self, model_id: str = "black-forest-labs/FLUX.1-dev", out_dir: str | Path = "records/_image", steps: int = 28):
+    def __init__(
+        self,
+        model_id: str = "black-forest-labs/FLUX.1-dev",
+        fill_model_id: str = "black-forest-labs/FLUX.1-Fill-dev",
+        out_dir: str | Path = "records/_image",
+        steps: int = 28,
+    ):
         self.model_id = model_id
+        self.fill_model_id = fill_model_id
         self.out_dir = Path(out_dir)
         self.steps = steps
         self._pipe = None
+        self._pipe_kind: str | None = None
 
-    def _load(self):
-        if self._pipe is not None:
+    def _load(self, kind: str = "base"):
+        if self._pipe is not None and self._pipe_kind == kind:
             return self._pipe
         try:
             import torch  # noqa: F401
-            from diffusers import FluxPipeline  # type: ignore
+            import diffusers  # noqa: F401
         except Exception as err:
-            raise PromptCraftError("DEP_IMAGE_MISSING", "Flux needs the [image] extra (torch + diffusers)") from err
+            raise PromptCraftError(
+                "DEP_IMAGE_MISSING", "Flux needs the [image] extra (torch + diffusers)"
+            ) from err
 
-        # F-10b380ba: FLUX.1-dev is a 12B-parameter model; the official usage snippet loads bf16
-        # specifically because float32 roughly doubles the ~24GB bf16 footprint. prefer_bf16=True on
-        # CUDA reflects that; CPU still gets float32 (bf16-on-CPU support varies by torch build).
-        # F-02ff1a21: keep select_device/select_dtype inside the classified load try.
         device = "unset"
         try:
             device = select_device(torch)
             dtype = select_dtype(torch, device, prefer_bf16=True)
-            pipe = FluxPipeline.from_pretrained(self.model_id, torch_dtype=dtype)
+            if kind == "inpaint":
+                from diffusers import FluxFillPipeline  # type: ignore
+
+                pipe = FluxFillPipeline.from_pretrained(self.fill_model_id, torch_dtype=dtype)
+            else:
+                from diffusers import FluxPipeline  # type: ignore
+
+                pipe = FluxPipeline.from_pretrained(self.model_id, torch_dtype=dtype)
             self._pipe = pipe.to(device)
+            self._pipe_kind = kind
+        except PromptCraftError:
+            raise
         except Exception as err:
             raise PromptCraftError(
                 "RUNTIME_GENERATOR_LOAD_FAILED",
-                f"Flux pipeline {self.model_id!r} failed to load/move to device {device!r}: {err}",
+                f"Flux pipeline failed to load/move to device {device!r}: {err}",
                 cause=err,
             ) from err
         return self._pipe
 
+    def _write_reference_recipe(self, conditioning: dict) -> Path:
+        from . import kontext_fill
+        from .reference_lock import assemble
+
+        bound = cond.bind_refs(conditioning, generator_id=self.generator_id)
+        lock = assemble(bound)
+        graph = kontext_fill.build_graph(lock)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / f"{kontext_fill.RECIPE_ID}.json"
+        import json
+
+        path.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+        return path
+
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
-        # Unmeasured family: pose-lock / identity-bind / inpaint stay refused until a
-        # Director-gated measurement says Flux may apply them. SDXL is the implemented encoder.
+        conditioning = cond.assert_refs_readable(conditioning, generator_id=self.generator_id)
+        cond.refuse_unimplemented_identity(self.generator_id, conditioning)
+        if cond.reference_refs(conditioning):
+            path = self._write_reference_recipe(conditioning)
+            raise PromptCraftError(
+                "GATE_CLOUD_SUBMIT",
+                f"{self.generator_id} wrote the Cloud recipe to {path}; "
+                "it does not run Kontext locally",
+                hint="Submit that graph on Comfy Cloud (pcraft recipe --image-name …). "
+                "Do not treat this refuse as a missing plate.",
+            )
         cond.refuse_unmeasured_family(self.generator_id, self.family, conditioning)
 
-        pipe = self._load()
+        kind = "inpaint" if cond.inpaint_from(conditioning) else "base"
+        pipe = self._load(kind)
         try:
             import torch  # type: ignore
 
             generator = torch.Generator(device=getattr(pipe, "device", "cpu")).manual_seed(seed)
-            image = pipe(prompt=prompt, num_inference_steps=self.steps, generator=generator).images[0]
+            call = {"prompt": prompt, "num_inference_steps": self.steps, "generator": generator}
+            applied: dict = {"kind": kind, "inpaint": None}
+            src = cond.inpaint_from(conditioning)
+            if src:
+                init = cond.open_image(src)
+                region = cond.inpaint_region(conditioning)
+                size = getattr(init, "size", (64, 64))
+                call["image"] = init
+                call["mask_image"] = cond.mask_for_region(size, region)
+                applied["inpaint"] = {"from": src, "region": region}
+            image = pipe(**call).images[0]
             self.out_dir.mkdir(parents=True, exist_ok=True)
-            path = self.out_dir / f"{self.generator_id}_seed{seed}.png"
+            suffix = "_inpaint" if src else ""
+            path = self.out_dir / f"{self.generator_id}_seed{seed}{suffix}.png"
             image.save(path)
+        except PromptCraftError:
+            raise
         except Exception as err:
-            # F-2ef1bb79: convert a raw call-time failure into the one structured error type.
             raise PromptCraftError(
                 "RUNTIME_GENERATE_FAILED",
                 f"{self.generator_id} failed generating seed={seed}: {err}",
@@ -78,6 +134,10 @@ class FluxGenerator:
             ) from err
 
         return GenerationResult(
-            image_path=str(path), seed=seed, sampler="flow-match", generator_id=self.generator_id,
-            generator_family=self.family, conditioning=conditioning,
+            image_path=str(path),
+            seed=seed,
+            sampler="flow-match",
+            generator_id=self.generator_id,
+            generator_family=self.family,
+            conditioning={**conditioning, "applied": applied},
         )

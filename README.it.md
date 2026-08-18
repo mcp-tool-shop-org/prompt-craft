@@ -104,9 +104,10 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 | | |
 |---|---|
-| Nucleo | **318 test superati** (contati il 2026-08-18 su `d36aa28`), privo di GPU, deterministico. `verify` esegue la suite, la suite viene eseguita nuovamente sotto `-O` e viene creato un pacchetto. |
+| Nucleo | **319 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
-| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) e l'inpaint regionale sono **collegati e coperti da test finti con torch**. La generazione locale `generate()` su una 5090 non è stata eseguita. Flux si rifiuta ancora di gestire pose / identità / inpaint (famiglia non misurata). |
+| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter (`method=ip_adapter`) e l’inpaint regionale sono **collegati e testati con fake-torch**. Non è stato eseguito il test locale `generate()` su una scheda 5090. |
+| Encoder Flux | Le versioni solo testo e “Fill inpaint” sono state collegate (fake-torch). ControlNet pose e IP-Adapter continuano a non funzionare (famiglia di algoritmi errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
 | Ricetta Cloud | `pcraft recipe` emette un'immagine cucita con Kontext, un ritaglio sinistro nel grafico e un riempimento Flux che mostra solo il pugno. `method=reference` è quel percorso. Un invio Cloud in diretta (lavoro `06668d4c`, 2026-08-18) ha prodotto un singolo pannello ritagliato e ha mantenuto il bracciale. |
 | Gate | Il livello 2 è una vera espansione DSG (entità / attributo / relazione). L'escalation è un checkpoint contrastivo. Le ricevute memorizzano la storia del tentativo, non solo il numero di tentativi. |
 | Sintesi offline | `compile_synthesizer` confronta con una **metrica del gate esterna** (`dspy.GEPA` quando `[synth]` è installato). `DSPySynthesizer` esegue il confronto. Nessuna compilazione live di 600B è stata eseguita. Il ciclo per asset utilizza ancora `TemplateSynthesizer`. |

@@ -33,6 +33,7 @@ from pcraft.domains.image.verifier.dsg_verifier import DSGVerifier
 from pcraft.domains.image.verifier.siglip2_screen import SigLIP2Screen
 from pcraft.domains.image.verifier.vqascore_verifier import DEFAULT_MODEL_ID, VQAScoreVerifier
 from pcraft.errors import PromptCraftError
+from pcraft.testing import write_solid_png
 
 
 def _question(check_type: CheckType = CheckType.vqa) -> Question:
@@ -194,17 +195,19 @@ def test_sdxl_allows_conditioning_with_no_pose_or_identity_keys_at_all():
     assert exc.value.code == "DEP_IMAGE_MISSING"
 
 
-def test_flux_refuses_nonempty_pose_refs():
+def test_flux_refuses_nonempty_pose_refs(tmp_path):
+    pose = write_solid_png(tmp_path / "front.openpose.png")
     gen = FluxGenerator()
     with pytest.raises(PromptCraftError) as exc:
-        gen.generate("p", "n", {"pose_refs": ["poses/front.openpose.png"]}, seed=1)
+        gen.generate("p", "n", {"pose_refs": [str(pose)]}, seed=1)
     assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
 
 
-def test_flux_refuses_nonempty_identity_refs():
+def test_flux_refuses_nonempty_identity_refs(tmp_path):
+    plate = write_solid_png(tmp_path / "ref.png")
     gen = FluxGenerator()
     with pytest.raises(PromptCraftError) as exc:
-        gen.generate("p", "n", {"identity_refs": [{"plate": "ref.png"}]}, seed=1)
+        gen.generate("p", "n", {"identity_refs": [{"plate": str(plate), "method": "ip_adapter"}]}, seed=1)
     assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
 
 

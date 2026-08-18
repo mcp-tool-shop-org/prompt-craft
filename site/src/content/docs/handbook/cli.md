@@ -37,6 +37,7 @@ the shipped ashen-reaver demo.
 ## What the CLI will not do
 
 - It will not silently become ashen-reaver when you point it at an empty store.
-- It will not submit a Cloud job. `recipe` writes JSON.
+- It will not submit a Cloud job. `recipe` writes JSON. Flux
+  `method=reference` also writes that graph and raises `GATE_CLOUD_SUBMIT`.
 - It will not run a live GEPA search. That is `compile_synthesizer(...)` from Python, offline.
 - It will not wire the identity sub-gate. That module is measured, not promoted.

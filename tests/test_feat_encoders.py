@@ -104,6 +104,12 @@ def _install_fake_diffusers(monkeypatch) -> dict:
     class _CNInpaint(_Pipe):
         __name__ = "StableDiffusionXLControlNetInpaintPipeline"
 
+    class _Flux(_Pipe):
+        __name__ = "FluxPipeline"
+
+    class _FluxFill(_Pipe):
+        __name__ = "FluxFillPipeline"
+
     class _ControlNetModel:
         @classmethod
         def from_pretrained(cls, model_id, **kwargs):
@@ -114,6 +120,8 @@ def _install_fake_diffusers(monkeypatch) -> dict:
     fake.StableDiffusionXLControlNetPipeline = _CN
     fake.StableDiffusionXLInpaintPipeline = _Inpaint
     fake.StableDiffusionXLControlNetInpaintPipeline = _CNInpaint
+    fake.FluxPipeline = _Flux
+    fake.FluxFillPipeline = _FluxFill
     fake.ControlNetModel = _ControlNetModel
     monkeypatch.setitem(sys.modules, "diffusers", fake)
     return captured
@@ -233,11 +241,50 @@ def test_flux_still_refuses_pose_even_when_the_file_exists(tmp_path):
     assert "flux" in exc.value.message.lower()
 
 
-def test_flux_still_refuses_inpaint(tmp_path):
+def test_flux_inpaint_uses_the_fill_pipeline(monkeypatch, tmp_path):
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    _install_fake_pil(monkeypatch)
     src = write_solid_png(tmp_path / "prev.png")
+    gen = FluxGenerator(out_dir=tmp_path / "out")
+    result = gen.generate(
+        "p",
+        "n",
+        {"inpaint_from": str(src), "inpaint_region": "fist"},
+        seed=5,
+    )
+    pipe = captured["last"]
+    assert pipe.model_id == gen.fill_model_id
+    assert "mask_image" in pipe.call_kwargs
+    assert "image" in pipe.call_kwargs
+    assert result.image_path.endswith("_inpaint.png")
+    assert result.conditioning["applied"]["inpaint"]["region"] == "fist"
+
+
+def test_flux_reference_writes_the_cloud_recipe_and_does_not_pretend(tmp_path):
+    identity = write_solid_png(tmp_path / "face.png")
+    pose = write_solid_png(tmp_path / "pose.openpose.png")
+    gen = FluxGenerator(out_dir=tmp_path / "out")
     with pytest.raises(PromptCraftError) as exc:
-        FluxGenerator().generate("p", "n", {"inpaint_from": str(src), "inpaint_region": "head"}, seed=1)
-    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+        gen.generate(
+            "p",
+            "n",
+            {
+                "pose_refs": [str(pose)],
+                "identity_refs": [{"plate": str(identity), "method": "reference", "scope": "face"}],
+            },
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CLOUD_SUBMIT"
+    written = tmp_path / "out" / "flux.kontext-stitch-crop-fill.v1.json"
+    assert written.is_file()
+    import json
+
+    graph = json.loads(written.read_text(encoding="utf-8"))
+    types = {n["class_type"] for n in graph.values()}
+    assert "ImageStitch" in types
+    assert "ImageCropV2" in types
+    assert "InpaintModelConditioning" in types
 
 
 # --------------------------------------------------------------------------- SDXL apply path (fakes)
