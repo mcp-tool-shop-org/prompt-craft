@@ -1,4 +1,4 @@
-"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor.
+"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor | recipe.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
@@ -7,6 +7,7 @@ model to stdout and the human banner to stderr."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from collections.abc import Sequence
@@ -476,6 +477,50 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
     except PromptCraftError as err:
         report.store_error = err.to_safe_text()
     return report
+
+
+@app.command()
+def recipe(
+    contract: str = typer.Option("char:ashen-reaver", help="contract id whose plates feed the stitch"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    out: Path = typer.Option(Path("kontext-fill.recipe.json"), "--out", help="write the Comfy API graph here"),
+    fill_region: str = typer.Option("fist", help="Fill mask region. fist only — hands/weapon ate the bracer"),
+    fill_mask: Path | None = typer.Option(None, help="optional painted fist-only mask (overrides --fill-region)"),
+    seed: int = typer.Option(169405236028824, help="KSampler seed (the measured stitch used this)"),
+    as_json: bool = typer.Option(False, "--json", help="emit RecipeReport as JSON on stdout"),
+    debug: bool = typer.Option(False),
+) -> None:
+    """Write the Cloud Kontext stitch + left crop + fist-only Fill graph. Does not submit."""
+    from ..core.loop.orchestrate import _assemble_conditioning
+    from ..domains.image.generator import kontext_fill
+    from ..sample import load_workspace
+
+    try:
+        _store, resolved, _t, _compiled = load_workspace(
+            contracts_dirs=contracts_dir or None, contract_id=contract
+        )
+        graph, report = kontext_fill.from_conditioning(
+            _assemble_conditioning(resolved),
+            fill_region=fill_region,
+            fill_mask=fill_mask,
+            seed=seed,
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+        report = report.model_copy(update={"graph_path": str(out.resolve())})
+        _say(f"recipe {report.recipe_id}", as_json=as_json)
+        _say(f"stages: {' -> '.join(report.stages)}", as_json=as_json)
+        _say(f"crop: {report.crop}  fill: {report.fill_region}  bracer: not masked", as_json=as_json)
+        _say(f"graph: {report.graph_path}", as_json=as_json)
+        _say(f"measured: {report.measured_graph}", as_json=as_json)
+        if as_json:
+            _emit_model(report)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 @app.command()

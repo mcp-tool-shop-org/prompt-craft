@@ -42,6 +42,10 @@ every entry below concerns the GPU-free core.
 - **Reference lock pack.** Identity + OpenPose in one reference-conditioned
   edit moved the axe to a two-hand grip. Identity + costume did not move
   pose. `method=reference` is reserved for that Cloud/Imagine path.
+- **`pcraft recipe`** emits the measured Cloud graph: Kontext stitch
+  (identity + OpenPose), in-graph left crop so the diptych never ships,
+  then Flux Fill on a fist-only mask. Do not mask the bracer.
+  `method=reference` is this path; SDXL refuses it. Does not submit.
 
 ### Fixed
 

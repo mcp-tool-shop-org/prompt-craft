@@ -11,8 +11,9 @@ multi-ref ``image_edit``, not SDXL ControlNet):
 So the lock is joint refs, not two bolted-on SDXL adapters. SDXL
 ControlNet + IP-Adapter stay the local/diffusers path. ``method=reference``
 on an identity plate means "these files are joint refs for a
-reference-conditioned model (Cloud / Imagine / Kontext)." SDXL does
-not pretend to run that model.
+reference-conditioned model (Cloud / Imagine / Kontext)." ``pcraft
+recipe`` emits that graph (stitch + left crop + fist-only Fill).
+SDXL does not pretend to run that model.
 """
 
 from __future__ import annotations

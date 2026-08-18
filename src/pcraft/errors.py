@@ -59,8 +59,10 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
-    "GATE_CONDITIONING_UNSUPPORTED": "SDXL applies ControlNet OpenPose and IP-Adapter. Flux, "
-    "method=lora, and InstantID still refuse. For a text-only run, omit identity_ref and pose spatials.",
+    "GATE_CONDITIONING_UNSUPPORTED": "SDXL applies ControlNet OpenPose and IP-Adapter. "
+    "method=reference is the Cloud Kontext stitch + left crop + fist-only Fill recipe "
+    "(`pcraft recipe`). Flux, method=lora, and InstantID still refuse. For a text-only "
+    "run, omit identity_ref and pose spatials.",
     "GATE_CONDITIONING_REF_MISSING": "Pass a real image path for every pose_ref, identity plate, "
     "and inpaint_from. A missing plate is a refuse, not a plain text-to-image render.",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom, "

@@ -24,6 +24,8 @@ _IP_ADAPTER = "ip_adapter"
 _REFERENCE = "reference"
 _SKIP_METHODS = frozenset({"none"})
 _UNIMPLEMENTED_METHODS = frozenset({"lora", "instantid"})
+# hands/weapon ate the bone-spike bracer on the keeper Fill. fist is the measured box.
+_FIST = (0.62, 0.48, 0.88, 0.65)
 
 
 def pose_paths(conditioning: dict) -> list[str]:
@@ -49,6 +51,10 @@ def ip_adapter_refs(conditioning: dict) -> list[dict[str, Any]]:
     return [r for r in identity_refs(conditioning) if r["method"] == _IP_ADAPTER]
 
 
+def reference_refs(conditioning: dict) -> list[dict[str, Any]]:
+    return [r for r in identity_refs(conditioning) if r["method"] == _REFERENCE]
+
+
 def unimplemented_identity_methods(conditioning: dict) -> list[str]:
     return sorted({r["method"] for r in identity_refs(conditioning) if r["method"] in _UNIMPLEMENTED_METHODS})
 
@@ -70,6 +76,8 @@ def pipeline_kind(conditioning: dict) -> str:
         parts.append("controlnet")
     if ip_adapter_refs(conditioning):
         parts.append("ip")
+    if reference_refs(conditioning):
+        parts.append("reference")
     return "_".join(parts) or "base"
 
 
@@ -152,7 +160,21 @@ def refuse_unimplemented_identity(generator_id: str, conditioning: dict) -> None
         f"{generator_id} cannot apply identity method(s) {methods}: "
         "only ip_adapter is implemented (lora / instantid are not)",
         hint="Set identity_ref.method to ip_adapter, or omit the plate. "
-        "method=none skips a plate. LoRA and InstantID are not wired.",
+        "method=none skips a plate. method=reference is `pcraft recipe`. "
+        "LoRA and InstantID are not wired.",
+    )
+
+
+def refuse_reference_identity(generator_id: str, conditioning: dict) -> None:
+    """SDXL / local Flux do not run the Cloud recipe. method=reference is pcraft recipe."""
+    if not reference_refs(conditioning):
+        return
+    raise PromptCraftError(
+        "GATE_CONDITIONING_UNSUPPORTED",
+        f"{generator_id} cannot apply identity method=reference: that is the "
+        "Cloud Kontext stitch + left crop + fist-only Fill recipe",
+        hint="Run `pcraft recipe` to emit the graph. SDXL stays on method=ip_adapter. "
+        "Do not mask the bracer on the Fill pass.",
     )
 
 
@@ -194,6 +216,13 @@ def region_box(width: int, height: int, region: str) -> tuple[int, int, int, int
         return (int(width * 0.15), int(height * 0.30), int(width * 0.85), int(height * 0.70))
     if name in {"hands", "weapon", "hand"}:
         return (0, int(height * 0.55), width, height)
+    if name == "fist":
+        x0, y0, x1, y1 = _FIST
+        left = int(width * x0)
+        top = int(height * y0)
+        right = max(left + 1, int(width * x1))
+        bottom = max(top + 1, int(height * y1))
+        return (left, top, right, bottom)
     return (int(width * 0.25), int(height * 0.25), int(width * 0.75), int(height * 0.75))
 
 

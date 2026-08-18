@@ -131,6 +131,7 @@ class SDXLGenerator:
 
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
         conditioning = cond.assert_refs_readable(conditioning, generator_id=self.generator_id)
+        cond.refuse_reference_identity(self.generator_id, conditioning)
         cond.refuse_unimplemented_identity(self.generator_id, conditioning)
         kind = cond.pipeline_kind(conditioning)
         pipe = self._load(kind)

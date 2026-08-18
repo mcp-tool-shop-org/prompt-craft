@@ -100,7 +100,7 @@ class IdentityRef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     plate: str  # path to the reference plate image (the conditioning input)
-    method: str = "ip_adapter"  # ip_adapter | instantid | lora | none
+    method: str = "ip_adapter"  # ip_adapter | reference | instantid | lora | none
     weight: float = 0.6
     scope: str = "face"  # face | costume | silhouette | full
 
