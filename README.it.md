@@ -100,17 +100,17 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 ## Stato corretto
 
-**v0.2.1: il nucleo è reale. Il condizionamento SDXL è assemblato nel codice. La generazione locale con GPU non è ancora stata testata. Un'unica ricetta Cloud è stata eseguita in diretta.**
+**v0.2.1: il nucleo è operativo. Il condizionamento SDXL è stato implementato nel codice. È stata eseguita una prova locale con una scheda grafica 5090 `generate()`. Una ricetta Cloud è stata eseguita in diretta.**
 
 | | |
 |---|---|
-| Nucleo | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Nucleo | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
-| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l’inpaint regionale sono stati **testati con fake-torch e i risultati sono stati verificati**. InstantID e IP-Adapter non possono essere utilizzati contemporaneamente per generare un’immagine. Non è stato eseguito il test locale `generate()` su una scheda grafica 5090. |
+| Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e l'inpaint regionale sono stati **integrati e testati con simulazioni**. InstantID e IP-Adapter non possono condividere lo stesso processo di generazione. La prova locale `generate()` è stata eseguita sulla scheda grafica 5090 (18 agosto 2026, seed `169405236028824`, tipo `controlnet_ip`). L'immagine risultante ha un aspetto grottesco; gli elementi "grip", "sigil" e "bracer" non sono stati renderizzati correttamente. Due immagini di test per IP-Adapter sullo stesso adattatore vengono rifiutate prima che vengano elaborati i pixel. |
 | Encoder Flux | Le funzioni “solo testo” e “riempimento inpaint” sono state integrate (fake-torch). ControlNet pose, IP-Adapter e LoRA continuano a essere rifiutate (famiglia errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
 | Ricetta Cloud | `pcraft recipe` emette un'immagine cucita con Kontext, un ritaglio sinistro nel grafico e un riempimento Flux che mostra solo il pugno. `method=reference` è quel percorso. Un invio Cloud in diretta (lavoro `06668d4c`, 2026-08-18) ha prodotto un singolo pannello ritagliato e ha mantenuto il bracciale. |
 | Gate | Il livello 2 è una vera espansione DSG (entità / attributo / relazione). L'escalation è un checkpoint contrastivo. Le ricevute memorizzano la storia del tentativo, non solo il numero di tentativi. |
-| Sintesi offline | `compile_synthesizer` confronta con una **metrica del gate esterna** (`dspy.GEPA` quando `[synth]` è installato). `DSPySynthesizer` esegue il confronto. Nessuna compilazione live di 600B è stata eseguita. Il ciclo per asset utilizza ancora `TemplateSynthesizer`. |
+| Sintesi offline | `compile_synthesizer` si basa su una **metrica esterna** (`dspy.GEPA` quando `[synth]` è installato). È stata eseguita una compilazione in diretta il 18 agosto 2026 sull'istanza locale di Ollama `hermes3:8b` (la versione 600B non era attiva). Valore fissato a `sprite.synth.v1-gepa.json` (`generated_by=gepa`). Il seed `sprite.synth.v1.json` è rimasto invariato. Il ciclo per ogni risorsa continua a utilizzare `TemplateSynthesizer`. L'interfaccia a riga di comando non riesce ancora a generare una metrica basata sui pixel. |
 | Sub-gate dell'identità | valuta CLIP-I e **non è collegato** a `orchestrate`. Le soglie 0,55 / 0,05 non hanno un set di dati di esclusione. Segnaposto. |
 | Canone reale | l'esempio di contratto fornito è un'**invenzione generica**, non il canone di un progetto reale. Definire un canone reale è una decisione umana deliberata. |
 
@@ -118,7 +118,7 @@ Tre affermazioni che le versioni precedenti di questo documento hanno fatto e ch
 
 - Le soglie a tre zone sono state descritte come *calibrate rispetto a un set di dati etichettato manualmente*. Non lo sono. Sono valori predefiniti.
 - La regola secondo cui un modello generativo non può mai essere il proprio "gatekeeper" è stata affermata come se uno studio l'avesse dimostrato. Le prove a sostegno sono **convergenti piuttosto che dirette**: i test discriminativi sì/no si sono dimostrati misurabilmente più stabili rispetto alla generazione di didascalie aperte, i modelli non possono autocorregersi in modo affidabile senza feedback esterno e il riconoscimento automatico traccia le preferenze. Nessuno studio singolo ha condotto un confronto diretto. La regola è valida; la certezza è stata esagerata.
-- Il processo di "conditioning" è stato inizialmente descritto come non implementato, poi come non utilizzato. SDXL ora **legge** i riferimenti assemblati nel codice. Ciò che rimane inutilizzato è un'istanza locale attiva `generate()` su questa macchina, non il cablaggio.
+- Il processo di "conditioning" è stato inizialmente descritto come non implementato, poi come non utilizzato. SDXL ora **legge** i riferimenti assemblati nel codice. Un `generate()` locale su questa macchina è già stato eseguito. Cablato e applicato non è il plate nei pixel.
 
 ## Requisiti
 
@@ -168,7 +168,7 @@ La motivazione del progetto, gli standard rispetto ai quali questo repository si
 
 ## Collaboratori
 
-Consultare il file [CONTRIBUTORS.md](CONTRIBUTORS.md). Autore: mcp-tool-shop. Test interni (dogfood) eseguiti su questo modello: Grok (xAI).
+Consultare il file [CONTRIBUTORS.md](CONTRIBUTORS.md). Autore: mcp-tool-shop. Test interni (dogfood) eseguiti su questo ramo: Grok (xAI).
 
 ## Licenza
 

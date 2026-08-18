@@ -134,13 +134,13 @@ in the verifier interface so nobody reintroduces it.
 
 | | |
 |---|---|
-| Core | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Core | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
 | SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. Two IP-Adapter plates on one adapter refuse before pixels. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
 | Cloud recipe | `pcraft recipe` emits Kontext stitch + in-graph left crop + fist-only Flux Fill. `method=reference` is that path. A live Cloud submit (job `06668d4c`, 2026-08-18) produced a single-panel crop and kept the bracer. |
 | Gate | Tier-2 is a real DSG expansion (entity / attribute / relation). Escalation is a contrastive checkpoint. Receipts store the attempt story, not just a retry count. |
-| Offline synth | `compile_synthesizer` pins against an **external** gate metric (`dspy.GEPA` when `[synth]` is installed). `DSPySynthesizer` runs the pin. No live 600B compile has been run. The per-asset loop still uses `TemplateSynthesizer`. |
+| Offline synth | `compile_synthesizer` pins against an **external** gate metric (`dspy.GEPA` when `[synth]` is installed). A live compile **ran** 2026-08-18 on local Ollama `hermes3:8b` (600B was not up). Pinned `sprite.synth.v1-gepa.json` (`generated_by=gepa`). The seed `sprite.synth.v1.json` is untouched. The per-asset loop still uses `TemplateSynthesizer`. The CLI still will not invent a pixel metric. |
 | Identity sub-gate | scores CLIP-I and is **not wired** into `orchestrate`. Thresholds 0.55 / 0.05 have no holdout. Placeholders. |
 | Real canon | the shipped example contract is a **generic invention**, not any real project's canon. Binding real canon is a deliberate, human decision |
 

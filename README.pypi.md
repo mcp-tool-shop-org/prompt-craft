@@ -70,7 +70,7 @@ concepts, blind to which attribute belongs to which object.
 
 **v0.2.1 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
 
-- **325 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
+- **328 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
   against a mock generator and verifier, which is what proves the plugin boundary holds.
 - Flux Fill inpaint is wired. `method=reference` writes the Cloud recipe (`GATE_CLOUD_SUBMIT`).
   ControlNet pose and IP-Adapter stay refused on Flux.
@@ -83,8 +83,10 @@ concepts, blind to which attribute belongs to which object.
   one adapter refuse before pixels. Flux refuses those identity methods.
 - `pcraft recipe` emits the Cloud Kontext stitch + left crop + fist-only Fill graph. A live
   Cloud submit (2026-08-18) produced a single-panel crop and kept the bracer.
-- Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. Offline GEPA compile
-  is a Python door against an external gate metric; no live 600B compile has been run.
+- Tier-2 is a real DSG expansion. Escalation is a contrastive checkpoint. A live GEPA
+  compile ran 2026-08-18 on local Ollama `hermes3:8b` (600B was not up). Pinned
+  `sprite.synth.v1-gepa.json`. The seed artifact is untouched. The per-asset loop
+  still uses `TemplateSynthesizer`.
 - The identity sub-gate is **not wired**. Its thresholds have no holdout.
 - Pre-1.0 deliberately, and a test enforces it. Promotion should follow evidence, not a version
   bump.

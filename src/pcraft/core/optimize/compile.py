@@ -207,11 +207,24 @@ class _DspyGepaRunner:
                     "this DSPy build has no dspy.GEPA",
                     hint="Upgrade DSPy, or inject a runner. GEPA is offline-only.",
                 )
-            opt = dspy.GEPA(metric=metric, auto="light")
+            opt = dspy.GEPA(metric=metric, auto="light", reflection_lm=_require_lm(dspy))
         compiled = opt.compile(student=_Program(), trainset=examples)
         instruction = _extract_instruction(compiled, fallback=base_instruction)
         demos = _extract_demos(compiled)
         return OptimizedPrompt(instruction=instruction, demos=demos, metric_calls=metric_calls)
+
+
+def _require_lm(dspy_module):
+    """DSPy 3.3 GEPA asserts a reflection LM. Use the configured one. No silent default."""
+    lm = getattr(getattr(dspy_module, "settings", None), "lm", None)
+    if lm is None:
+        raise PromptCraftError(
+            "DEP_SYNTH_MISSING",
+            "dspy.GEPA needs a configured LM (dspy.configure(lm=...))",
+            hint="Point DSPy at a real LM before compile_synthesizer. "
+            "A local Ollama model counts. Do not invent a pixel metric.",
+        )
+    return lm
 
 
 def _extract_instruction(program, *, fallback: str) -> str:

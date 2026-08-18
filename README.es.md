@@ -100,17 +100,17 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v0.2.1: el núcleo es real.** El condicionamiento de SDXL se ha implementado en código. La generación local con GPU aún no se ha probado. Se ha ejecutado una receta en la nube.
+**v0.2.1: el núcleo es real. El condicionamiento de SDXL se ha implementado en el código. Ahora se ha ejecutado una versión local con una 5090 `generate()`. Se ha probado una receta en la nube.**
 
 | | |
 |---|---|
-| Núcleo | **319 pruebas superadas** (contadas el 2026-08-18), sin GPU, determinista. `verify` ejecuta la suite, la suite de nuevo bajo `-O` y se crea un paquete. |
+| Núcleo | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
-| Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **integrados y cubiertos por pruebas de fake-torch**. InstantID e IP-Adapter no pueden utilizarse en la misma generación. No se ha ejecutado la versión local `generate()` en una tarjeta gráfica 5090. |
+| Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **implementados y cubiertos por pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. La versión local `generate()` se **ejecutó** en la 5090 (18-08-2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma es de estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. Dos placas de IP-Adapter en un solo adaptador fallan antes de que se procesen los píxeles. |
 | Codificador Flux | El modo solo texto y el **relleno** están conectados (fake-torch). ControlNet pose e IP-Adapter siguen rechazados (familia incorrecta). `method=reference` escribe el gráfico de la receta en la nube y se niega a simular que Kontext se ejecuta localmente (`GATE_CLOUD_SUBMIT`). |
 | Receta en la nube | `pcraft recipe` emite el ensamblaje de Kontext + recorte izquierdo en el gráfico + relleno Flux solo con puño. `method=reference` es esa ruta. Una ejecución en vivo en la nube (trabajo `06668d4c`, 2026-08-18) produjo un recorte de un solo panel y conservó el soporte. |
 | Puerta | El nivel 2 es una expansión DSG real (entidad / atributo / relación). La escalada es un punto de control contrastivo. Los registros almacenan la historia del intento, no solo el recuento de reintentos. |
-| Síntesis fuera de línea | `compile_synthesizer` se basa en una métrica de puerta **externa** (`dspy.GEPA` cuando `[synth]` está instalado). `DSPySynthesizer` ejecuta la prueba. No se ha ejecutado ninguna compilación en vivo de 600B. El bucle por activo aún utiliza `TemplateSynthesizer`. |
+| Síntesis fuera de línea | `compile_synthesizer` se fija a una métrica de puerta **externa** (`dspy.GEPA` cuando `[synth]` está instalado). Se realizó una compilación en vivo el 18-08-2026 en Ollama local `hermes3:8b` (no se cargó 600B). Fijo `sprite.synth.v1-gepa.json` (`generated_by=gepa`). La semilla `sprite.synth.v1.json` no se ha modificado. El bucle por activo sigue utilizando `TemplateSynthesizer`. La CLI todavía no puede inventar una métrica de píxeles. |
 | Subpuerta de identidad | Las puntuaciones de CLIP-I **no están conectadas** a `orchestrate`. Los umbrales 0,55 / 0,05 no tienen ningún valor de retención. Marcadores de posición. |
 | Canon real | el contrato de ejemplo enviado es una **invención genérica**, no el canon de ningún proyecto real. Vincular un canon real es una decisión humana deliberada. |
 
@@ -118,7 +118,7 @@ Tres afirmaciones que las versiones anteriores de este documento hicieron y que 
 
 - Se describieron los tres umbrales de zona como *calibrados con un conjunto de datos de prueba etiquetado por humanos*. No lo están. Son valores predeterminados.
 - La regla de que un modelo generativo nunca puede ser su propia puerta se enunció como si un estudio la hubiera establecido. La evidencia de respaldo es **más convergente que directa**: las encuestas discriminativas de sí/no son mediblemente más estables que el etiquetado abierto, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea el sesgo de preferencia propia. Ningún estudio único realiza la comparación directa. La regla es sólida; se exageró la certeza.
-- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Lo que aún no se ha probado es una ejecución local en vivo `generate()` en esta máquina, no la conexión.
+- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Una ejecución local `generate()` en esta máquina **ya se ha ejecutado**. Que esté cableado y aplicado no es lo mismo que el plate aparezca en los píxeles.
 
 ## Requisitos
 
@@ -159,8 +159,7 @@ La justificación del diseño, los estándares con los que este repositorio se e
 
 ## Colaboradores
 
-Consulte el archivo [CONTRIBUTORS.md](CONTRIBUTORS.md). Autor: mcp-tool-shop. Prueba interna
-en este proyecto: Grok (xAI).
+Consulte [CONTRIBUTORS.md](CONTRIBUTORS.md). Autor: mcp-tool-shop. Pruebas internas en este repositorio: Grok (xAI).
 
 ## Licencia
 

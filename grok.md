@@ -34,14 +34,18 @@ $env:PYTHONPATH = "src"
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 `pip install -e ".[dev]"` also works (no PYTHONPATH).
 
+`[image]` and `[synth]` are now installed in this venv. The suite
+must stay GPU-free anyway — stub `_load`, do not fire a live generate
+from a test.
+
 ## Fences
 
 - Version stays **0.2.1** unless the Director says bump.
 - `identity_subgate.py`: no delete, no promote, no wire.
 - No mutmut, no dependabot.
-- Cloud Comfy is the default generate path. Local 5090 only if asked
-  — **except the next session, which is greened for a live 5090
-  generate and a live GEPA compile.** See `HANDOFF.md`.
+- Cloud Comfy is the default generate path. Local 5090 only if asked.
+  The greened live 5090 generate and live GEPA compile **already ran**.
+  See `HANDOFF.md`.
 - GEPA is offline, `[synth]`, never on the per-asset hot path.
   `pcraft compile` does not invent a pixel metric.
 - Gates `raise`, never bare `assert`. ASCII in tool output.
@@ -49,24 +53,33 @@ Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 
 ## What is true (re-measure before quoting)
 
-- Suite last counted **325**. Re-count before quoting.
+- Suite last counted **328**. Re-count before quoting.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional
   inpaint — wired, fake-torch tested. InstantID and IP-Adapter cannot
-  share one generate. Local `generate()` on the 5090 has not been run.
+  share one generate. Local `generate()` **ran** on the 5090
+  (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). Looked
+  at the frame: orcish; grip, sigil, bracer did not land. Two
+  IP-Adapter plates on one adapter refuse before pixels.
 - Flux: text-only and Fill inpaint are wired. Pose / IP-Adapter stay
   refused. `method=reference` writes the Cloud recipe and raises
-  `GATE_CLOUD_SUBMIT`.
+  `GATE_CLOUD_SUBMIT`. Local Flux generate was **not** run — weights
+  not on disk.
 - Cloud recipe submitted live: job `06668d4c`. Looked at crop + fill.
 - DSG Tier-2 expands entity / attribute / relation. Answerer may still
   share Tier-1 VQAScore weights (`shares_model_with`).
-- GEPA compile door is wired. No live 600B compile has been run.
+- Live GEPA compile ran on local Ollama `hermes3:8b` (not 600B).
+  Pinned `sprite.synth.v1-gepa.json`. Seed `sprite.synth.v1.json` is
+  still `scaffold-seed`. Per-asset loop still `TemplateSynthesizer`.
 - Identity sub-gate is measured, not in `orchestrate`.
+- `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the
+  mock loop.
 
 ## Honest language
 
-- Wired + fake-tested ≠ live GPU generate.
-- A Cloud submit is not a local 5090 run.
+- Wired + fake-tested ≠ the plate landing in the pixels.
+- A Cloud submit is not a local 5090 run. A 5090 run is not a lock.
 - InstantID is wired on SDXL. Flux still refuses InstantID.
+- A live GEPA compile on `hermes3:8b` is not a 600B compile.
 - The shipped contract is a generic invention, not real canon.
 
 ## Memory

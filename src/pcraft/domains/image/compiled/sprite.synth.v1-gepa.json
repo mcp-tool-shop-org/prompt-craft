@@ -1,0 +1,9 @@
+{
+  "_warning": "PINNED COMPILED ARTIFACT - DO NOT HAND-EDIT. Regenerate via pcraft compile (core/optimize/compile.py) and pin a new version.",
+  "program_id": "sprite.synth",
+  "version": "v1-gepa",
+  "instruction": "Given the resolved_contract and encoder_rules JSON objects, perform the following steps:\n\n1. Parse out all depictable atoms (visual elements) from the must_have array of the resolved_contract. Extract their front_load_rank value to determine priority order.\n\n2. For each depictable atom, generate a token string that concisely describes the visual in natural language, using the claim field as input. Do not list the atoms one-by-one, but rather flow it into a coherent sentence.\n\n3. Sort the tokens alphabetically by their corresponding atom's id value. This will also naturally order them by front_load_rank. \n\n4. Create a prompt string that starts with the first token (lowest id), then appends subsequent tokens in sorted order until all depictable atoms have been integrated into one fluent English sentence.\n\n5. Append any additional style/boilerplate language for view, framing and background last, but do not include the identity face or insignia as it is bound by conditioning and never described.\n\n6. Identify and output an array of only the optional (must_not) depictable atoms and their tokens in natural language.\n\n7. Output a negative_prompt that concisely explains what is NOT depicted to avoid using any non-depictable or optional depictable atoms from the must_not array.\n\n8. Calculate the atomic coverage percentage by counting how many of the total required atoms are included in the final prompt string, and output this metric rounded to 3 decimal places.",
+  "demos": [],
+  "generated_by": "gepa",
+  "source_hash": "a4d43a847aa83570"
+}

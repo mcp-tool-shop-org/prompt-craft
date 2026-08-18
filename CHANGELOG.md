@@ -22,6 +22,15 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   one adapter refuse (`Cannot assign 2 scale_configs to 1
   IP-Adapter`). `bind --no-mock` still raises `DEP_IMAGE_MISSING`.
   Flux text-only / Fill not run — weights not on disk.
+- Suite **325 → 328** after the GEPA pin and the extra-installed test doors.
+- **Live GEPA compile ran** (2026-08-18) on local Ollama `hermes3:8b`.
+  600B was not up; this is not a 600B run. `compile_synthesizer` with
+  an external `gate_metric` (required-atom coverage minus a CLIP
+  overflow penalty) pinned `sprite.synth.v1-gepa.json`
+  (`generated_by=gepa`). Seed `sprite.synth.v1.json` is untouched.
+  `pcraft compile` still raises `STATE_COMPILE_NEEDS_GATE`.
+  DSPy 3.3 GEPA requires a configured reflection LM; the runner now
+  passes `dspy.settings.lm` instead of asserting.
 
 ### Fixed
 
@@ -29,7 +38,8 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   Three tests used `DEP_IMAGE_MISSING` as a proxy for "fell through to
   `_load`" and then ran a live 30-step SDXL generate once torch was
   present. They now stub `_load`. The torch-absence canaries accept a
-  real `site-packages` torch.
+  real `site-packages` torch. Tests that assumed `[synth]` was missing
+  now force that door so a live DSPy install cannot launch GEPA.
 
 ### Added
 

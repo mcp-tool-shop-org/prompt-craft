@@ -100,17 +100,17 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v0.2.1 — o núcleo é real. O condicionamento do SDXL está implementado no código. A geração local na GPU ainda não foi testada. Uma receita para a nuvem já foi executada.**
+**v0.2.1 — o núcleo é real. O condicionamento SDXL está implementado no código. Uma instância local 5090 `generate()` já foi executada. Um script do Cloud foi executado ao vivo.**
 
 | | |
 |---|---|
-| Núcleo | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Núcleo | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
-| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e o recurso de retoque regional estão **integrados e cobertos por testes do fake-torch**. InstantID e IP-Adapter não podem ser usados em conjunto para gerar uma imagem. O teste local `generate()` numa placa 5090 ainda não foi executado. |
+| Condicionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e retoque regional estão **integrados e cobertos por testes fake-torch**. InstantID e IP-Adapter não podem compartilhar uma geração. A instância local `generate()` foi **executada** na 5090 (2026-08-18, semente `169405236028824`, tipo `controlnet_ip`). O quadro é de aparência orc; a empunhadura, o sigilo e a braçadeira não foram aplicados. Duas camadas do IP-Adapter em um único adaptador são rejeitadas antes da aplicação dos pixels. |
 | Codificador Flux | O modo apenas texto e o preenchimento (Fill Inpaint) estão conectados (fake-torch). O ControlNet pose e o IP-Adapter continuam a ser rejeitados (família incorreta). `method=reference` escreve o gráfico da receita do Cloud e recusa-se a simular que o Kontext foi executado localmente (`GATE_CLOUD_SUBMIT`). |
 | Receita para a nuvem | `pcraft recipe` gera o "Kontext stitch" + recorte à esquerda no gráfico + preenchimento do Flux apenas na mão. `method=reference` é esse caminho. Um envio ao vivo para a nuvem (tarefa `06668d4c`, 2026-08-18) produziu um recorte de painel único e manteve o suporte. |
 | Portão | O nível 2 é uma expansão DSG real (entidade/atributo/relação). A escalada é um ponto de verificação contrastivo. Os registros armazenam a história da tentativa, não apenas a contagem de tentativas. |
-| Síntese offline | `compile_synthesizer` compara com uma métrica de portão **externa** (`dspy.GEPA` quando `[synth]` está instalado). `DSPySynthesizer` executa a comparação. Nenhuma compilação ao vivo de 600B foi executada. O loop por ativo ainda usa `TemplateSynthesizer`. |
+| Síntese offline | `compile_synthesizer` restringe uma métrica de porta **externa** (`dspy.GEPA` quando `[synth]` está instalado). Uma compilação ao vivo foi executada em 2026-08-18 no Ollama local `hermes3:8b` (600B não estava ativo). Restrição aplicada `sprite.synth.v1-gepa.json` (`generated_by=gepa`). A semente `sprite.synth.v1.json` permanece inalterada. O ciclo por recurso ainda usa `TemplateSynthesizer`. A CLI ainda não consegue criar uma métrica de pixel. |
 | Sub-portão de identidade | calcula as pontuações do CLIP-I e **não está conectado** a `orchestrate`. Os limites de 0,55/0,05 não têm retenção. Marcadores de posição. |
 | Canone real | o contrato de exemplo enviado é uma **invenção genérica**, não o canone de nenhum projeto real. Vincular um canone real é uma decisão humana deliberada |
 
@@ -121,7 +121,7 @@ não são. São valores padrão.
 - A regra de que um modelo generativo nunca é seu próprio portão foi declarada como se um estudo tivesse
 estabelecido isso. As evidências de suporte são **mais convergentes do que diretas** — a sondagem discriminativa sim/não é mensuravelmente mais estável do que a geração de legendas abertas, os modelos não podem corrigir-se de forma confiável sem feedback externo e o reconhecimento próprio rastreia o viés de preferência própria. Nenhum
 estudo único realiza a comparação direta. A regra é válida; a certeza foi exagerada.
-- O condicionamento foi descrito como não lido, depois como não implementado. O SDXL agora **lê** as referências implementadas no código. O que ainda não foi testado é uma execução local ao vivo de `generate()` nesta máquina, e não a conexão.
+- O condicionamento foi descrito como não lido, depois como não implementado. O SDXL agora **lê** as referências implementadas no código. Um `generate()` local nesta máquina já foi executado. Estar ligado e aplicado não é o plate nos pixels.
 
 ## Requisitos
 

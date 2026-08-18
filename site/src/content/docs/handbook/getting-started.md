@@ -87,8 +87,9 @@ pip install -e ".[synth]"    # DSPy + a hosted LM — the real synthesizer
 **Neither is needed to run, test, or evaluate the core.** Local `generate()` on a 5090 **has**
 been run here (2026-08-18, ashen-reaver, OpenPose + identity plate). The frame is orcish;
 grip, sigil, and bracer did not land. A Cloud recipe (`pcraft recipe`) **has** been submitted
-live (2026-08-18). Offline GEPA compile needs `[synth]` and a Python `gate_metric` — the CLI
-will not invent one. `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the mock
+live (2026-08-18). A live GEPA compile ran 2026-08-18 on local Ollama `hermes3:8b`
+(not 600B) via `compile_synthesizer` and an external `gate_metric`. The CLI will
+not invent one (`STATE_COMPILE_NEEDS_GATE`). `bind --no-mock` still raises `DEP_IMAGE_MISSING` and stays on the mock
 loop; call `SDXLGenerator().generate()` if you want pixels.
 
 ## Verify a change

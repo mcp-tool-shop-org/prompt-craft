@@ -100,17 +100,17 @@ Cette dernière ligne est celle qui compte. « Je n’ai pas pu vérifier » et 
 
 ## Statut honnête
 
-**v0.2.1 — le cœur du système est réel. Le conditionnement SDXL est assemblé dans le code. La génération locale sur GPU n’a pas encore été testée. Une recette Cloud a été exécutée en direct.**
+**v0.2.1 — le noyau est opérationnel. Le conditionnement SDXL est intégré dans le code. Une exécution locale sur une carte 5090 `generate()` a été effectuée. Un script Cloud a été exécuté en direct.**
 
 | | |
 |---|---|
-| Cœur du système | **325 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
+| Cœur du système | **328 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs the suite, the suite again under `-O`, and a package build |
 | Prédicats | les onze points de décision composés dans `core/` sont **testés par mutation** — 20 des 21 mutants ont été éliminés, et [le survivant est nommé](scripts/mutate_predicates.py) plutôt que caché. |
-| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** et le remplissage régional sont **intégrés et couverts par des tests « fake-torch »**. InstantID et IP-Adapter ne peuvent pas être utilisés simultanément pour une même génération. Le test local `generate()` sur une carte 5090 n’a pas été effectué. |
+| Conditionnement SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** et l’inpaint régional sont **intégrés et couverts par des tests « fake-torch »**. InstantID et IP-Adapter ne peuvent pas partager une même génération. Une exécution locale `generate()` a été effectuée sur la carte 5090 (18 août 2026, seed `169405236028824`, type `controlnet_ip`). L’image est de style orc ; les éléments « grip », « sigil » et « bracer » n’ont pas été correctement intégrés. Deux plaques IP-Adapter sur un seul adaptateur refusent de fonctionner avant que les pixels ne soient traités. |
 | Encodeur Flux | Les options texte seul et **remplissage** sont intégrées (tests « fake-torch »). ControlNet pose, IP-Adapter et LoRA continuent d’être refusés (famille incorrecte). `method=reference` écrit le graphe de la recette Cloud et refuse de prétendre que Kontext a été exécuté localement (`GATE_CLOUD_SUBMIT`). |
 | Recette Cloud | `pcraft recipe` émet un assemblage Kontext, une découpe à gauche dans le graphique et un remplissage Flux avec uniquement le poing. `method=reference` est ce chemin. Une soumission Cloud en direct (tâche `06668d4c`, 2026-08-18) a produit une seule image découpée et a conservé le bracelet. |
 | Porte d’entrée | Le niveau 2 est une expansion DSG réelle (entité / attribut / relation). L’escalade est un point de contrôle contrastif. Les reçus stockent l’historique des tentatives, et pas seulement le nombre de nouvelles tentatives. |
-| Synthèse hors ligne | `compile_synthesizer` se compare à une **métrique de porte d’entrée externe** (`dspy.GEPA` lorsque `[synth]` est installé). `DSPySynthesizer` exécute la comparaison. Aucune compilation en direct avec 600B n’a été effectuée. La boucle par élément utilise toujours `TemplateSynthesizer`. |
+| Synthèse hors ligne | `compile_synthesizer` se base sur une métrique de porte **externe** (`dspy.GEPA` lorsque `[synth]` est installé). Une compilation en direct a été effectuée le 18 août 2026 sur Ollama local `hermes3:8b` (600B n’était pas actif). `sprite.synth.v1-gepa.json` est fixé (`generated_by=gepa`). Le seed `sprite.synth.v1.json` reste inchangé. La boucle par ressource utilise toujours `TemplateSynthesizer`. L’interface en ligne de commande ne génère toujours pas une métrique de pixel. |
 | Sous-porte d’entrée pour l’identité | calcule les scores CLIP-I et **n’est pas connectée** à `orchestrate`. Les seuils de 0,55 / 0,05 n’ont pas de données de validation. Valeurs réservées. |
 | Le véritable modèle de référence | l’exemple de contrat fourni est une **invention générique**, et non le modèle de référence d’un projet réel. Définir un véritable modèle de référence est une décision humaine délibérée. |
 
@@ -118,7 +118,7 @@ Trois affirmations que les versions antérieures de ce document contenaient et q
 
 - Les seuils à trois zones étaient décrits comme *calibrés par rapport à un ensemble de données étiqueté par des humains*. Ce n’est pas le cas. Il s’agit de valeurs par défaut.
 - La règle selon laquelle un modèle génératif ne peut jamais être son propre filtre a été énoncée comme si une étude l’avait établie. Les preuves à l’appui sont **plus convergentes que directes** : les tests discriminatifs oui/non se révèlent mesurablement plus stables que la génération de légendes ouverte, les modèles ne peuvent pas s’auto-corriger de manière fiable sans rétroaction externe et la reconnaissance automatique suit les biais de préférence personnelle. Aucune étude unique n’effectue une comparaison directe. La règle est valable ; le degré de certitude a été exagéré.
-- Le conditionnement était décrit comme non lu, puis comme non implémenté. SDXL **lit** désormais les références assemblées dans le code. Ce qui reste sans utilisation est un processus local `generate()` sur cette machine, et non le câblage.
+- Le conditionnement était décrit comme non lu, puis comme non implémenté. SDXL **lit** désormais les références assemblées dans le code. Un `generate()` local a maintenant été exécuté sur cette machine. Être câblé et appliqué n’est pas le plate dans les pixels.
 
 ## Exigences
 

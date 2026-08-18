@@ -89,7 +89,18 @@ def test_unknown_optimizer_refuses(tmp_path):
     assert exc.value.code == "STATE_COMPILE_NOT_WIRED"
 
 
-def test_missing_dspy_without_a_runner_is_dep_synth(tmp_path):
+def test_missing_dspy_without_a_runner_is_dep_synth(tmp_path, monkeypatch):
+    """[synth] may be installed. Force the missing-DSPy door so this test
+    cannot launch a live GEPA compile."""
+    import pcraft.core.optimize.compile as compile_mod
+
+    def no_dspy(_name):
+        raise PromptCraftError(
+            "DEP_SYNTH_MISSING",
+            "offline compile needs DSPy + an LM backend",
+        )
+
+    monkeypatch.setattr(compile_mod, "_default_runner", no_dspy)
     _s, resolved, _t, _c = load_sprite_example()
     with pytest.raises(PromptCraftError) as exc:
         compile_synthesizer(
@@ -124,7 +135,11 @@ def test_dspy_synthesizer_runs_the_pinned_artifact(tmp_path):
     assert synth.synthesizer_id.startswith("dspy.v1+")
 
 
-def test_dspy_synthesizer_without_dspy_or_predictor_refuses():
+def test_dspy_synthesizer_without_dspy_or_predictor_refuses(monkeypatch):
+    """[synth] may be installed. Close the DSPy door so this cannot hit a live LM."""
+    import pcraft.core.synth.signature as sig
+
+    monkeypatch.setattr(sig, "_HAS_DSPY", False)
     _s, _r, _t, compiled = load_sprite_example()
     with pytest.raises(PromptCraftError) as exc:
         DSPySynthesizer(compiled).synthesize(_r, "")
@@ -135,6 +150,44 @@ def test_per_asset_loop_still_uses_the_template():
     _s, resolved, _t, compiled = load_sprite_example()
     result = TemplateSynthesizer(compiled).synthesize(resolved, "")
     assert result.backend == "template"
+
+
+def test_live_gepa_artifact_is_a_sibling_of_the_seed():
+    from pcraft.domains.image import COMPILED_ARTIFACT
+
+    seed = load_pinned(COMPILED_ARTIFACT)
+    assert seed.generated_by == "scaffold-seed"
+    gepa = load_pinned(COMPILED_ARTIFACT.with_name("sprite.synth.v1-gepa.json"))
+    assert gepa.generated_by == "gepa"
+    assert gepa.version == "v1-gepa"
+    assert gepa.instruction.strip()
+    assert gepa.source_hash
+
+
+def test_gepa_without_a_configured_lm_is_dep_synth():
+    from pcraft.core.optimize.compile import _require_lm
+
+    class _Settings:
+        lm = None
+
+    class _Dspy:
+        settings = _Settings()
+
+    with pytest.raises(PromptCraftError) as exc:
+        _require_lm(_Dspy())
+    assert exc.value.code == "DEP_SYNTH_MISSING"
+
+
+def test_gepa_uses_the_configured_lm():
+    from pcraft.core.optimize.compile import _require_lm
+
+    class _Settings:
+        lm = "ollama_chat/hermes3:8b"
+
+    class _Dspy:
+        settings = _Settings()
+
+    assert _require_lm(_Dspy()) == "ollama_chat/hermes3:8b"
 
 
 def test_cli_compile_without_seed_is_not_a_silent_ok():
