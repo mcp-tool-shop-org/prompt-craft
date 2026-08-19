@@ -116,8 +116,9 @@ Two rules that will bite you:
 
 ## Fences
 
-- Version stays **0.3.0** unless the Director says bump. Pre-1.0 is a standing
-  ruling: a generate that ran is not a stability claim.
+- Version stays **0.4.0** unless the Director says bump. Pre-1.0 is a standing
+  ruling: a generate that ran is not a stability claim. The landing-page badge says
+  `pre-1.0, deliberately` — that is a published position, not an oversight.
 - `identity_subgate.py`: no delete, no promote, no wire. Thresholds 0.55 / 0.05 stay.
 - No mutmut, no dependabot.
 - Do not lower a gate to make it green. Widening a rule set and then blanket-ignoring
@@ -135,8 +136,8 @@ Two rules that will bite you:
 
 ## What is true (re-measure before quoting)
 
-- **v0.3.0 shipped** to PyPI + npm 2026-08-18, after the verify gate held two
-  failed release attempts. Suite last counted **359**. Re-count before quoting.
+- **v0.4.0 shipped** to PyPI + npm 2026-08-18 (tag `v0.4.0`, both registries
+  confirmed). Suite last counted **359**. Re-count before quoting.
 - The gate **checks itself**: the lint and typecheck legs cover `verify.py`, pinned by
   `test_the_gate_checks_the_file_that_defines_the_gate` so they cannot narrow back.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.

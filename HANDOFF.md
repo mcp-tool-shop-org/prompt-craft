@@ -12,8 +12,10 @@ copy, and the CHANGELOG body beyond Unreleased.
 
 ## Where you are (measured 2026-08-18, re-measure anyway)
 
-Repo: `E:\AI\prompt-craft` — HEAD **`1503769`** on `origin/main`, tree clean.
-Version **0.3.0**. Suite **359**. **CI green on both legs.**
+Repo: `E:\AI\prompt-craft` — HEAD **`45c7dae`** on `origin/main`, tree clean.
+Version **0.4.0 — SHIPPED 2026-08-18** to PyPI (`prompt-crafter`) and npm
+(`@mcptoolshop/prompt-crafter`), tag `v0.4.0`, both registries confirmed. Suite **359**.
+**CI green on both legs.**
 
 **Nothing is open in this repo.** Every item raised across 2026-08-18 is closed and
 verified on a real run. If the Director does not name a job: measure HEAD, re-count, stop.

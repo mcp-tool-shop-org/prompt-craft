@@ -7,8 +7,9 @@ day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
 **HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
-**Version:** **0.3.0** (shipped to PyPI + npm 2026-08-18)
+**Version:** **0.4.0** (shipped to PyPI + npm 2026-08-18, tag `v0.4.0`)
 **Suite last counted:** **359** (re-count before quoting)
+**Released:** v0.4.0 — both registries confirmed; handbook + all seven translations current at the tag
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.
 This file is the standing state and the fences. Measure HEAD and the suite yourself.
@@ -41,7 +42,7 @@ The Executor still:
 | v0.3.0 release | **Shipped** 2026-08-18 to PyPI + npm after two verify-gate failures held it |
 | ruff rule-set widening (v0.3.0's one deferred item) | **Closed** (`f41d46b`) |
 | CI 3.11 dependency-audit red | **Closed** (`ef5f72e`) — ambient setuptools upgraded, not ignored; both legs green on run `32198885560` |
-| Phase 10 — full treatment / publish | **Not run.** Needs an explicit Director go |
+| Phase 10 — full treatment / publish | **Run 2026-08-18** on the Director's go. README + handbook updated, translations regenerated BEFORE the tag, v0.4.0 published to both registries by OIDC |
 
 The swarm is **not closed**. Closing it is Phase 10 and is not authorised.
 
