@@ -12,8 +12,8 @@ copy, and the CHANGELOG body beyond Unreleased.
 
 ## Where you are (measured 2026-08-18, re-measure anyway)
 
-Repo: `E:\AI\prompt-craft` — HEAD **`ef5f72e`** on `origin/main`, tree clean.
-Version **0.3.0**. Suite **339**. **CI green on both legs** (run `32198885560`).
+Repo: `E:\AI\prompt-craft` — HEAD **`02386e5`** on `origin/main`, tree clean.
+Version **0.3.0**. Suite **344**. **CI green on both legs** (run `32200681387`).
 
 ```
 cd E:\AI\prompt-craft
@@ -56,6 +56,15 @@ below unedited -- the ruling is recorded against it, not in place of it.
 >
 > **1.1 and 1.3 landed.** Suite 344 (was 339; five new tests in `tests/test_verify_legs.py`).
 > `1.2` remains the only open piece of this item.
+>
+> **Advisor note added on review, 2026-08-18 — one refinement for whoever builds 1.2.**
+> The diskcache finding proves the audit's result **depends on which extras are installed**:
+> `[synth]` surfaces it, `[dev]` alone does not, and CI only ever installs `[dev]`. So a
+> report from one box is not comparable to a report from another unless it says what it was
+> looking at. `--audit` must therefore **name the extras present in the environment it
+> audited**, alongside the fix/no-fix split. Otherwise two honest runs disagree and neither
+> can be trusted -- which is the same failure the `--select` override trap produced on ruff,
+> in a different tool. The ruled fix/no-fix semantics are unchanged and correct.
 
 The previous Executor was asked for a recommendation, not an implementation, and
 delivered one. This is the ruling on it, recorded here so it stops living in a chat log.
@@ -181,17 +190,42 @@ Director**. No publish, no tag, no `gh release create` this session.
 - Version stays **0.3.0** unless the Director says bump. Pre-1.0 is a standing ruling:
   a generate that ran is not a stability claim.
 - **Do not run Phase 10 / full treatment / publish / tag.** Not asked.
-- **Do not touch `verify.py`** until the Director rules on open item 1.
-- **Do not `pip uninstall` anything** until the Director rules on open item 2.
+- `verify.py` 1.1 + 1.3 are **landed**. Do not implement `--audit` (1.2) until the
+  Director says go; its semantics are already ruled and recorded above.
+- **Do not `pip uninstall` anything further.** The one approved delete is done.
 - Do not lower a gate to make it green.
 - Do not re-open the ruff rejections in `[tool.ruff.lint]`. They carry their evidence.
 - Do not touch README* / translations / handbook / landing / PyPI / npm copy — Advisor's.
   You may update **CHANGELOG Unreleased** for what you land.
+- **`HANDOFF.md` and `ADVISOR.md`: Advisor owns the structure; the Executor owns the
+  receipts.** Write a Director ruling or a completion receipt into `HANDOFF.md` **in the
+  same sitting**, as a marked block against the original item text — never by editing or
+  deleting that text. Do not route it through Advisor first: an Advisor session may not
+  exist when the ruling lands, and a ruling that waits is a ruling that lives in a chat
+  log, which is the single thing these files exist to prevent. Advisor reconciles the
+  surrounding prose afterwards. The 2026-08-18 Executor did this correctly and asked
+  whether they should have; they should, and the earlier fence list was ambiguous, not
+  them.
 - No mutmut, no dependabot. Gates `raise`, never bare `assert`. ASCII in tool output.
 - Do not share a fixed `--basetemp` across seats; `verify.py` uses a fresh `mkdtemp`.
 - Do not pull `FLUX.1-dev` (24 GB, gated). Do not start InstantID rewrites. Do not swap
   the per-asset loop onto `DSPySynthesizer`. None of these are next obvious steps.
 - Path rule on this rig: `F:/AI/...` in old memory means `E:/AI/...`. No F: or G: drive.
+
+## Small, unclaimed, no go needed beyond the usual
+
+- **`verify.py`'s `_RAN` is module-level mutable state.** It is correct as run today —
+  the script runs once per process and the new tests do not call `main()` — but a second
+  in-process `main()` would append to the first run's list and print a summary naming a
+  leg twice. That is the drift the list was introduced to prevent, one layer up. Reset it
+  at the top of `main()` or thread it through as a local. Found in Advisor review, not by
+  a gate; verified latent, not live.
+- **`.venv/Lib/site-packages/pcraft/`** survives the uninstall as six directories with
+  **zero files** (verified: `find -type f` returns 0). Never in the dist RECORD, so pip
+  left it. Nothing imports through it — `pcraft` and `pcraft.domains` both resolve under
+  `src/`, verified. **Advisor recommends clearing it**: its only effect is to look like a
+  shadowing hazard to the next person who audits this venv, which costs a real
+  investigation to disprove. It is a delete, so it needs the Director's word.
 
 ## Still out — only if the Director asks
 

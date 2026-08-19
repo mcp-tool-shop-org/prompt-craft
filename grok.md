@@ -47,10 +47,12 @@ $env:PYTHONPATH = "src"
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Blessed full gate: `python verify.py` — lint, typecheck, suite, suite under `-O`,
-build. It does **not** run the dependency audit; CI runs that as a separate step
-afterwards, so a green `verify.py` is not yet a green CI. Whether that belongs
-inside the gate is an open question for the Director, not a cleanup to just do.
+Blessed full gate: `python verify.py` — version coherence (`--installed` only), lint,
+typecheck, suite, suite under `-O`, build. It closes by naming **what it checked and what
+it did not**: the dependency audit is not in it, CI runs pip-audit separately, so a green
+`verify.py` is not yet a green CI. An opt-in `--audit` leg is ruled but not yet built —
+when it lands it fails on advisories with a published fix and reports-without-failing on
+those without one.
 
 Python: `E:\AI\prompt-craft\.venv\Scripts\python.exe`.
 `pip install -e ".[dev]"` also works (no PYTHONPATH).
@@ -130,7 +132,7 @@ Two rules that will bite you:
 ## What is true (re-measure before quoting)
 
 - **v0.3.0 shipped** to PyPI + npm 2026-08-18, after the verify gate held two
-  failed release attempts. Suite last counted **339**. Re-count before quoting.
+  failed release attempts. Suite last counted **344**. Re-count before quoting.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.
 - **CI is green on both legs** (`ef5f72e`, run `32198885560`). The 3.11 leg had been
   red at `dependency audit` on an ambient `setuptools` 79.0.1 (PYSEC-2026-3447);
