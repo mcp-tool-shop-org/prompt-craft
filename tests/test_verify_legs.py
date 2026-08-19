@@ -345,3 +345,22 @@ def test_the_audit_is_opt_in_and_reachable():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "_audit" in called, "_audit is defined but nothing calls it"
+
+
+def test_the_gate_checks_the_file_that_defines_the_gate():
+    """verify.py was the one file its own static legs did not cover.
+
+    lint ran ``src tests`` and typecheck ran ``src``, so the script that decides what
+    "verified" means was exempt from the checks it runs on everything else. A
+    pre-existing PLW1510 sat in ``_run`` unreported because of it. This is the same
+    shape as ``[tool.ruff]`` with no ``select``, as a bare ``VERIFY OK``, and as mypy
+    aborting on a numpy stub while still reading as a configured gate.
+    """
+    legs = _verify_legs()
+    assert "verify.py" in legs["lint"], (
+        "the lint leg does not lint verify.py -- the gate is exempting the file that "
+        "defines the gate"
+    )
+    assert "verify.py" in legs["typecheck"], (
+        "the typecheck leg does not check verify.py"
+    )

@@ -249,7 +249,18 @@ Director**. No publish, no tag, no `gh release create` this session.
   shadowing hazard to the next person who audits this venv, which costs a real
   investigation to disprove. It is a delete, so it needs the Director's word.
 
-## Open — one item, verified free TODAY and decaying
+## CLOSED 2026-08-18 on the Director's go — the gate now checks itself
+
+> **Landed.** `ruff check src tests verify.py` and `mypy src verify.py`. Both were clean
+> before and after, so the change cost nothing and the window did not have to be paid for.
+> mypy 56 -> 57 files, no conflict with the pinned `packages = ["pcraft"]` — verified
+> independently by the Executor against the real invocation, not the isolated proxy.
+> Pinned by `test_the_gate_checks_the_file_that_defines_the_gate`, so a future edit cannot
+> quietly narrow the targets back. Suite **359**.
+>
+> The original argument is kept below, because the reasoning is the reusable part.
+
+## (was) Open — one item, verified free TODAY and decaying
 
 **`verify.py` is not linted or typechecked by its own gate.** The legs are
 `ruff check src tests` and `mypy src`; the gate checks everything except the file that

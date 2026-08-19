@@ -267,8 +267,16 @@ def main(argv: list[str] | None = None) -> int:
             ran.append("version coherence")
         # Static legs first: they are seconds, and a type error should not wait
         # behind a full suite + two builds to surface.
-        _run("lint", [py, "-m", "ruff", "check", "src", "tests"], env, ran)
-        _run("typecheck", [py, "-m", "mypy", "src"], env, ran)
+        #
+        # Both targets include verify.py, which for a long time neither tool saw: lint
+        # ran `src tests` and typecheck ran `src`, so the one file exempt from the gate
+        # was the file that DEFINES the gate. That is the fourth appearance of this
+        # repo's recurring shape -- after [tool.ruff] with no select, a bare VERIFY OK,
+        # and mypy aborting on a numpy stub while still reading as configured. It was
+        # closed while both tools were already clean on it, which is the only cheap
+        # moment to close such a thing.
+        _run("lint", [py, "-m", "ruff", "check", "src", "tests", "verify.py"], env, ran)
+        _run("typecheck", [py, "-m", "mypy", "src", "verify.py"], env, ran)
         pytest = [py, "-m", "pytest", "-q", f"--basetemp={scratch / 't'}"]
         _run("suite", pytest, env, ran)
         env_o = env.copy()

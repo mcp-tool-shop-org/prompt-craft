@@ -70,7 +70,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   on `PackageNotFoundError`, so stale metadata is *found* and the wrong version returns
   silently. The suite could not catch it -- the quick-count recipe sets `PYTHONPATH=src`
   while the metadata read ignores `PYTHONPATH` entirely. The gate and the lie were looking
-  at different things. Suite **358**, up from 339.
+  at different things. Suite **359**, up from 339.
 
 ### Fixed
 
@@ -98,6 +98,19 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   Hoisted out of the loop — the same merge, no longer quadratic. (Surfaced by PERF401.)
 
 ### Changed
+
+- **The gate now checks the file that defines the gate.** `lint` ran `src tests` and
+  `typecheck` ran `src`, so `verify.py` was the one file exempt from the checks it runs on
+  everything else -- and a pre-existing `PLW1510` sat unreported in `_run` because of it.
+  The targets are now `ruff check src tests verify.py` and `mypy src verify.py`; mypy goes
+  from 56 to 57 files, with no conflict against the pinned `packages = ["pcraft"]`.
+
+  Closed while both tools were already clean on it, which is the only cheap moment to
+  close such a thing -- `verify.py` has grown from a thin runner into a file with JSON
+  parsing and category logic, exactly the code a gate exists for. This is the fourth
+  appearance of one shape in this repo: `[tool.ruff]` with no `select`, a bare
+  `VERIFY OK`, mypy aborting on a numpy stub while still reading as configured, and now
+  the gate exempting itself.
 
 - **The lint gate now declares what it lints for.** v0.3.0 pinned the historical default set
   (`E4/E7/E9/F`) to buy a clean release; it did not decide the rule set. `[tool.ruff.lint]`
