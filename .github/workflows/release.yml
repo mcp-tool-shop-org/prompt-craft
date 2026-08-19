@@ -18,12 +18,30 @@
 # ONE-TIME SETUP, on the registries themselves — until both are done this workflow fails
 # at the publish step by design rather than falling back to a token:
 #   PyPI  → pending publisher for project `prompt-crafter`:
-#           owner mcp-tool-shop-org · repo prompt-craft · workflow release.yml   [DONE]
-#   npm   → trusted publisher for `@mcptoolshop/prompt-crafter`: same three values.
+#           owner mcp-tool-shop-org · repo prompt-craft · workflow release.yml
+#           · environment release                                              [DONE]
+#   npm   → trusted publisher for `@mcptoolshop/prompt-crafter`: same FOUR values.
 #           npm accepts a publisher for a name with zero published versions, so the first
 #           OIDC run CREATES the package. An E404 on that first publish means the trusted
 #           publisher is not configured yet — npm masks a missing publisher as 404, never
 #           as an auth error. Configure it, then `gh run rerun <id> --failed`.
+#
+# THE ENVIRONMENT IS THE FOURTH VALUE, AND IT IS NOT OPTIONAL. Both publish jobs below
+# declare `environment: release`, but a trusted publisher registered WITHOUT an environment
+# accepts a token from any run of this workflow — so the job asserts a boundary the
+# registry does not require, and the assertion can be removed by editing this file. PyPI
+# flags this after the first publish from an environment; the fix is registry-side, in the
+# project's publishing settings. Go there directly rather than through the emailed link:
+# a one-click "constrain your publisher" link is exactly the shape a credential phish takes,
+# and the notification is most convincing right after a genuine release.
+#
+# CONSTRAINING THE PUBLISHER IS HALF THE JOB. As of 2026-08-18 the `release` environment
+# has ZERO protection rules and no deployment branch policy — measured, not assumed
+# (`gh api repos/mcp-tool-shop-org/prompt-craft/environments/release`). An environment with
+# no rules is a label, not a gate: pinning the publisher to it narrows WHICH workflow can
+# publish, but not WHO can cause that workflow to run. Required reviewers and/or a branch
+# policy on the environment are what turn the name into a boundary. Do both, or the
+# hardening reads stronger than it is.
 #
 # The publisher's project name and workflow FILENAME are both matched byte-for-byte at
 # authentication time. That is why this file is `release.yml` and not `publish.yml`.
