@@ -2,8 +2,15 @@
 
 No global magic constant. Each clause type (``siglip2`` / ``vqa`` / ``palette`` / a named sub-gate)
 gets a band: ``PASS`` (>= high) / ``FAIL`` (<= low) / ``UNCERTAIN`` (between). Only the UNCERTAIN
-band routes to a human checkpoint. Bands are calibrated against a human-labelled holdout and stored
-versioned; recalibrate when the generator or verifier checkpoint changes (both pinned)."""
+band routes to a human checkpoint. Bands are **defaults**, stored versioned
+(``sprite.calibration.json``, ``sprite.cal.v1``) and stamped into every receipt so a decision can be
+replayed against the table that made it; recalibrate when the generator or verifier checkpoint
+changes (both pinned).
+
+They are NOT calibrated against a human-labelled holdout. An earlier version of this docstring said
+they were, and README.md retracts that claim by name as one it could not support -- so the sentence
+survived in `src/` for the whole life of the correction. A docstring that outranks the front door on
+a claim the front door has already withdrawn is the defect this package exists to catch."""
 
 from __future__ import annotations
 

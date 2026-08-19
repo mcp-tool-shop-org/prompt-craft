@@ -44,7 +44,7 @@
 ## D. Shipping Hygiene
 
 - [x] `[all]` `verify` script exists (test + build + smoke in one command) (2026-08-18 — `python verify.py --installed`: suite, suite again under `-O` to prove refusals raise rather than assert, then a package build; VERIFY OK)
-- [ ] `[all]` SKIP: no git tag exists yet (pre-first-release scaffold) — nothing to compare the manifest's 0.1.0 against
+- [x] `[all]` Version matches the git tag (2026-08-18 — pyproject `0.4.0` == tag `v0.4.0` == `npm/package.json` `0.4.0` == `_FALLBACK_VERSION`. Enforced mechanically, not by eye: `release.yml` fails the release if `$TAG != $PKG` or `$PKG != $NPM`, and `verify.py --installed` refuses when installed metadata disagrees with pyproject. **This item was skipped as "no git tag exists yet ... nothing to compare the manifest's 0.1.0 against" through four releases** — v0.2.0, v0.2.1, v0.3.0, v0.4.0 — and it is the exact check that would have caught the stale editable dist-info that broke a release twice)
 - [x] `[all]` Dependency scanning runs in CI (ecosystem-appropriate) (2026-08-18 — `pip-audit --strict` in ci.yml, running after verify so a red audit is never read against an already-broken tree; locally: "No known vulnerabilities found")
 - [ ] `[all]` SKIP: the org's GitHub Actions rule forbids adding `dependabot.yml` unless explicitly requested (2026-08-18). A standing tension between that rule and this gate, resolved in favour of the org rule and recorded rather than silently checked. `pip-audit` in CI covers the detection half; the update half is manual by policy
 - [ ] `[npm]` SKIP: not an npm package
