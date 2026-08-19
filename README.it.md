@@ -100,11 +100,11 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 ## Stato corretto
 
-**v0.3.0: il nucleo è operativo. Il sistema di condizionamento SDXL è stato implementato tramite codice. È stata eseguita una prova su una scheda grafica locale 5090 `generate()`. È stata eseguita una dimostrazione dal vivo con un modello Cloud.**
+**v0.4.0: il nucleo è funzionante e ora il sistema di controllo fornisce informazioni accurate sul proprio stato. Il processo di condizionamento SDXL è implementato nel codice. È stata eseguita una prova su una scheda grafica locale 5090 `generate()`. Una configurazione Cloud è stata testata in tempo reale.**
 
 | | |
 |---|---|
-| Nucleo | **337 test superati** (conteggiati il 2026-08-18), eseguiti senza GPU, risultati deterministici. `verify` esegue linting, controllo dei tipi, l'intera suite di test, la suite di nuovo sotto `-O` e compila un pacchetto. |
+| Nucleo | **359 test superati** (conteggio del 2026-08-18), eseguiti senza l'uso della GPU, risultati deterministici. `verify` esegue il controllo della coerenza delle versioni, l'analisi del codice, il controllo dei tipi, la suite di test completa e nuovamente sotto `-O`, oltre alla creazione del pacchetto; quindi **indica quali controlli non ha eseguito**. Esegue l'analisi del codice e il controllo dei tipi su se stesso, con un test che ne impedisce la modifica. |
 | Predicati | gli undici punti decisionali composti in `core/` sono **testati con mutazioni**: 20 su 21 mutanti eliminati, e [il sopravvissuto è nominato](scripts/mutate_predicates.py) anziché nascosto. |
 | Condizionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e il ritocco regionale sono **integrati e coperti dai test fake-torch**. InstantID e IP-Adapter non possono condividere la stessa generazione. Due immagini di input per IP-Adapter vengono elaborate con un singolo adattatore (tutte le immagini; la scala è il fattore limitante più forte). `generate()` è stato eseguito localmente sulla scheda 5090 (2026-08-18, seme `169405236028824`, tipo `controlnet_ip`). L'immagine risultante ha un aspetto orchesesco; gli elementi "grip", "sigil" e "bracer" non sono stati applicati correttamente. |
 | Encoder Flux | Le funzioni “solo testo” e “riempimento inpaint” sono state integrate (fake-torch). ControlNet pose, IP-Adapter e LoRA continuano a essere rifiutate (famiglia errata). `method=reference` scrive il grafico della ricetta Cloud e si rifiuta di simulare l’esecuzione locale di Kontext (`GATE_CLOUD_SUBMIT`). |
@@ -116,15 +116,16 @@ Quest'ultima riga è quella che conta. "Non sono riuscito a verificare" e "Ho ve
 
 Tre affermazioni che le versioni precedenti di questo documento hanno fatto e che i test non hanno supportato, sono state corrette qui invece di essere semplicemente eliminate:
 
-- Le soglie a tre zone sono state descritte come *calibrate rispetto a un set di dati etichettato manualmente*. Non lo sono. Sono valori predefiniti.
-- La regola secondo cui un modello generativo non può mai essere il proprio "gatekeeper" è stata affermata come se uno studio l'avesse dimostrato. Le prove a sostegno sono **convergenti piuttosto che dirette**: i test discriminativi sì/no si sono dimostrati misurabilmente più stabili rispetto alla generazione di didascalie aperte, i modelli non possono autocorregersi in modo affidabile senza feedback esterno e il riconoscimento automatico traccia le preferenze. Nessuno studio singolo ha condotto un confronto diretto. La regola è valida; la certezza è stata esagerata.
-- Il processo di "conditioning" è stato inizialmente descritto come non implementato, poi come non utilizzato. SDXL ora **legge** i riferimenti assemblati nel codice. Ciò che rimane inutilizzato è un'istanza locale attiva `generate()` su questa macchina, non il cablaggio.
+- Le tre soglie delle zone sono state descritte come *calibrate rispetto a un set di dati di riferimento etichettato manualmente*. In realtà non lo sono. Si tratta di valori predefiniti.
+- La regola secondo cui un modello generativo non può mai essere il proprio sistema di controllo è stata presentata come se fosse stata stabilita da uno studio. Le prove a sostegno sono **indirette piuttosto che dirette**: l'analisi discriminativa sì/no si è dimostrata più stabile rispetto alla generazione di didascalie aperte, i modelli non possono correggersi in modo affidabile senza un feedback esterno e il riconoscimento di sé stesso rivela una distorsione dovuta alle preferenze personali. Nessuno studio singolo ha confrontato direttamente questi aspetti. La regola è valida; la certezza è stata esagerata.
+- Il processo di condizionamento è stato inizialmente descritto come non letto, poi come non implementato. Ora SDXL **legge** i riferimenti assemblati nel codice. È stata eseguita una prova in tempo reale su questa macchina utilizzando una scheda grafica locale `generate()`. L'implementazione e l'applicazione non sono la stessa cosa dell'output finale visualizzato nell'immagine.
+- `verify` è stato descritto elencando le fasi che esegue, il che ha portato a interpretare che un processo verde `verify.py` sia una CI (Continuous Integration) verde. In realtà non lo è: l'analisi delle dipendenze viene eseguita come fase separata della CI. Ora il sistema di controllo stampa ciò che **non** ha controllato e `--audit` esiste per quando si desidera eseguire tale fase localmente. Nello stesso ciclo: il sistema di controllo non aveva mai analizzato o controllato i tipi del proprio codice sorgente, e l'insieme delle regole di analisi è stato ereditato dalla versione dello strumento utilizzata anziché essere dichiarato esplicitamente. Entrambi questi problemi sono stati risolti nella versione 0.4.0. Un controllo che sembra funzionare in tempo reale ma in realtà fa meno di quanto sembri è esattamente il tipo di errore che questo progetto si propone di individuare, e si trovava negli strumenti utilizzati.
 
 ## Requisiti
 
 | | |
 |---|---|
-| Python | **3.11+:** (il sistema di integrazione continua esegue le versioni 3.11 e 3.13 sul nucleo + `[dev]`. Il vantaggio aggiuntivo `[image]` non è garantito con la versione 3.11). |
+| Python | **3.11+** (la CI esegue le versioni 3.11 e 3.13 sul nucleo + `[dev]`. L'extra `[image]` non è garantito per la versione 3.11). |
 | Piattaforme | solo Python, nessuna estensione compilata nel core: sviluppato su Windows 11, test CI su `ubuntu-latest` |
 | Dipendenze | il core necessita solo di `pydantic`. Le operazioni GPU sono implementate tramite moduli opzionali. |
 

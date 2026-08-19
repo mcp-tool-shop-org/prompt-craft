@@ -100,11 +100,11 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v0.3.0 – o núcleo está pronto. O condicionamento do SDXL foi implementado no código. Uma placa gráfica local 5090 `generate()` já foi testada. Um modelo na nuvem foi executado em tempo real.**
+**v0.4.0 — o núcleo é real e o sistema agora informa com precisão sobre si mesmo. O condicionamento SDXL é montado no código. Uma instância local 5090 `generate()` foi executada. Um script do Cloud foi executado ao vivo.**
 
 | | |
 |---|---|
-| Núcleo | **337 testes aprovados** (contados em 2026-08-18), sem uso de GPU, resultados determinísticos. `verify` executa as verificações de estilo de código, verificação de tipos, toda a suite de testes, a suite de testes novamente sob `-O` e cria um pacote. |
+| Núcleo | **359 testes aprovados** (contados em 2026-08-18), sem uso de GPU, determinístico. `verify` executa a verificação da versão, análise estática, verificação de tipos, o conjunto de testes, o conjunto de testes novamente sob `-O` e a construção do pacote — e então **indica o que não verificou**. Ele realiza a análise estática e a verificação de tipos em si mesmo, fixado por um teste para que os alvos não possam ser restringidos. |
 | Predicados | os onze pontos de decisão compostos em `core/` são **testados por mutação** — 20 de 21 mutantes eliminados, e [o sobrevivente tem nome](scripts/mutate_predicates.py) em vez de estar oculto |
 | Condicionamento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** e a ferramenta de retoque regional estão **integrados e cobertos por testes do fake-torch**. InstantID e IP-Adapter não podem ser usados em conjunto para gerar uma imagem. Duas imagens do IP-Adapter permanecem na mesma configuração (todas as imagens; a escala é o fator mais determinante). O código local `generate()` foi executado na placa 5090 (18 de agosto de 2026, semente `169405236028824`, tipo `controlnet_ip`). A imagem resultante tem um estilo «orc»; os elementos de empunhadura, sigilo e braçadeira não foram aplicados. |
 | Codificador Flux | O modo apenas texto e o preenchimento (Fill Inpaint) estão conectados (fake-torch). O ControlNet pose e o IP-Adapter continuam a ser rejeitados (família incorreta). `method=reference` escreve o gráfico da receita do Cloud e recusa-se a simular que o Kontext foi executado localmente (`GATE_CLOUD_SUBMIT`). |
@@ -116,12 +116,10 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 Três afirmações que versões anteriores deste documento fizeram e que a medição não suportou, corrigidas aqui em vez de descartadas silenciosamente:
 
-- Os três limites de zona foram descritos como *calibrados em relação a um conjunto de dados de referência rotulado por humanos*. Eles
-não são. São valores padrão.
-- A regra de que um modelo generativo nunca é seu próprio portão foi declarada como se um estudo tivesse
-estabelecido isso. As evidências de suporte são **mais convergentes do que diretas** — a sondagem discriminativa sim/não é mensuravelmente mais estável do que a geração de legendas abertas, os modelos não podem corrigir-se de forma confiável sem feedback externo e o reconhecimento próprio rastreia o viés de preferência própria. Nenhum
-estudo único realiza a comparação direta. A regra é válida; a certeza foi exagerada.
-- O condicionamento foi descrito como não lido, depois como não implementado. O SDXL agora **lê** as referências implementadas no código. O que ainda não foi testado é uma execução local ao vivo de `generate()` nesta máquina, e não a conexão.
+- Os três limites de zona foram descritos como *calibrados em relação a um conjunto de dados de referência rotulado manualmente*. Não é o caso. São valores padrão.
+- A regra de que um modelo generativo nunca pode ser seu próprio sistema de controle foi apresentada como se um estudo tivesse comprovado isso. As evidências de suporte são **convergentes, e não diretas** — a avaliação discriminativa sim/não é mensuravelmente mais estável do que a geração de legendas abertas; os modelos não podem se autocorrigir de forma confiável sem feedback externo, e o reconhecimento próprio rastreia o viés de preferência própria. Nenhum estudo único realiza uma comparação direta. A regra é válida; a certeza foi exagerada.
+- O condicionamento foi descrito como não lido e, em seguida, como não implementado. Agora, o SDXL **lê** as referências montadas no código. Uma instância local `generate()` nesta máquina foi executada ao vivo. "Conectado e aplicado" não é o mesmo que a imagem final sendo renderizada nos pixels.
+- `verify` foi descrito listando os componentes que executa, o que sugeriu que um `verify.py` verde é um CI verde. Não é — a auditoria de dependências é executada como uma etapa separada do CI. O sistema agora imprime o que **não** verificou, e `--audit` existe para quando você quiser executar esse componente localmente. Na mesma execução: o sistema nunca havia realizado a análise estática ou a verificação de tipos em seu próprio código-fonte, e o conjunto de regras de análise estática foi herdado da versão da ferramenta que estava sendo usada, em vez de ser declarado. Ambos foram corrigidos na v0.4.0. Uma verificação que parece estar ativa enquanto faz menos do que aparenta é exatamente a falha que este projeto existe para detectar, e ela estava nas ferramentas.
 
 ## Requisitos
 

@@ -101,7 +101,58 @@ door when `[image]` is installed; missing extras are `DEP_IMAGE_MISSING`.
 python verify.py --installed
 ```
 
-One command: the suite, the suite again under `-O`, and a package build. The `-O` pass is not
-ceremony — `assert` is stripped under `-O`, so a check written as an `assert` silently disappears
-in optimized mode. Every refusal in this codebase `raise`s, and that second pass is what proves
-it.
+Six legs: **version coherence**, lint, typecheck, the suite, the suite again under `-O`, and a
+package build.
+
+The `-O` pass is not ceremony — `assert` is stripped under `-O`, so a check written as an
+`assert` silently disappears in optimized mode. Every refusal in this codebase `raise`s, and
+that second pass is what proves it.
+
+**Version coherence** compares the installed distribution's version against the one
+`pyproject.toml` declares, and refuses when they differ. An editable install's metadata is not
+regenerated when `pyproject.toml` changes, and `package_version()` falls back to the tree's
+literal *only* when the distribution is missing entirely — so stale metadata is *found* and the
+wrong version is returned silently. That happened twice here. It runs first, because an
+environment lying about its version should not be discovered after a full suite and two builds.
+
+The gate also **lints and typechecks itself**. That sounds obvious and was not true until v0.4.0:
+the legs covered `src` and `tests` and skipped the file defining them.
+
+### What it does not check
+
+The run closes by naming its own scope:
+
+```
+VERIFY OK -- checked: version coherence, lint, typecheck, suite, suite under -O, build
+NOT CHECKED -- dependency audit. CI runs pip-audit as a separate step, so a green
+verify.py is not yet a green CI.
+```
+
+A bare `OK` implies a scope this gate does not have. "Could not check" must never read as
+"checked clean" — the same rule the CI workflow applies to its own skipped entries.
+
+### The dependency audit, opt-in
+
+```bash
+python verify.py --installed --audit
+```
+
+Off by default, and not out of squeamishness about the network: running it makes the gate
+**time-varying**, so an unchanged tree passes today and fails tomorrow when an advisory
+publishes. That is right for CI and wrong for a release gate.
+
+It reports three outcomes rather than two, because two would have shipped a gate that is red
+forever:
+
+| outcome | behaviour |
+|---|---|
+| advisory **with** a published fix | **fails** — there is a move available |
+| advisory with **no** published fix | reported, does not fail |
+| **could not audit at all** | reported loudest |
+
+The third row is the one that would otherwise pass silently. With `[image]` installed, `torch`
+is a local CUDA build that is not on PyPI, so the auditor cannot see the largest dependency in
+the tree at all — and a report saying "no vulnerabilities" would be printing "could not check"
+as "checked clean". Every run also names the **extras it resolved against**, because the verdict
+depends on that set: `[synth]` surfaces an advisory `[dev]` does not. A passing run carrying any
+caveat prints `QUALIFIED` rather than a bare OK.

@@ -130,11 +130,11 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v0.3.0 — the core is real. SDXL conditioning is assembled in code. A local 5090 `generate()` has now been run. One Cloud recipe has been run live.**
+**v0.4.0 — the core is real, and the gate now reports honestly about itself. SDXL conditioning is assembled in code. A local 5090 `generate()` has been run. One Cloud recipe has been run live.**
 
 | | |
 |---|---|
-| Core | **338 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs lint, typecheck, the suite, the suite again under `-O`, and a package build |
+| Core | **359 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs version coherence, lint, typecheck, the suite, the suite again under `-O`, and a package build — then **names what it did not check**. It lints and typechecks itself, pinned by a test so the targets cannot narrow back |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
 | SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Two IP-Adapter plates stay on one adapter (all images; scale is the strongest lock). Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
@@ -157,6 +157,13 @@ corrected here rather than quietly dropped:
 - Conditioning was described as unread, then as unimplemented. SDXL now **reads** the assembled
   refs in code. A live local `generate()` on this machine has now been run. Wired-and-applied
   is not the same as the plate landing in the pixels.
+- `verify` was described by listing the legs it runs, which invited the reading that a green
+  `verify.py` is a green CI. It is not — the dependency audit runs as a separate CI step. The
+  gate now prints what it did **not** check, and `--audit` exists for when you want that leg
+  locally. In the same pass: the gate had never linted or typechecked its own source, and the
+  lint rule set was inherited from whatever tool version happened to resolve rather than
+  declared. Both are fixed in v0.4.0. A check that reads as live while doing less than it
+  appears to is the exact failure this project exists to catch, and it was in the tooling.
 
 ## Requirements
 

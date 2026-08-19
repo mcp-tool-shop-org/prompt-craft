@@ -100,11 +100,11 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v0.3.0: el núcleo ya es funcional. El condicionamiento de SDXL se ha implementado en el código. Se ha ejecutado una prueba local con una tarjeta gráfica 5090 `generate()`. Se ha probado una configuración en la nube.**
+**v0.4.0: el núcleo es real y ahora la puerta informa de forma honesta sobre sí misma. El condicionamiento de SDXL se ensambla en el código. Se ha ejecutado una instancia local de 5090 `generate()`. Se ha ejecutado una receta de Cloud en vivo.**
 
 | | |
 |---|---|
-| Núcleo | **319 pruebas superadas** (contadas el 2026-08-18), sin GPU, determinista. `verify` ejecuta la suite, la suite de nuevo bajo `-O` y se crea un paquete. |
+| Núcleo | **359 pruebas superadas** (contadas el 2026-08-18), sin GPU, determinista. `verify` ejecuta la coherencia de la versión, el análisis de código, la verificación de tipos, la suite completa y luego la suite nuevamente bajo `-O`, y construye un paquete; después, **indica lo que no verificó**. Realiza el análisis de código y la verificación de tipos por sí mismo, fijado mediante una prueba para que los objetivos no puedan reducirse. |
 | Predicados | los once puntos de decisión compuestos en `core/` se **prueban mediante mutación**: se eliminaron 20 de 21 mutantes, y [el superviviente tiene nombre](scripts/mutate_predicates.py) en lugar de estar oculto. |
 | Condicionamiento SDXL | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID** y el retoque regional están **conectados y cubiertos por las pruebas de fake-torch**. InstantID e IP-Adapter no pueden compartir una misma generación. Dos imágenes de IP-Adapter permanecen en un mismo adaptador (todas las imágenes; la escala es la restricción más fuerte). La versión local `generate()` se ejecutó en la 5090 (18 de agosto de 2026, semilla `169405236028824`, tipo `controlnet_ip`). El fotograma tiene un estilo orco; el agarre, el sigilo y el brazalete no se aplicaron correctamente. |
 | Codificador Flux | El modo solo texto y el **relleno** están conectados (fake-torch). ControlNet pose e IP-Adapter siguen rechazados (familia incorrecta). `method=reference` escribe el gráfico de la receta en la nube y se niega a simular que Kontext se ejecuta localmente (`GATE_CLOUD_SUBMIT`). |
@@ -116,9 +116,10 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 Tres afirmaciones que las versiones anteriores de este documento hicieron y que la medición no respaldó, corregidas aquí en lugar de eliminadas silenciosamente:
 
-- Se describieron los tres umbrales de zona como *calibrados con un conjunto de datos de prueba etiquetado por humanos*. No lo están. Son valores predeterminados.
-- La regla de que un modelo generativo nunca puede ser su propia puerta se enunció como si un estudio la hubiera establecido. La evidencia de respaldo es **más convergente que directa**: las encuestas discriminativas de sí/no son mediblemente más estables que el etiquetado abierto, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea el sesgo de preferencia propia. Ningún estudio único realiza la comparación directa. La regla es sólida; se exageró la certeza.
-- Se describió el condicionamiento como no leído y luego como no implementado. Ahora, SDXL **lee** las referencias ensambladas en el código. Lo que aún no se ha probado es una ejecución local en vivo `generate()` en esta máquina, no la conexión.
+- Se describieron los tres umbrales de zona como *calibrados en relación con un conjunto de datos de referencia etiquetado manualmente*. No lo son. Son valores predeterminados.
+- La regla de que un modelo generativo nunca es su propia puerta se enunció como si un estudio la hubiera establecido. La evidencia de respaldo es **convergente más que directa**: las encuestas discriminativas de sí/no son mediblemente más estables que el etiquetado abierto, los modelos no pueden corregirse de forma fiable sin retroalimentación externa y el reconocimiento propio rastrea el sesgo de preferencia propia. No hay ningún estudio único que realice una comparación directa. La regla es sólida; la certeza se exageró.
+- Se describió el condicionamiento como no leído y luego como no implementado. SDXL ahora **lee** las referencias ensambladas en el código. Ahora se ha ejecutado una instancia local en vivo de `generate()` en esta máquina. Que esté conectado y aplicado no es lo mismo que que la imagen final aparezca en los píxeles.
+- Se describió `verify` enumerando las etapas que ejecuta, lo que sugirió que un `verify.py` verde es un CI verde. No lo es; la auditoría de dependencias se ejecuta como una etapa separada del CI. Ahora, la puerta imprime lo que **no** verificó y `--audit` existe para cuando desee esa etapa localmente. En el mismo proceso: la puerta nunca había realizado el análisis de código ni la verificación de tipos de su propio código fuente, y el conjunto de reglas de análisis de código se heredaba de la versión de herramienta que se resolvía en lugar de declararse. Ambos problemas se han solucionado en v0.4.0. Una comprobación que parece estar activa mientras hace menos de lo que aparenta es exactamente el fallo que este proyecto pretende detectar, y estaba presente en las herramientas.
 
 ## Requisitos
 

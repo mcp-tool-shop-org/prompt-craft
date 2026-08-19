@@ -11,7 +11,7 @@ export const config: SiteConfig = {
     'MIT Licensed — built by <a href="https://github.com/mcp-tool-shop-org" style="color:var(--color-muted);text-decoration:underline">mcp-tool-shop-org</a>',
 
   hero: {
-    badge: 'v0.3.0 · pre-1.0, deliberately',
+    badge: 'v0.4.0 · pre-1.0, deliberately',
     headline: 'Say what the picture must contain.',
     headlineAccent: 'Then check that it does.',
     description:

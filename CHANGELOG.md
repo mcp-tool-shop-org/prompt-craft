@@ -13,6 +13,24 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [0.4.0] — 2026-08-18
+
+**The gate started reporting on itself. Everything it found, it found about its own
+honesty rather than about the pipeline.**
+
+Nothing in the image path changed in this release. What changed is that four checks
+which read as live were doing less than they appeared to: a lint rule set inherited from
+whatever tool version resolved, a `# type: ignore` that stopped applying when a formatter
+wrapped its import, a success token that did not name its own scope, and a gate that
+linted every file except the one defining the gate. The version moves because `verify.py`
+gained a flag and two legs, not because the pipeline proved anything new.
+
+### Added
+
 - **`verify.py --audit` -- the dependency audit as an opt-in leg, with three outcomes
   rather than two.** `verify.py` and CI previously disagreed about what "verified" means;
   this gives them one definition. It stays **off by default**, and not out of squeamishness
