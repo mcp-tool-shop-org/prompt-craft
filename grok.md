@@ -60,24 +60,35 @@ anyway — stub `_load`, do not fire a live generate from a test.
 
 ### Verify like CI, not like this box
 
-**Do not trust the local venv.** On v0.3.0 it was wrong in three directions at
-once: ruff 0.15.16 against CI's 0.16.3; mypy 2.1.0 against 2.3.1, which emit
-*different error codes*, so an ignore named a code CI never produced; and a stale
-editable dist-info still reporting the previous version. Three release attempts
-died in that gap before anyone built the right environment.
+**Do not trust the local venv.** It has now been wrong in **five** distinct ways on
+this repo: ruff 0.15.16 against CI's 0.16.3; mypy 2.1.0 against 2.3.1, which emit
+*different error codes*, so an ignore named a code CI never produced; a stale
+editable dist-info reporting the previous version — **twice**, at `f23f345` and
+again on 2026-08-18; and a stale `pip` reporting advisories the runner does not
+have. Three release attempts died in that gap before anyone built the right
+environment.
 
 Before pushing anything a release gate will judge, build a CI-equivalent venv per
 leg and verify there:
 
 ```
 python -m venv <tmp>/civenv                      # once for 3.11, once for 3.13
+<tmp>/civenv/Scripts/python -m pip install -q --upgrade pip    # DO THIS FIRST
 <tmp>/civenv/Scripts/python -m pip install -e ".[dev]" build
 <tmp>/civenv/Scripts/python -m ruff --version     # confirm it matches CI's resolve
 <tmp>/civenv/Scripts/python verify.py --installed
 ```
 
-`uv python list --only-installed` has 3.11.15 and 3.13.13 on this rig. CI runs
-both. They differ in ways that matter — see the setuptools note below.
+`uv python list --only-installed` has 3.11.15 and 3.13.13 on this rig. CI runs both.
+Upgrade `pip` first or you will chase advisories the runner does not have: a fresh 3.11
+venv ships pip 24.0, while `setup-python` provides a current pip.
+
+**And do not trust `.venv`'s own metadata.** `package_version()` reads
+`version("prompt-crafter")` from installed metadata and falls back to the tree's literal
+*only* on `PackageNotFoundError` — so a **stale** dist-info is found, and returns the
+wrong version silently. On 2026-08-18 `pcraft --version` reported 0.2.1 against a 0.3.0
+tree, the same defect as `f23f345`. Re-run `pip install -e ".[dev]"` after any version
+bump; the dist-info is not regenerated when `pyproject.toml` changes.
 
 ## The lint gate
 
@@ -121,12 +132,11 @@ Two rules that will bite you:
 - **v0.3.0 shipped** to PyPI + npm 2026-08-18, after the verify gate held two
   failed release attempts. Suite last counted **339**. Re-count before quoting.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.
-- **CI is not fully green.** `verify (3.13)` passes; `verify (3.11)` fails at the
-  `dependency audit` step on an ambient `setuptools` 79.0.1 (PYSEC-2026-3447).
-  Python 3.12+ venvs no longer bundle setuptools, which is why 3.13 is clean.
+- **CI is green on both legs** (`ef5f72e`, run `32198885560`). The 3.11 leg had been
+  red at `dependency audit` on an ambient `setuptools` 79.0.1 (PYSEC-2026-3447);
+  Python 3.12+ venvs no longer bundle setuptools, which is why 3.13 was clean.
   setuptools is **not a dependency of this package** — pip-audit audits the
-  environment, not the declared dependency set. The `verify` step itself passes on
-  both legs. Current job; see `HANDOFF.md`.
+  environment, not the declared dependency set. Fixed by upgrading, not ignoring.
 - SDXL: ControlNet OpenPose, IP-Adapter, LoRA, InstantID, regional inpaint —
   wired, fake-torch tested. InstantID and IP-Adapter cannot share one generate.
   Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`,

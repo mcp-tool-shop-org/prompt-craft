@@ -6,7 +6,7 @@ the prior Advisor seat was Grok. `grok.md` and `AGENTS.md` were brought current 
 day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
-**HEAD at write:** `f41d46b` on `origin/main`, tree clean
+**HEAD at write:** `ef5f72e` on `origin/main`, tree clean. **CI green on both legs.**
 **Version:** **0.3.0** (shipped to PyPI + npm 2026-08-18)
 **Suite last counted:** **339** (re-count before quoting)
 
@@ -40,6 +40,7 @@ The Executor still:
 | Phase 9 — final test / typecheck restore | **Closed** (`b4320fe`, `4a14db0`) |
 | v0.3.0 release | **Shipped** 2026-08-18 to PyPI + npm after two verify-gate failures held it |
 | ruff rule-set widening (v0.3.0's one deferred item) | **Closed** (`f41d46b`) |
+| CI 3.11 dependency-audit red | **Closed** (`ef5f72e`) — ambient setuptools upgraded, not ignored; both legs green on run `32198885560` |
 | Phase 10 — full treatment / publish | **Not run.** Needs an explicit Director go |
 
 The swarm is **not closed**. Closing it is Phase 10 and is not authorised.
@@ -54,7 +55,7 @@ fire a live generate from a test.
 |---|---|
 | GPU-free suite | **339** |
 | Lint gate | **Declared**, not inherited. 15 families selected; every `ignore` names its reason. `ruff>=0.6,<0.17`, `mypy>=1.11,<3` |
-| CI | 3.13 **green**; 3.11 **red at `dependency audit`** (ambient setuptools, not a package dep). `verify` step green on both legs. This is the Executor's job — see `HANDOFF.md` |
+| CI | **green on both legs** (`ef5f72e`, run `32198885560`). Both land on setuptools 84.0.0; the visible skip table survives |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
 | Local 5090 `generate()` | **ran** 2026-08-18. Seed `169405236028824`, kind `controlnet_ip`, torch 2.13.0+cu130, RTX 5090 |
 | That frame (looked at) | Orcish tusks, crossed arms, scythe not a two-hand axe, no triple-bar, no bone-spike bracer. Same species, different character |
@@ -127,19 +128,24 @@ python -m venv <tmp>/civenv                       # once per CI python: 3.11 AND
 
 ## Recommended next increment (Advisor ruling)
 
-**Take the CI 3.11 red. Nothing else.** It is the only unfenced open item, the fix is
-verified, and the repo has a standing rule against leaving CI failing. Full brief in
-`HANDOFF.md`.
+**Nothing on the board has a Director go.** Both prior items are closed and verified on
+real runs. Two open items are written up in `HANDOFF.md` and both are **gated**:
 
-If the Director does **not** name a job beyond that: measure HEAD, re-count, stop.
+1. **`verify.py` honesty** — declare the gate's scope in its output, add `--audit` as an
+   opt-in leg, and add a version-coherence assertion under `--installed`. Audit-on-by-
+   default is **rejected**: it makes the release gate time-varying and puts a network
+   call in a hermetic gate. Needs a Director go.
+2. **The stale `pcraft==0.1.0` dist in the blessed `.venv`** — half-repaired
+   non-destructively (metadata now reports 0.3.0); clearing the leftover is a `pip
+   uninstall`, which is a delete, so it needs a Director go.
+
+If the Director does **not** name a job: measure HEAD, re-count, stop.
 
 Still out, only if asked:
 
 1. Local Flux text-only / Fill — weights are not on disk.
 2. Point the per-asset loop at `DSPySynthesizer` + the GEPA pin.
 3. Phase 10 full treatment / publish.
-4. Whether the dependency audit belongs inside `verify.py` — a recommendation is due
-   from this session, not an implementation.
 
 ## Memory
 
