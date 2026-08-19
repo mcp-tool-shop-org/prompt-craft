@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from ...errors import PromptCraftError
-from .schema import Contract, IdentityRef, ResolvedContract, Severity
+from .schema import SUPPORTED_CONTRACT_SCHEMAS, Contract, IdentityRef, ResolvedContract, Severity
 
 
 class ContractStore:
@@ -61,6 +61,13 @@ def _read_contract(path: Path) -> Contract:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as err:
         raise PromptCraftError("IO_CONTRACT_READ", f"could not read contract {path}", cause=err) from err
+    declared = data.get("$schema") if isinstance(data, dict) else None
+    if declared is not None and declared not in SUPPORTED_CONTRACT_SCHEMAS:
+        raise PromptCraftError(
+            "CONTRACT_SCHEMA_UNSUPPORTED",
+            f"contract {path} declares $schema {declared!r}; this build reads "
+            f"{sorted(SUPPORTED_CONTRACT_SCHEMAS)}",
+        )
     return Contract.model_validate(data)
 
 

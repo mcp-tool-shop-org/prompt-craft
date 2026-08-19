@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 # registered for this exact name with workflow release.yml, and both are matched
 # byte-for-byte at authentication time.
 name = "prompt-crafter"
-version = "0.4.0"
+version = "1.0.0"
 description = "Say what the picture must contain, check that it does, and refuse when it does not. A typed contract of depictable claims drives both the prompt and the gate that verifies the pixels."
 # PyPI-specific. The GitHub README opens with a logo at a repo-relative path and a
 # seven-language nav bar of sibling files — both render as broken links on PyPI, which
@@ -20,6 +20,29 @@ license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "mcp-tool-shop", email = "64996768+mcp-tool-shop@users.noreply.github.com" }]
 keywords = ["diffusion", "sprite", "contract", "verifier", "dspy", "generative-assets"]
+
+# `Development Status :: 5 - Production/Stable` is a claim about INTERFACES, not about
+# pictures. STABILITY.md is the actual promise and names what semver covers and what it
+# explicitly does not (threshold table VALUES, the unwired identity sub-gate and its
+# unvalidated 0.55 / 0.05 defaults, `core.optimize`, everything under `subdomains/sprite`).
+# It is here rather than `4 - Beta` because the three things that made a stable claim
+# dishonest are closed: the receipt format is versioned and its reader branches, the
+# contract `$schema` is enforced instead of decorative, and `replay` asserts the threshold
+# version it had always stamped and never compared.
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 
 # Core is DOMAIN-AGNOSTIC and GPU-free: pydantic for the typed contract, typer for the CLI.
 # Everything that touches a GPU, an LLM backend, or a diffusion model is an OPTIONAL extra,

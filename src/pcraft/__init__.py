@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-_FALLBACK_VERSION = "0.4.0"
+_FALLBACK_VERSION = "1.0.0"
 """Must equal pyproject's ``[project].version``.
 
 Pinned by ``test_the_version_fallback_matches_pyproject``: this literal is only reachable

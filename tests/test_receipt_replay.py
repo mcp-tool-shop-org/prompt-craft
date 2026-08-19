@@ -18,7 +18,7 @@ def test_receipt_round_trips_and_replays(tmp_path):
     rec = load(path)
     store, _r, _t, _c = load_sprite_example()
     resolved = store.resolve(rec.contract_id)
-    dag = replay(rec, resolved)  # no raise == the gate reproduces bit-for-bit
+    dag = replay(rec, resolved, thresholds_version=rec.thresholds_version)  # no raise == reproduces
     assert dag.contract_id == rec.contract_id
 
 
@@ -84,5 +84,5 @@ def test_replay_detects_contract_drift(tmp_path):
     resolved = store.resolve(res.record.contract_id)
     resolved.must_have[0].claim = "TAMPERED — the contract changed since bind"
     with pytest.raises(PromptCraftError) as exc:
-        replay(res.record, resolved)
+        replay(res.record, resolved, thresholds_version=None)
     assert exc.value.code == "STATE_REPLAY_DRIFT"

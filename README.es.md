@@ -100,7 +100,9 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v0.4.0: el núcleo es real y ahora la puerta informa de forma honesta sobre sí misma. El condicionamiento de SDXL se ensambla en el código. Se ha ejecutado una instancia local de 5090 `generate()`. Se ha ejecutado una receta de Cloud en vivo.**
+**v1.0.0: las INTERFACES son estables. Las imágenes aún no están terminadas, y este documento no pretende afirmar lo contrario.**
+
+`1.0.0` aquí es una declaración sobre la CLI, las rutas de importación, los códigos de salida y los dos formatos en disco; todo ello se enumera en [STABILITY.md](STABILITY.md), junto con lo que se excluye deliberadamente. No es una afirmación de que la imagen se proyecte perfectamente en los píxeles. Los espacios que se muestran a continuación son reales y mejoran en las versiones posteriores; lo que deja de moverse es la superficie sobre la que se construye.
 
 | | |
 |---|---|

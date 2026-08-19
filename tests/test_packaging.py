@@ -17,28 +17,45 @@ def test_wheel_does_not_force_include_trees_already_in_packages():
     assert "src/pcraft" in packages
 
 
-def test_version_is_pre_one_and_the_readme_agrees():
-    """The version stays pre-1.0 deliberately, and the README may not drift from it.
+def test_version_is_one_or_later_and_the_public_surface_agrees():
+    """The version is 1.x, the README may not drift from it, and STABILITY.md must exist.
 
-    ⚑ REPLACES `test_version_stays_scaffold`, which pinned the literal `0.1.0`. That pin did its
-    job — it caught the first bump rather than letting it pass silently — but "stays 0.1.0
-    forever" is not an invariant anyone wants: it fires on every legitimate release. The two
-    invariants that are actually load-bearing:
+    ⚑ REPLACES `test_version_is_pre_one_and_the_readme_agrees`, which asserted the major was
+    still `0` and said promoting "needs an evidence-backed decision, not a test edit." That is
+    exactly what happened, so this is the edit the old test was holding the door for — not a
+    deletion of an inconvenient assertion.
 
-    1. **Still pre-1.0.** A live 5090 generate has now run, and `bind --no-mock` is
-       the live door when `[image]` is installed. That is not a 1.x stability claim.
-       Promoting the version should be a decision made on evidence, and deleting a
-       failing assertion is not that.
-    2. **The README cannot drift from it.** A front door advertising a version the package does
-       not carry is this repo's own defect, one level up.
+    The decision, in one line: the pre-1.0 ruling was *"a generate that ran is not a stability
+    claim,"* which argues from **capability** — and capability is the category that does not
+    block a stable interface. It gets better in minors. The real blockers were three markers
+    that read as compatibility checks and were never compared: an unversioned receipt format
+    whose reader was fail-closed in both directions, a `$schema` label that accepted any
+    string, and a `thresholds_version` that was stamped into every receipt and asserted by
+    nothing. All three are closed and pinned in `tests/test_stability_surface.py`.
+
+    So the invariant flips rather than disappears. What is load-bearing now:
+
+    1. **1.0 does not silently regress.** Dropping back to 0.x would retract a published
+       stability promise, and that needs the same deliberation the promotion did.
+    2. **The README cannot drift from the version.** Unchanged, and it is this repo's own
+       defect one level up: a front door advertising a version the package does not carry.
+    3. **The promise exists.** `1.0.0` without `STABILITY.md` is a number, not a commitment —
+       the document is what names the covered surface and, just as importantly, the excluded
+       one.
     """
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     version = data["project"]["version"]
-    assert int(version.split(".")[0]) == 0, (
-        f"promoting to {version} needs an evidence-backed decision, not a test edit"
+    assert int(version.split(".")[0]) >= 1, (
+        f"version {version} regresses below 1.0.0; that retracts a published promise"
     )
     readme = Path("README.md").read_text(encoding="utf-8")
     assert f"v{version}" in readme, f"README does not state v{version}"
+
+    stability = Path("STABILITY.md")
+    assert stability.is_file(), "1.0.0 without STABILITY.md is a number, not a promise"
+    assert "Development Status :: 5" in Path("pyproject.toml").read_text(encoding="utf-8"), (
+        "the stable classifier and the stable version ship together or neither is honest"
+    )
 
 
 def test_ci_runs_the_declared_python_floor():

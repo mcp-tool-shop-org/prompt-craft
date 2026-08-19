@@ -399,21 +399,29 @@ def demo(
 def replay(
     record: Path = typer.Argument(...),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON to check the receipt against; default: shipped sprite calibration"),
+    skip_threshold_check: bool = typer.Option(False, "--skip-threshold-check", help="replay without comparing the threshold table (states that you have no table to compare, rather than hiding that you did not look)"),
     as_json: bool = typer.Option(False, "--json", help="emit AssetRecord as JSON on stdout"),
     debug: bool = typer.Option(False),
 ) -> None:
     """Replay a receipt: reconstruct its question DAG from the contract and assert no drift."""
+    from ..core.gate.thresholds import load_thresholds
     from ..core.receipt.asset_record import load
     from ..core.receipt.asset_record import replay as do_replay
+    from ..domains.image.subdomains.sprite import THRESHOLDS_PATH
     from ..sample import load_store
 
     try:
         rec = load(record)
         store = load_store(contracts_dir or None)
         resolved = store.resolve(rec.contract_id)
-        do_replay(rec, resolved)
+        # The receipt has always stamped the table version; nothing compared it until v1.0.0, so a
+        # replay under a retuned table re-decided in silence. Opting out is a flag you have to type.
+        table_version = None if skip_threshold_check else load_thresholds(thresholds or THRESHOLDS_PATH).version
+        do_replay(rec, resolved, thresholds_version=table_version)
         _say(
-            f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)",
+            f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)"
+            + (f"  thresholds={table_version}" if table_version else "  thresholds=NOT CHECKED"),
             as_json=as_json,
         )
         if as_json:

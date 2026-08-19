@@ -156,11 +156,23 @@ def _reject_duplicates_in(
         seen.add(atom.id)
 
 
+CONTRACT_SCHEMA_ID = "prompt-craft/contract.v1"
+"""The on-disk contract format this build reads.
+
+Checked in ``loader._read_contract``. It was a decorative label until v1.0.0 --
+``prompt-craft/contract.v99-NONSENSE`` loaded without complaint, so a file could announce a
+format nobody supports and be parsed as though it had announced nothing. A version marker that
+is never compared is worse than no marker: it reads as a compatibility check to everyone who
+sees it in the file."""
+
+SUPPORTED_CONTRACT_SCHEMAS = frozenset({CONTRACT_SCHEMA_ID})
+
+
 class Contract(BaseModel):
     """A single faction or character contract (unresolved — ``extends`` not yet applied)."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
-    schema_id: str = Field(default="prompt-craft/contract.v1", alias="$schema")
+    schema_id: str = Field(default=CONTRACT_SCHEMA_ID, alias="$schema")
     id: str
     level: str  # "faction" | "character"
     extends: str | None = None  # a faction id, for level == "character"

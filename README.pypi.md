@@ -69,7 +69,12 @@ concepts, blind to which attribute belongs to which object.
 
 ## Honest status
 
-**v0.4.0 — the core is real, and the gate now reports honestly about itself. SDXL conditioning is assembled in code. A local 5090 `generate()` has been run. One Cloud recipe has been run live.**
+**v1.0.0 — the INTERFACES are stable. The pictures are not finished, and this document does not pretend otherwise.**
+
+A `1.0.0` here is a claim about the CLI, the import paths, the exit codes and the two on-disk
+formats — enumerated in STABILITY.md, along with what is deliberately excluded.
+It is not a claim that the plate lands in the pixels. The gaps below are real and they get
+better in minor releases; what stops moving is the surface you build against.
 
 - **338 tests passing** (counted 2026-08-18), GPU-free and deterministic. The whole suite runs
   against a mock generator and verifier, which is what proves the plugin boundary holds.

@@ -17,6 +17,75 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Changed
 
+## [1.0.0] — 2026-08-18
+
+**The interfaces are stable. The pictures are not finished, and the two are different claims.**
+
+The pre-1.0 ruling was *"a generate that ran is not a stability claim."* It reached the right
+answer from the wrong premise: it argued from **capability**, and capability is exactly the
+category that does not block a stable interface — it improves in minor releases. Held only by
+that argument, the position weakened every time a capability landed, which is why it kept
+resurfacing.
+
+The real blockers were three markers that read as compatibility checks and were never
+compared. None of them appeared on the honest-status table, because none of them were about
+the pictures. All three are closed below.
+
+### Added
+
+- **`STABILITY.md`** — what semver covers and, at equal length, what it does not. Covered: the
+  CLI commands, the exit-code contract (including `4` for could-not-run, which exists so a CI
+  branch cannot read "the gate ran and failed" when the gate never ran), the listed import
+  paths, and the two on-disk formats. **Excluded, by name:** threshold table *values*, the
+  identity sub-gate, `core.optimize`, and everything under `subdomains/sprite`.
+
+  The identity sub-gate is named **provisional and out of scope**, with `0.55` / `0.05` stated
+  as **unvalidated defaults** — never calibrated against a labelled holdout, bare constructor
+  arguments in no table and no receipt. That excludes it from the promise without deleting,
+  promoting, or wiring it. A holdout is work that belongs before the sub-gate is *wired*, not
+  before the package is *stable*.
+
+  Every name in the document is checked by `tests/test_stability_surface_names_resolve.py` —
+  it parses the file rather than restating it, so the two cannot drift. It caught a wrong
+  module path in the document on its first run.
+
+- **`AssetRecord.schema_version`, and a `load()` that branches on it.** The receipt reader was
+  fail-closed in **both** directions (`extra="forbid"` rejects an added field; a required field
+  rejects a dropped one), so any future record change would have invalidated every receipt
+  already on disk, with no migration path. `replay` reads receipts written by earlier runs, so
+  this was a live liability, not a hypothetical one. A receipt with no `schema_version` is read
+  as v1 — that is how every receipt written before 1.0.0 keeps working — and an unknown version
+  raises **`IO_RECORD_SCHEMA_UNSUPPORTED`**, deliberately *not* `IO_RECORD_INVALID`: "written by
+  a newer prompt-craft" is not "corrupt", and collapsing them would send someone off re-binding
+  a perfectly good file.
+
+- **`Development Status :: 5 - Production/Stable`** and the rest of the PyPI classifiers, which
+  the package had never carried.
+
+### Changed
+
+- **The contract `$schema` is enforced.** `prompt-craft/contract.v99-NONSENSE` used to load
+  without complaint — a file could announce a format nobody supports and be parsed as though it
+  had announced nothing. Unsupported values now raise **`CONTRACT_SCHEMA_UNSUPPORTED`** (exit 1,
+  user input). A version marker that is never compared is worse than no marker: it reads as a
+  compatibility check to everyone who sees it in the file.
+
+- **`replay` asserts `thresholds_version`.** The receipt has always stamped the table version
+  and nothing ever compared it, so replaying under a retuned table silently re-decided and
+  reported success. `pcraft replay` now loads the table and refuses on drift, naming both
+  versions. The parameter is **keyword-only with no default** — passing `None` still skips the
+  comparison, but a caller has to say so, which is the difference between a decision and an
+  oversight. `--skip-threshold-check` states it out loud, and the summary line then reads
+  `thresholds=NOT CHECKED` rather than staying quiet.
+
+- **The pre-1.0 test flipped rather than vanished.** `test_version_is_pre_one_and_the_readme_agrees`
+  asserted the major was `0` and said promoting "needs an evidence-backed decision, not a test
+  edit." This release is that decision; its successor asserts 1.x does not silently regress,
+  that the README tracks the version, and that `STABILITY.md` and the stable classifier ship
+  together — because `1.0.0` without the document is a number, not a commitment.
+
+Suite **394** (was 359), GPU-free and deterministic.
+
 ## [0.4.0] — 2026-08-18
 
 **The gate started reporting on itself. Everything it found, it found about its own

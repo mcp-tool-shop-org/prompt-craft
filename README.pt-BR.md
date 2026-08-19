@@ -100,7 +100,9 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v0.4.0 — o núcleo é real e o sistema agora informa com precisão sobre si mesmo. O condicionamento SDXL é montado no código. Uma instância local 5090 `generate()` foi executada. Um script do Cloud foi executado ao vivo.**
+**v1.0.0 — as INTERFACES estão estáveis. As imagens ainda não estão finalizadas, e este documento não pretende sugerir o contrário.**
+
+A `1.0.0` aqui é uma afirmação sobre a CLI, os caminhos de importação, os códigos de saída e os dois formatos no disco — listados em [STABILITY.md](STABILITY.md), juntamente com o que foi deliberadamente excluído. Não se trata de uma afirmação de que a imagem será perfeitamente renderizada nos pixels. As lacunas abaixo são reais e melhoram nas versões menores; o que deixa de mudar é a superfície sobre a qual você constrói.
 
 | | |
 |---|---|

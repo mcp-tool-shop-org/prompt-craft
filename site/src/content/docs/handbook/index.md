@@ -42,7 +42,7 @@ the features.
 
 | | |
 |---|---|
-| The core | **359 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
+| The core | **394 tests passing** (counted 2026-08-18), GPU-free and deterministic — it runs anywhere, against a mock generator and verifier |
 | The plugin boundary | `core/` imports zero diffusion or torch symbols. The GPU-free suite is the proof, not the claim |
 | The gate on itself | `verify.py` names what it checked **and what it did not**, refuses an environment whose installed version disagrees with the tree, and lints and typechecks its own source — pinned by a test so the targets cannot narrow back |
 | Decision points | the eleven compound predicates in `core/` are **mutation-tested** — 20 of 21 mutants killed, the survivor named |
