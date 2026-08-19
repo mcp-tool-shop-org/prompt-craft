@@ -29,11 +29,33 @@ Two items closed back to back, both verified on real runs:
 - **CI 3.11 dependency-audit red** (`ef5f72e`) — ambient setuptools upgraded, not
   ignored. Both legs now land on setuptools 84.0.0 and the visible skip table survives.
 
-Nothing on the board has a Director go yet. **Read the two open items, then stop and ask.**
+**Director ruled 2026-08-18. Both items now have a go and are DONE except one deferral.**
+Item 1.1 and 1.3 landed; item 1.2 (`--audit`) is deferred with its semantics already ruled
+(below). Item 2's delete was authorised and run. The original text of both items is kept
+below unedited -- the ruling is recorded against it, not in place of it.
 
 ---
 
-## Open item 1 — `verify.py` honesty (ADVISOR RULING, needs Director go)
+## Open item 1 — `verify.py` honesty (ADVISOR RULING — DIRECTOR RULED, PARTLY LANDED)
+
+> **Director ruling, 2026-08-18.** Land **1.1 and 1.3 now**; hold **1.2 (`--audit`)** until
+> its semantics were settled. They were, in the same ruling: **when `--audit` lands, it must
+> fail on advisories that have a published fix and report-loudly-without-failing on those
+> that do not.**
+>
+> That question was live because of a finding the Executor surfaced before implementation:
+> `diskcache 5.6.3` carries **PYSEC-2026-2447 with no fix version published**. It is not a
+> declared dependency -- `pip show` gives `Required-by: dspy`, so it arrives transitively
+> through the `[synth]` extra. **CI never sees it** (CI installs `.[dev]` only), but the
+> blessed `.venv` has `[synth]`. So a naive `--audit` would be permanently red on this box
+> with no upgrade path while CI stayed green -- the exact inversion of the gap 1.2 exists to
+> close, and the fastest way to train people to skip a gate. The repo already separates
+> "could not check" from "checked clean"; this is a third category, *checked, real, no fix
+> published*, and it gets reported rather than either failing or being ignored.
+> `--ignore-vuln` remains refused.
+>
+> **1.1 and 1.3 landed.** Suite 344 (was 339; five new tests in `tests/test_verify_legs.py`).
+> `1.2` remains the only open piece of this item.
 
 The previous Executor was asked for a recommendation, not an implementation, and
 delivered one. This is the ruling on it, recorded here so it stops living in a chat log.
@@ -65,7 +87,20 @@ offline and hermetic. A category change, not a cleanup.
 
 Item 3 is the one that pays for the session, and open item 2 is why.
 
-## Open item 2 — the blessed `.venv` was lying, and half of it still is
+## Open item 2 — the blessed `.venv` was lying (RESOLVED 2026-08-18)
+
+> **Director gave the go; `pip uninstall pcraft` was run.** `pcraft 0.1.0` is gone;
+> `prompt-crafter 0.3.0` remains; `import pcraft` and `pcraft.domains` both resolve under
+> `src/`. Two things the original write-up did not anticipate, both checked before acting:
+>
+> 1. **Both distributions claimed `Scripts/pcraft.exe`.** The uninstall removed the *working*
+>    0.3.0 CLI shim along with the stale dist. Predicted from the RECORD beforehand, backed
+>    up, and repaired immediately with `pip install -e ".[dev]"`; `pcraft --version` reports
+>    0.3.0 from the exe. Anyone repeating this on another box should expect the same.
+> 2. **An empty directory skeleton survives** at `.venv/Lib/site-packages/pcraft/`
+>    (six directories, **zero files**) -- it was never in the dist's RECORD, so pip does not
+>    remove it. Nothing references it and nothing imports through it. Left in place: it is a
+>    further delete, and it is inert.
 
 Found by the Advisor while verifying the Executor's report. No gate caught it.
 

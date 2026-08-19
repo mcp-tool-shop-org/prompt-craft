@@ -4,9 +4,25 @@
     python verify.py              # checkout: PYTHONPATH=src
     python verify.py --installed  # after pip install -e ".[dev]"
 
-Legs: lint, typecheck, the suite, the suite under -O (gates must still
-raise), the wheel and sdist. --basetemp is always set so Windows
-dead-symlink cleanup does not look like a repo failure.
+Legs: version coherence (--installed only), lint, typecheck, the suite,
+the suite under -O (gates must still raise), the wheel and sdist.
+--basetemp is always set so Windows dead-symlink cleanup does not look
+like a repo failure.
+
+What this gate does NOT check is the dependency audit. CI runs pip-audit
+as a separate step afterwards, so a green verify.py is not yet a green
+CI. The summary says that out loud rather than letting a bare "VERIFY
+OK" imply a scope it does not have -- the same visible-skip doctrine
+ci.yml already argues for --skip-editable: "could not check" must never
+read as "checked clean".
+
+Version coherence is a leg because this environment has lied about the
+version twice -- at f23f345, and again on 2026-08-18. package_version()
+reads installed metadata and falls back to the tree literal *only* on
+PackageNotFoundError, so a STALE dist-info is found and the wrong
+version returns silently. The suite cannot catch it: the quick-count
+recipe sets PYTHONPATH=src while the metadata read ignores PYTHONPATH
+entirely. The gate and the lie were looking at different things.
 
 Lint and typecheck are legs here because they were configured in
 pyproject and invoked by nothing -- no workflow, no script. That is how
@@ -25,9 +41,41 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+_RAN: list[str] = []
+"""Labels of legs that actually passed, in order, for the closing summary.
+
+Collected rather than hard-coded so the summary cannot drift from what ran. A
+summary that names a leg nobody executed is the defect this script exists for.
+"""
+
+
+def _declared_version() -> str:
+    """The version pyproject declares.
+
+    Read from the file, not imported from the package: importing would consult the
+    same installed metadata this check exists to catch, and agree with itself.
+    """
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
+
+
+def _check_installed_version(installed: str, declared: str) -> None:
+    """Refuse when installed metadata disagrees with the tree."""
+    if installed != declared:
+        raise SystemExit(
+            f"VERIFY FAIL: version coherence -- the installed distribution reports "
+            f"{installed}, pyproject declares {declared}. The editable install is stale; "
+            f're-run `pip install -e ".[dev]"`. This is not cosmetic: package_version() '
+            f"falls back to the tree literal only on PackageNotFoundError, so stale "
+            f"metadata is found and returned silently by pcraft --version and pcraft "
+            f"doctor."
+        )
 
 
 def _run(label: str, cmd: list[str], env: dict[str, str]) -> None:
@@ -35,6 +83,7 @@ def _run(label: str, cmd: list[str], env: dict[str, str]) -> None:
     proc = subprocess.run(cmd, cwd=ROOT, env=env)
     if proc.returncode != 0:
         raise SystemExit(f"VERIFY FAIL: {label} exited {proc.returncode}")
+    _RAN.append(label)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,6 +104,18 @@ def main(argv: list[str] | None = None) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="pcraft-verify-"))
     try:
         py = sys.executable
+        if args.installed:
+            try:
+                installed = version("prompt-crafter")
+            except PackageNotFoundError:
+                raise SystemExit(
+                    "VERIFY FAIL: version coherence -- --installed was passed but the "
+                    "prompt-crafter distribution is not installed in this interpreter."
+                ) from None
+            declared = _declared_version()
+            print(f"-- version coherence: installed {installed} vs pyproject {declared}")
+            _check_installed_version(installed, declared)
+            _RAN.append("version coherence")
         # Static legs first: they are seconds, and a type error should not wait
         # behind a full suite + two builds to surface.
         _run("lint", [py, "-m", "ruff", "check", "src", "tests"], env)
@@ -70,7 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         _run("build", [py, "-m", "build", "--outdir", str(dist)], env)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    print("VERIFY OK")
+    print("VERIFY OK -- checked: " + ", ".join(_RAN))
+    print(
+        "NOT CHECKED -- dependency audit. CI runs pip-audit as a separate step, so a "
+        "green verify.py is not yet a green CI. See .github/workflows/ci.yml."
+    )
     return 0
 
 

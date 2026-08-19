@@ -19,6 +19,7 @@ add ``[tool.bandit]`` to pyproject without a leg and this fails.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import tomllib
 from pathlib import Path
 
@@ -126,3 +127,75 @@ def test_static_legs_run_before_the_suite():
         assert labels.index(fast) < labels.index("suite"), (
             f"{fast!r} leg runs after the suite; put the fast static checks first"
         )
+
+
+def _load_verify():
+    """Import verify.py by path.
+
+    Loaded under a private name so its ``__main__`` guard does not fire and run the
+    entire gate as a side effect of importing it.
+    """
+    spec = importlib.util.spec_from_file_location("_verify_under_test", VERIFY)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_version_coherence_rejects_the_stale_install_that_actually_happened():
+    """0.2.1 metadata against a 0.3.0 tree: ``f23f345``, and again on 2026-08-18.
+
+    Both times the environment reported the previous release's number from a tree that
+    had already been bumped, and nothing failed.
+    """
+    verify = _load_verify()
+    with pytest.raises(SystemExit) as excinfo:
+        verify._check_installed_version("0.2.1", "0.3.0")
+    message = str(excinfo.value)
+    assert "0.2.1" in message and "0.3.0" in message, (
+        "the refusal must name both versions -- 'version mismatch' on its own does not "
+        "say which side is stale, and the fix depends on knowing that"
+    )
+
+
+def test_version_coherence_passes_when_metadata_matches_the_tree():
+    _load_verify()._check_installed_version("0.3.0", "0.3.0")
+
+
+def test_declared_version_reads_pyproject_not_installed_metadata():
+    """The check must not consult the metadata it exists to catch.
+
+    If ``_declared_version`` imported the package instead of reading the file, it would
+    compare installed metadata against installed metadata, agree with itself, and never
+    fire -- passing hardest in exactly the case it was written for.
+    """
+    declared = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    assert _load_verify()._declared_version() == declared
+
+
+def test_the_version_check_is_reachable():
+    """A check defined but never called is this file's whole subject matter."""
+    tree = ast.parse(VERIFY.read_text(encoding="utf-8"))
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_check_installed_version" in called, (
+        "_check_installed_version is defined but nothing calls it -- a gate nothing runs "
+        "cannot fail"
+    )
+
+
+def test_the_summary_declares_what_it_did_not_check():
+    """A bare ``VERIFY OK`` implies a scope this gate does not have.
+
+    Asserted against the source text rather than the call graph because here the printed
+    string *is* the deliverable: the defect is a human reading an unqualified success
+    token and concluding CI will be green too.
+    """
+    source = VERIFY.read_text(encoding="utf-8")
+    assert "NOT CHECKED" in source and "pip-audit" in source, (
+        "verify.py must name the dependency audit as out of its scope; CI runs pip-audit "
+        "as a separate step, so a green verify.py is not yet a green CI"
+    )

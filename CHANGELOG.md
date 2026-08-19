@@ -13,6 +13,32 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Added
 
+- **`verify.py` declares its own scope, and asserts the installed version matches the
+  tree.** Two legs from one finding: the gate's closing output was a bare `VERIFY OK`, a
+  success token that does not name what it covers -- and its coverage is smaller than it
+  reads.
+
+  - The summary now prints `VERIFY OK -- checked: <the legs that actually ran>`, followed
+    by `NOT CHECKED -- dependency audit`, naming CI's separate `pip-audit` step. The leg
+    list is accumulated as legs pass rather than hard-coded, so the summary cannot drift
+    from what ran. This is the visible-skip doctrine `ci.yml` already argues for under
+    `--skip-editable`, turned on the gate itself: "could not check" must never read as
+    "checked clean".
+  - **Version coherence**, under `--installed`: the installed distribution's version must
+    equal `pyproject.toml`'s, or the gate refuses and names both numbers. It runs first --
+    an environment lying about its version should not be discovered after a full suite and
+    two builds. `_declared_version()` reads the file rather than importing the package;
+    importing would compare installed metadata against installed metadata, agree with
+    itself, and pass hardest in exactly the case it was written for.
+
+  This pins a defect that has now happened twice: `f23f345`, and again on 2026-08-18, when
+  the blessed `.venv` reported **0.2.1 against a 0.3.0 tree** through an entire session
+  while every gate stayed green. `package_version()` falls back to the tree literal *only*
+  on `PackageNotFoundError`, so stale metadata is *found* and the wrong version returns
+  silently. The suite could not catch it -- the quick-count recipe sets `PYTHONPATH=src`
+  while the metadata read ignores `PYTHONPATH` entirely. The gate and the lie were looking
+  at different things. Suite **344**, up from 339.
+
 ### Fixed
 
 - **CI `verify (3.11)` was red at `dependency audit`, and had simply never been fixed.** The
