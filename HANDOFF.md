@@ -325,3 +325,240 @@ report-without-failing path rather than the failing one.
 3. Verify CI on a real run before calling it done.
 4. If you change something a public surface quotes, **tell Advisor** — do not edit
    README/handbook yourself in this multi-seat sitting.
+
+---
+
+# RULING 2026-08-18 -- what `1.0.0` would mean here. Recommendation: STAY PRE-1.0.
+
+> Asked for a decision, not a survey, and told not to bump. Nothing was bumped, tagged,
+> published, or released. `identity_subgate.py` was not touched. No public surface was
+> edited -- every doc change below is **proposed**, for the Advisor to land.
+
+## Receipts first
+
+Measured at HEAD **`763d20f`** (not `5deb7dd` -- HEAD moved mid-session; `763d20f` is
+comment-only in `.github/workflows/release.yml`, no source, no tests). Tree clean,
+`origin/main` in sync. CI **green** at that HEAD (run `32207592767`).
+
+CI-equivalent venvs built per leg, `pip` upgraded first, both resolving **ruff 0.16.3 /
+mypy 2.3.1** -- matching CI, not this box:
+
+| leg | result |
+|---|---|
+| 3.11.15 `verify.py --installed` | **VERIFY OK** -- version coherence 0.4.0/0.4.0, lint, mypy 57 files, suite, suite under `-O`, build |
+| 3.13.13 `verify.py --installed` | **VERIFY OK** -- same six legs |
+| suite, re-counted at `763d20f` | **359** |
+
+**359 stands.** Counted after my own run, on a private `--basetemp`, no shared path.
+
+**`npx @mcptoolshop/shipcheck audit` -> exit 0.** Checked 20, unchecked 0, skipped 17,
+pass rate **100%**, `All hard gates pass. Ship it.` -- reported as run, not estimated.
+
+## The rule conflict is not mechanical. It is documentary.
+
+**The shipcheck 1.0.0 floor is prose, not a gate.** `auditCommand()` in
+`@mcptoolshop/shipcheck@1.0.7` (`bin/shipcheck.mjs:158-213`) is a **markdown checkbox
+parser**: it reads `SHIP_GATE.md`, counts `- [x]`, `- [ ] ... SKIP:` and bare `- [ ]`,
+and exits 1 only when something is unchecked. It never opens `pyproject.toml`, never
+reads a version, and contains no semver logic -- the only `version` strings in the whole
+binary serve its own `--version` flag. That is why the audit returned **100% at 0.4.0**.
+
+So rule 1 (`shipcheck-product-standards.md`: "repos at 0.x MUST be promoted to 1.0.0")
+and this repo's standing pre-1.0 ruling have **never actually collided in CI**, and
+cannot. The conflict is between two documents, and it is resolvable in a document.
+
+**Caveat on that 100%, found while working the gate.** `SHIP_GATE.md:47` skips a
+**hard-gate-D** item -- "version matches tag" -- with the justification *"no git tag
+exists yet (pre-first-release scaffold) -- nothing to compare the manifest's 0.1.0
+against."* Five tags exist: `v0.2.0`, `v0.2.1`, `v0.3.0`, `v0.4.0`. The premise expired
+three releases ago. Two more checked items carry receipts asserting **v0.2.0** content.
+The audit cannot see any of this, because it counts boxes rather than re-checking claims.
+A skip whose reason has expired reads as handled while being inert -- the exact defect
+class this repo has now closed four times, sitting inside the gate the Director would
+lean on to authorise a 1.0.
+
+## The analytical core: two categories, not one list
+
+A 1.0 under semver is a promise about **API and behavioural stability** -- what callers
+may depend on, and what requires a major bump to break. It is **not** a claim that the
+pipeline makes a good picture. Sorting the honest-status table on that axis splits it
+cleanly, and the split is the answer.
+
+### Category A -- capability gaps a 1.0 could honestly ship with
+
+Each re-verified against the tree, not taken from the table:
+
+| gap | verified | why it does not block 1.0 |
+|---|---|---|
+| Identity sub-gate not in `orchestrate` | only import is `subdomains/sprite/__init__.py:11`; absent from `orchestrate.py` | it gates nothing, so it constrains no behaviour anyone can depend on |
+| Example contract is a generic invention | both shipped contracts carry `_note: "GENERIC EXAMPLE -- NOT real canon"` | example **data**, not API |
+| 5090 frame missed grip / sigil / bracer | as recorded | output quality is not a semver surface |
+| Local Flux never run | `method=reference` raises `GATE_CLOUD_SUBMIT`; pose/IP/LoRA/InstantID refuse | a **documented refusal is a stable behaviour** |
+| GEPA only on `hermes3:8b` | `sprite.synth.v1-gepa.json` -> `generated_by: gepa`; seed still `scaffold-seed` | model scale, off the hot path, Director-gated |
+| Per-asset loop still `TemplateSynthesizer` | `cli/__init__.py:198` | implementation behind `synthesizer_iface`; the interface holds |
+
+Filling any of these later is a **minor** bump by definition. All six are honestly
+disclosable in a 1.0 release note. **If capability were the only issue, this repo could
+go 1.0 today.**
+
+### Category B -- genuine stability blockers, and they are NOT on the honest-status table
+
+The table enumerates what the project has not *proven*. It does not enumerate what the
+project has not *frozen*. That second list is where the real blockers are, and it is
+undocumented.
+
+**B1. The receipt format has no version and is fail-closed in both directions.**
+`AssetRecord` fields: `record_id, contract_id, contract_hash, compiled_synth_id,
+synth_backend, synth_degraded, generator_id, generator_family, seed, sampler,
+conditioning, verifier_ids, thresholds_version, question_dag, gate_transcript,
+retry_count, decision, attempts, checkpoint`. **No version field**, `extra="forbid"`.
+Measured on a real receipt from `pcraft demo`:
+
+```
+FORWARD BREAK: IO_RECORD_INVALID -- one added field makes the whole receipt unreadable
+BACKWARD BREAK: IO_RECORD_INVALID -- a receipt missing one field is unreadable
+```
+
+`replay` is a **shipped CLI command** whose entire purpose is reading receipts written by
+earlier runs. Any future change to the record -- including one the roadmap plainly wants,
+since wiring the identity sub-gate would add a sub-gate result to the transcript --
+invalidates every receipt on disk, in both directions, with no version to branch on and
+no migration path. This is the strongest blocker and it is nowhere in the docs.
+
+**B2. The contract `$schema` version label is inert.** `Contract.schema_id` defaults to
+`prompt-craft/contract.v1` (aliased `$schema`) and **nothing validates it**. Measured:
+
+```
+CONTRACT $schema v99 LOADED  -> version label is INERT, schema_id = prompt-craft/contract.v99-NONSENSE
+```
+
+The one mechanism that would let the contract format evolve compatibly is decorative.
+Same shape as the finding in `763d20f` -- a boundary asserted on one side and not
+required by the other.
+
+**B3. The task's threshold hypothesis is half right, and the half matters.** The dispatch
+proposed that thresholds with no holdout, backing a gate that blocks assets, are a
+stability blocker. Measurement refines it:
+
+- The **main gate** bands (`vqa` / `siglip2` / `palette`) live in
+  `sprite.calibration.json`, versioned **`sprite.cal.v1`**, stamped into every receipt
+  (`thresholds_version`, `orchestrate.py:417`, `harness.py:193`) and printed in the gate
+  report. The file states its own status: *"GENERIC SEED - not a real human-labelled
+  holdout."* Retuning these is a **declared data change, visible in every receipt** -- not
+  a semver break, provided 1.0 says the table version is outside the semver contract.
+- The **identity sub-gate's** `0.55` / `0.05` are different in kind: constructor defaults
+  at `identity_subgate.py:35-36`, in **no table, no version, no receipt**. Retuning them
+  later silently changes behaviour for any caller constructing the gate bare -- and that
+  constructor is public via `SpriteSubdomain.identity_subgate(**kwargs)`.
+- **But it blocks nothing today**, because it is not in `orchestrate`. So it is not a
+  blocker for the gate that ships; it is a blocker for **freezing that constructor**. The
+  fence forbids touching the file, so the fix is not code -- it is scoping the sub-gate
+  explicitly *out* of the 1.0 promise.
+
+**B4. `thresholds_version` is recorded but never enforced.** `replay()` raises
+`STATE_REPLAY_DRIFT` on contract-hash drift and on question-DAG drift, and is **silent on
+threshold drift**. A replay under a retuned table re-decides and reports no drift. If the
+1.0 promise is "receipts are replayable," that is the hole in it.
+
+**B5. The public surface has never been enumerated.** The only semver mention in the repo
+is boilerplate at `CHANGELOG.md:6`. `src/pcraft/__init__.py` exports exactly
+`package_version`; there is no `__all__` discipline, so every module path under `core/`
+and `domains/` is de facto public. README's Support status says *"`main` is the only
+supported state. No release channel, no backport policy, no SLA"* -- which is coherent
+with 1.0 but is not a stability statement. **You cannot promise stability over a surface
+you have not drawn.**
+
+**B6. No `Development Status` classifier in `pyproject.toml`** -- there is no
+`classifiers` key at all, so PyPI shows no maturity signal either way.
+
+## The decision
+
+**Stay pre-1.0 -- but retire the current reason for it.**
+
+The standing ruling, *"a generate that ran is not a stability claim,"* reaches the right
+conclusion from the wrong premise. It argues from **capability**, and capability is
+Category A: six gaps, all documentable, none of them semver events. Held only by that
+argument, the position quietly weakens every time a capability lands -- and it will
+resurface at every release, exactly as it has now.
+
+The defensible reason is Category B: **the two persisted formats a 1.0 would be
+promising about are not ready to be frozen.** One has no version and is fail-closed in
+both directions (measured). The other has a version nothing validates (measured). Neither
+is on the honest-status table, so the project's own most useful artifact does not
+currently surface its real blockers.
+
+That reason is stronger, it is **checkable**, and it converts "pre-1.0, deliberately"
+from a posture into a work item that ends.
+
+## Criteria that flip it -- verifiable, not arguable
+
+1. **`AssetRecord` carries `schema_version`, and `load()` branches on it.** Verified by: a
+   v1 receipt loads under the v2 reader; an unknown future version raises a **named** code,
+   not `IO_RECORD_INVALID`. Both directions pinned by tests.
+2. **The contract `$schema` is validated.** Verified by: `prompt-craft/contract.v99` raises
+   a named refusal; `contract.v1` loads. Today it accepts anything (measured above).
+3. **`replay` asserts `thresholds_version`.** Verified by: replaying a receipt under a
+   different threshold table raises drift instead of passing silently.
+4. **A `STABILITY.md` enumerates the public surface** -- which CLI commands, which import
+   paths, which on-disk formats semver covers, and what is explicitly excluded (named:
+   threshold *table values*, everything under `subdomains/sprite/` while unwired,
+   `core.optimize`). Verified by: the document exists and every name in it resolves.
+5. **The identity sub-gate is named in that document as provisional and out of scope**,
+   with `0.55` / `0.05` stated as unvalidated defaults. This satisfies the fence -- no
+   delete, no promote, no wire -- and removes it as a blocker without touching the file.
+6. **`Development Status :: 5 - Production/Stable`** added to `pyproject.toml` in the same
+   commit as the bump. Verified by: it appears on the PyPI page.
+
+Deliberately **not** on this list: a labelled holdout for the identity thresholds. It is
+good work and it is Category A. Requiring it here would re-import the capability argument
+this ruling is retiring -- an unwired gate needs a holdout before it is *wired*, not
+before the package is *stable*.
+
+## Free fix, owed regardless of the 1.0 decision -- and it is a live one
+
+`src/pcraft/core/gate/thresholds.py:5` still states: *"Bands are calibrated against a
+human-labelled holdout and stored versioned."* That is the **exact claim** `README.md:150`
+and `site/src/content/docs/handbook/index.md:58` retract by name. The data file is honest;
+the module docstring that defines the thresholds is not. A claim reading as established
+while untrue, in the gate's own source, is the defect this project exists to catch -- the
+fifth instance, and the first one found in `core/`.
+
+It is a `src/` docstring, so it is the **Executor's** to land, not this seat's and not the
+Advisor's. One sentence. Recommend it goes in the next sitting that touches `core/`.
+
+## Reconciling the two rules so this does not resurface
+
+`E:\AI\.claude\rules\shipcheck-product-standards.md` is outside this repo and is the
+Director's file, so this is **proposed text, not a change made**:
+
+> **Named exemption -- `mcp-tool-shop-org/prompt-craft`.** The v1.0.0 floor does not apply
+> while this repo's published pre-1.0 position stands. Reason: two persisted wire formats
+> (`AssetRecord` receipts, contract `$schema`) are not yet frozen -- receipts carry no
+> version and reject both added and missing fields; the contract version label is not
+> validated. Both measured 2026-08-18. The exemption **ends** when the six criteria in
+> `HANDOFF.md` ("Criteria that flip it") are met; it is bounded by those criteria, not
+> open-ended. Note that shipcheck does **not** enforce the floor mechanically -- `audit`
+> parses `SHIP_GATE.md` checkboxes and never reads a version -- so this exemption
+> reconciles two documents, not a failing gate.
+
+Recording it there is what stops the next seat re-deriving this from scratch. The floor
+rule keeps its purpose -- it exists to stop 0.x drifting forever -- because the exemption
+expires on named, checkable conditions rather than on judgement.
+
+## Also worth the Advisor's attention (proposed, not done)
+
+- **The honest-status table should gain a stability row.** It is the best artifact in the
+  repo and it currently enumerates only unproven *capability*. B1 and B2 are the items a
+  1.0 reader most needs and cannot currently find.
+- **`SHIP_GATE.md:47`'s expired SKIP** should be re-worked to a real check now that four
+  release tags exist -- it is a hard-gate-D item, and "version matches tag" is precisely
+  the check that would have caught the stale dist-info this repo hit **twice**.
+- **`ADVISOR.md` Fences and `HANDOFF.md` Fences both still read "Version stays 0.3.0"**
+  while the header of each says 0.4.0 shipped. Stale by one release, in the fence list.
+
+## Compensators
+
+Nothing irreversible was performed. No version change, no tag, no publish, no release, no
+edit to `identity_subgate.py`, no edit to any public surface. The single mutation is this
+appended block; its compensator is `git revert <sha>`, owner Executor. Two throwaway CI
+venvs and a demo receipt live under the session scratch dir and need no undo.
