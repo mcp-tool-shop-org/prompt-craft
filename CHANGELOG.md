@@ -13,6 +13,37 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ### Added
 
+- **`verify.py --audit` -- the dependency audit as an opt-in leg, with three outcomes
+  rather than two.** `verify.py` and CI previously disagreed about what "verified" means;
+  this gives them one definition. It stays **off by default**, and not out of squeamishness
+  about the network: running it makes the gate *time-varying*, so the same tree passes
+  today and fails tomorrow when an advisory publishes. Correct for CI, wrong for a release
+  gate, which should be a function of the tree.
+
+  The three outcomes exist because two would have shipped a gate that is red forever:
+
+  | outcome | example on this rig | behaviour |
+  |---|---|---|
+  | advisory **with** a published fix | `setuptools 78.1.0` -> 83.0.0 | **fails** -- actionable |
+  | advisory with **no** published fix | `diskcache 5.6.3` PYSEC-2026-2447 | reported, does not fail |
+  | **could not audit at all** | `torch 2.13.0+cu130` -- a local build, not on PyPI | reported loudest |
+
+  The middle row is why: `diskcache` arrives transitively from `dspy` under `[synth]`, has
+  no version to upgrade to, and CI never sees it because CI installs `[dev]` only. Failing
+  on it would have made `--audit` permanently red on the blessed box with no move
+  available, which is how people learn to skip gates. The third row is the one that would
+  otherwise pass silently: with `[image]` installed, pip-audit cannot see the largest
+  dependency in the tree, and a report that said "no vulnerabilities" would be printing
+  "could not check" as "checked clean".
+
+  Each run also **names the extras it resolved against**, because the verdict depends on
+  that set -- `[synth]` surfaces an advisory `[dev]` does not. Without it two honest runs
+  on different boxes disagree and neither can be trusted, which is the `ruff --select`
+  override trap in a different tool. A passing run carrying caveats prints `QUALIFIED`
+  rather than a bare OK. Duplicate advisory rows (pip-audit emits them) are deduped, and a
+  missing or unparseable report **refuses** rather than reporting an audit that did not
+  run. Twelve tests, all offline against synthetic reports.
+
 - **`verify.py` declares its own scope, and asserts the installed version matches the
   tree.** Two legs from one finding: the gate's closing output was a bare `VERIFY OK`, a
   success token that does not name what it covers -- and its coverage is smaller than it
@@ -39,7 +70,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   on `PackageNotFoundError`, so stale metadata is *found* and the wrong version returns
   silently. The suite could not catch it -- the quick-count recipe sets `PYTHONPATH=src`
   while the metadata read ignores `PYTHONPATH` entirely. The gate and the lie were looking
-  at different things. Suite **346**, up from 339.
+  at different things. Suite **358**, up from 339.
 
 ### Fixed
 

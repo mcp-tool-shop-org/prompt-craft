@@ -55,7 +55,15 @@ below unedited -- the ruling is recorded against it, not in place of it.
 > `--ignore-vuln` remains refused.
 >
 > **1.1 and 1.3 landed.** Suite 344 (was 339; five new tests in `tests/test_verify_legs.py`).
-> `1.2` remains the only open piece of this item.
+>
+> **1.2 LANDED 2026-08-18** on the Director's go, with the ruled semantics plus the
+> Advisor's extras refinement. `--audit` is opt-in and off by default. Three outcomes, not
+> two: fixable fails, no-published-fix is reported without failing, and **could-not-audit
+> is reported loudest** -- a category found while building it, not before. On a box with
+> `[image]`, pip-audit cannot check `torch` at all (a local `+cu130` build is not on PyPI),
+> so a naive audit would have printed a clean bill while blind to the largest dependency in
+> the tree. Both paths exercised live: FAIL on this rig (setuptools, exit 1) and QUALIFIED
+> on the CI-equivalent `[dev]` venv (exit 0). Twelve offline tests. **This item is closed.**
 >
 > **Advisor note added on review, 2026-08-18 — one refinement for whoever builds 1.2.**
 > The diskcache finding proves the audit's result **depends on which extras are installed**:

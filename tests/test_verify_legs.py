@@ -231,3 +231,117 @@ def test_a_failing_leg_is_not_recorded_as_checked():
     with pytest.raises(SystemExit):
         verify._run("boom", [sys.executable, "-c", "raise SystemExit(3)"], dict(os.environ), ran)
     assert ran == [], f"a failed leg was recorded as checked: {ran}"
+# A pip-audit report with one of every case that matters, in the real JSON shape:
+# a clean dep, an advisory with no published fix, an advisory with one (emitted TWICE,
+# as pip-audit really does), and a distribution it could not audit at all. Skipped
+# entries carry only ``name`` and ``skip_reason`` -- no ``version`` key.
+AUDIT_PAYLOAD = {
+    "dependencies": [
+        {"name": "pydantic", "version": "2.9.0", "vulns": []},
+        {
+            "name": "diskcache",
+            "version": "5.6.3",
+            "vulns": [{"id": "PYSEC-2026-2447", "fix_versions": []}],
+        },
+        {
+            "name": "setuptools",
+            "version": "78.1.0",
+            "vulns": [
+                {"id": "PYSEC-2026-3447", "fix_versions": ["83.0.0"]},
+                {"id": "PYSEC-2026-3447", "fix_versions": ["83.0.0"]},
+            ],
+        },
+        {
+            "name": "torch",
+            "skip_reason": "Dependency not found on PyPI and could not be audited: "
+            "torch (2.13.0+cu130)",
+        },
+    ]
+}
+
+
+def test_an_advisory_with_a_published_fix_is_actionable():
+    """Something to upgrade to means the gate can demand it."""
+    fixable, _unfixable, _unauditable = _load_verify()._split_audit(AUDIT_PAYLOAD)
+    assert fixable == [("setuptools", "78.1.0", "PYSEC-2026-3447", ["83.0.0"])]
+
+
+def test_an_advisory_with_no_published_fix_is_reported_not_failed():
+    """diskcache 5.6.3 / PYSEC-2026-2447 is real, and there is nothing to upgrade to.
+
+    Failing on it would make the gate permanently red with no move available on any box
+    carrying ``[synth]``, which is how people learn to skip gates. It is a third
+    category, not a pass and not a failure.
+    """
+    fixable, unfixable, _ = _load_verify()._split_audit(AUDIT_PAYLOAD)
+    assert unfixable == [("diskcache", "5.6.3", "PYSEC-2026-2447", [])]
+    assert not any(entry[0] == "diskcache" for entry in fixable), (
+        "an advisory with no published fix must never reach the failing category"
+    )
+
+
+def test_a_distribution_that_could_not_be_audited_is_surfaced():
+    """The one that would otherwise read as clean coverage.
+
+    On a box with ``[image]``, torch is a local ``+cu130`` build that is not on PyPI, so
+    pip-audit cannot check the largest dependency in the tree. Reporting nothing here
+    would be "could not check" printed as "checked clean" -- this repo's whole subject.
+    """
+    _fixable, _unfixable, unauditable = _load_verify()._split_audit(AUDIT_PAYLOAD)
+    assert len(unauditable) == 1
+    name, reason = unauditable[0]
+    assert name == "torch"
+    assert "could not be audited" in reason
+
+
+def test_duplicate_advisory_rows_are_counted_once():
+    """pip-audit emits the same advisory twice; the count must not inherit that."""
+    fixable, _, _ = _load_verify()._split_audit(AUDIT_PAYLOAD)
+    assert len(fixable) == 1, f"duplicate rows were not deduped: {fixable}"
+
+
+def test_an_empty_report_is_not_mistaken_for_a_finding():
+    assert _load_verify()._split_audit({"dependencies": []}) == ([], [], [])
+
+
+@pytest.mark.parametrize(
+    ("requirement", "expected"),
+    [
+        ("dspy-ai>=2.5", "dspy-ai"),
+        ("ruff>=0.6,<0.17", "ruff"),
+        ("torch>=2.4", "torch"),
+        ("pillow>=10.0", "pillow"),
+        ("numpy", "numpy"),
+    ],
+)
+def test_requirement_names_parse(requirement: str, expected: str):
+    assert _load_verify()._req_name(requirement) == expected
+
+
+def test_installed_extras_are_named_from_pyproject():
+    """The audit's verdict depends on which extras are installed, so it reports them.
+
+    ``[synth]`` brings the no-published-fix advisory; ``[dev]`` alone does not, and CI
+    installs only ``[dev]``. Two honest runs on different boxes disagree unless each
+    says what it measured -- the same trap as reading one ruff family under ``--select``
+    as though it were the gate.
+    """
+    declared = set(
+        tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
+        .get("optional-dependencies", {})
+    )
+    assert set(_load_verify()._installed_extras()) <= declared
+
+
+def test_the_audit_is_opt_in_and_reachable():
+    """Off by default keeps the gate hermetic and a function of the tree; and a leg
+    nothing calls cannot fail."""
+    source = VERIFY.read_text(encoding="utf-8")
+    assert '"--audit"' in source and 'action="store_true"' in source
+    tree = ast.parse(source)
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_audit" in called, "_audit is defined but nothing calls it"
