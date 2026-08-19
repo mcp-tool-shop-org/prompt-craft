@@ -12,8 +12,8 @@ copy, and the CHANGELOG body beyond Unreleased.
 
 ## Where you are (measured 2026-08-18, re-measure anyway)
 
-Repo: `E:\AI\prompt-craft` — HEAD **`02386e5`** on `origin/main`, tree clean.
-Version **0.3.0**. Suite **344**. **CI green on both legs** (run `32200681387`).
+Repo: `E:\AI\prompt-craft` — HEAD **`e5af2e5`** on `origin/main`, tree clean.
+Version **0.3.0**. Suite **358**. **CI green on both legs** (run `32202494004`).
 
 ```
 cd E:\AI\prompt-craft
@@ -222,6 +222,14 @@ Director**. No publish, no tag, no `gh release create` this session.
 
 ## Small, unclaimed, no go needed beyond the usual
 
+> **Both items below were RESOLVED 2026-08-18** (`25a7e91`, `e5af2e5`). `_RAN` is gone
+> entirely — threaded as a local rather than reset, so there is no reset to forget, and
+> two tests pin it: one that legs do not leak between callers, one that **a leg which
+> exits non-zero is never recorded as checked**. That second test was not asked for and
+> is the better half: the ordering of `ran.append` after the raise was incidental, and it
+> is load-bearing. The skeleton is cleared; `pcraft` and `pcraft.domains` still resolve
+> under `src/`, CLI still 0.3.0, all re-verified by Advisor. Original text kept below.
+
 - **`verify.py`'s `_RAN` is module-level mutable state.** It is correct as run today —
   the script runs once per process and the new tests do not call `main()` — but a second
   in-process `main()` would append to the first run's list and print a summary naming a
@@ -240,6 +248,53 @@ Director**. No publish, no tag, no `gh release create` this session.
   `src/`, verified. **Advisor recommends clearing it**: its only effect is to look like a
   shadowing hazard to the next person who audits this venv, which costs a real
   investigation to disprove. It is a delete, so it needs the Director's word.
+
+## Open — one item, verified free TODAY and decaying
+
+**`verify.py` is not linted or typechecked by its own gate.** The legs are
+`ruff check src tests` and `mypy src`; the gate checks everything except the file that
+defines the gate. This is the same defect class as the three already fixed in this repo
+(`[tool.ruff]` with no `select`; a bare `VERIFY OK`; mypy aborting on a numpy stub while
+still reporting as configured) — and it is the fourth instance, in the gate itself.
+
+Found by the Executor, who noticed only because they ran ruff on `verify.py` by hand and
+it flagged `PLW1510` on a **pre-existing** line. They fixed both sites, so:
+
+**Advisor verified the change that would actually land, not the isolated proxy:**
+
+```
+ruff check src tests verify.py     -> All checks passed
+mypy src verify.py                 -> Success, 57 source files (was 56, no config conflict)
+```
+
+Both clean **right now**. That is the whole argument for doing it now: the cost is zero
+today and rises the moment anyone edits `verify.py` again, because `verify.py` has grown
+from a thin runner into a file with JSON parsing and category logic — exactly the kind of
+code the gate exists for. It is two words added to two legs. It needs a Director go
+because it widens what CI enforces.
+
+## Resolved by Advisor, 2026-08-18 — the blessed `.venv` was non-compliant
+
+The Executor found `--audit` failing on this box and correctly did not mutate the
+environment. Advisor ran the remedy, which is an **upgrade, not a delete**, and is the
+identical action the Director already approved for CI at `ef5f72e`:
+
+```
+.\.venv\Scripts\python.exe -m pip install -U setuptools     # 78.1.0 -> 84.0.0
+```
+
+Before: `VERIFY FAIL: dependency audit -- 2 advisories with a published fix`, exit 1.
+After: exit 0, and the gate says the honest thing rather than a clean bill —
+
+```
+QUALIFIED -- the audit found nothing actionable, but this is not a clean bill:
+1 advisory with no published fix and 3 distributions it could not audit at all.
+Could not check is not checked clean.
+```
+
+Enforcing a setuptools floor on CI while the blessed box carried two fixable advisories
+was incoherent. It is now consistent, and `--audit` on this box exercises the
+report-without-failing path rather than the failing one.
 
 ## Still out — only if the Director asks
 
