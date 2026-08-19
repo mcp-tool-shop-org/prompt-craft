@@ -35,13 +35,26 @@
 # a one-click "constrain your publisher" link is exactly the shape a credential phish takes,
 # and the notification is most convincing right after a genuine release.
 #
-# CONSTRAINING THE PUBLISHER IS HALF THE JOB. As of 2026-08-18 the `release` environment
-# has ZERO protection rules and no deployment branch policy — measured, not assumed
-# (`gh api repos/mcp-tool-shop-org/prompt-craft/environments/release`). An environment with
-# no rules is a label, not a gate: pinning the publisher to it narrows WHICH workflow can
-# publish, but not WHO can cause that workflow to run. Required reviewers and/or a branch
-# policy on the environment are what turn the name into a boundary. Do both, or the
-# hardening reads stronger than it is.
+# CONSTRAINING THE PUBLISHER WAS HALF THE JOB; BOTH HALVES ARE NOW DONE. The publisher is
+# pinned to `release` on PyPI, and the environment itself — which on 2026-08-18 had ZERO
+# protection rules and no branch policy, measured rather than assumed — now carries:
+#
+#   required reviewer          mcp-tool-shop
+#   deployment branch policy   tag `v*` only (custom policies on, protected_branches off)
+#
+# Both halves are needed and neither is sufficient. Pinning the publisher narrows WHICH
+# workflow can publish; the environment rules narrow WHO can cause it to run and FROM WHAT
+# REF. An environment with no rules is a label, not a gate, so pinning to it alone would
+# have read stronger than it was.
+#
+# WHAT THIS CHANGES AT RELEASE TIME: the `pypi` and `npm` jobs now PAUSE for approval
+# before they publish, and a `workflow_dispatch` from a branch can no longer reach the
+# environment at all — the ref must be a `v*` tag. That pause is the last human gate in
+# front of an irreversible action, which is where a pause belongs.
+#
+# To verify:  gh api repos/mcp-tool-shop-org/prompt-craft/environments/release
+# To undo:    gh api -X PUT .../environments/release with reviewers: [] and
+#             deployment_branch_policy: null
 #
 # The publisher's project name and workflow FILENAME are both matched byte-for-byte at
 # authentication time. That is why this file is `release.yml` and not `publish.yml`.
