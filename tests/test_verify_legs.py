@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
+import sys
 import tomllib
 from pathlib import Path
 
@@ -199,3 +201,33 @@ def test_the_summary_declares_what_it_did_not_check():
         "verify.py must name the dependency audit as out of its scope; CI runs pip-audit "
         "as a separate step, so a green verify.py is not yet a green CI"
     )
+
+
+def test_run_records_into_the_callers_list_not_shared_state():
+    """The summary must describe *this* run, not every run in the process.
+
+    The accumulator was module-level for one commit. A second in-process ``main()``
+    appended to the first run's list, so the summary printed a leg twice -- the exact
+    drift the accumulator was introduced to prevent, one layer up. Found in review
+    rather than by a gate, which is why it is pinned here now.
+    """
+    verify = _load_verify()
+    first: list[str] = []
+    second: list[str] = []
+    noop = [sys.executable, "-c", ""]
+    verify._run("noop", noop, dict(os.environ), first)
+    verify._run("noop", noop, dict(os.environ), second)
+    assert first == ["noop"], f"first run recorded {first}"
+    assert second == ["noop"], (
+        f"second run recorded {second} -- legs are leaking across invocations, so the "
+        f"summary no longer describes the run it is printed for"
+    )
+
+
+def test_a_failing_leg_is_not_recorded_as_checked():
+    """A leg that exits non-zero must halt, and must not appear in the summary."""
+    verify = _load_verify()
+    ran: list[str] = []
+    with pytest.raises(SystemExit):
+        verify._run("boom", [sys.executable, "-c", "raise SystemExit(3)"], dict(os.environ), ran)
+    assert ran == [], f"a failed leg was recorded as checked: {ran}"

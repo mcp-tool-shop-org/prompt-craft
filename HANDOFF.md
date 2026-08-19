@@ -220,6 +220,12 @@ Director**. No publish, no tag, no `gh release create` this session.
   leg twice. That is the drift the list was introduced to prevent, one layer up. Reset it
   at the top of `main()` or thread it through as a local. Found in Advisor review, not by
   a gate; verified latent, not live.
+
+  > **RESOLVED 2026-08-18 (Executor).** Reproduced first -- two in-process `_run` calls
+  > gave `VERIFY OK -- checked: noop, noop` -- then **threaded through as a local**
+  > rather than reset, so the state is gone rather than managed. `_RAN` no longer exists.
+  > Two tests pin it: legs recorded into one caller's list do not leak into another's,
+  > and a leg that exits non-zero is **not** recorded as checked. Suite **346**.
 - **`.venv/Lib/site-packages/pcraft/`** survives the uninstall as six directories with
   **zero files** (verified: `find -type f` returns 0). Never in the dist RECORD, so pip
   left it. Nothing imports through it — `pcraft` and `pcraft.domains` both resolve under

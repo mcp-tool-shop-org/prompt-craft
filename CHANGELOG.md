@@ -20,8 +20,10 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
   - The summary now prints `VERIFY OK -- checked: <the legs that actually ran>`, followed
     by `NOT CHECKED -- dependency audit`, naming CI's separate `pip-audit` step. The leg
-    list is accumulated as legs pass rather than hard-coded, so the summary cannot drift
-    from what ran. This is the visible-skip doctrine `ci.yml` already argues for under
+    list is accumulated as legs pass rather than hard-coded, and is threaded through each
+    `main()` call rather than held at module level, so the summary cannot drift from what
+    ran in either direction -- neither naming a leg that did not run, nor carrying one in
+    from a previous invocation in the same process. This is the visible-skip doctrine `ci.yml` already argues for under
     `--skip-editable`, turned on the gate itself: "could not check" must never read as
     "checked clean".
   - **Version coherence**, under `--installed`: the installed distribution's version must
@@ -37,7 +39,7 @@ has never been able to prove. The `[image]` path has now executed once on the 50
   on `PackageNotFoundError`, so stale metadata is *found* and the wrong version returns
   silently. The suite could not catch it -- the quick-count recipe sets `PYTHONPATH=src`
   while the metadata read ignores `PYTHONPATH` entirely. The gate and the lie were looking
-  at different things. Suite **344**, up from 339.
+  at different things. Suite **346**, up from 339.
 
 ### Fixed
 

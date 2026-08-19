@@ -47,14 +47,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-_RAN: list[str] = []
-"""Labels of legs that actually passed, in order, for the closing summary.
-
-Collected rather than hard-coded so the summary cannot drift from what ran. A
-summary that names a leg nobody executed is the defect this script exists for.
-"""
-
-
 def _declared_version() -> str:
     """The version pyproject declares.
 
@@ -78,12 +70,19 @@ def _check_installed_version(installed: str, declared: str) -> None:
         )
 
 
-def _run(label: str, cmd: list[str], env: dict[str, str]) -> None:
+def _run(label: str, cmd: list[str], env: dict[str, str], ran: list[str]) -> None:
+    """Run one leg; on success record its label in the caller's ``ran`` list.
+
+    ``ran`` is threaded through rather than kept at module level. It was module-level
+    for one commit, and a second in-process ``main()`` would have appended to the first
+    run's list and printed a leg twice -- a summary drifting from what actually ran,
+    which is precisely the defect the accumulator was introduced to prevent.
+    """
     print(f"-- {label}: {' '.join(cmd)}")
     proc = subprocess.run(cmd, cwd=ROOT, env=env)
     if proc.returncode != 0:
         raise SystemExit(f"VERIFY FAIL: {label} exited {proc.returncode}")
-    _RAN.append(label)
+    ran.append(label)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         src = str(ROOT / "src")
         env["PYTHONPATH"] = src if not existing else src + os.pathsep + existing
 
+    ran: list[str] = []
     scratch = Path(tempfile.mkdtemp(prefix="pcraft-verify-"))
     try:
         py = sys.executable
@@ -115,23 +115,23 @@ def main(argv: list[str] | None = None) -> int:
             declared = _declared_version()
             print(f"-- version coherence: installed {installed} vs pyproject {declared}")
             _check_installed_version(installed, declared)
-            _RAN.append("version coherence")
+            ran.append("version coherence")
         # Static legs first: they are seconds, and a type error should not wait
         # behind a full suite + two builds to surface.
-        _run("lint", [py, "-m", "ruff", "check", "src", "tests"], env)
-        _run("typecheck", [py, "-m", "mypy", "src"], env)
+        _run("lint", [py, "-m", "ruff", "check", "src", "tests"], env, ran)
+        _run("typecheck", [py, "-m", "mypy", "src"], env, ran)
         pytest = [py, "-m", "pytest", "-q", f"--basetemp={scratch / 't'}"]
-        _run("suite", pytest, env)
+        _run("suite", pytest, env, ran)
         env_o = env.copy()
         env_o["PYTHONOPTIMIZE"] = "1"
         _run("suite under -O", [py, "-O", "-m", "pytest", "-q",
-                                f"--basetemp={scratch / 'to'}"], env_o)
+                                f"--basetemp={scratch / 'to'}"], env_o, ran)
         dist = scratch / "dist"
         dist.mkdir()
-        _run("build", [py, "-m", "build", "--outdir", str(dist)], env)
+        _run("build", [py, "-m", "build", "--outdir", str(dist)], env, ran)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    print("VERIFY OK -- checked: " + ", ".join(_RAN))
+    print("VERIFY OK -- checked: " + ", ".join(ran))
     print(
         "NOT CHECKED -- dependency audit. CI runs pip-audit as a separate step, so a "
         "green verify.py is not yet a green CI. See .github/workflows/ci.yml."
