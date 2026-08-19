@@ -136,7 +136,9 @@ Two rules that will bite you:
 ## What is true (re-measure before quoting)
 
 - **v0.3.0 shipped** to PyPI + npm 2026-08-18, after the verify gate held two
-  failed release attempts. Suite last counted **358**. Re-count before quoting.
+  failed release attempts. Suite last counted **359**. Re-count before quoting.
+- The gate **checks itself**: the lint and typecheck legs cover `verify.py`, pinned by
+  `test_the_gate_checks_the_file_that_defines_the_gate` so they cannot narrow back.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.
 - **CI is green on both legs** (`ef5f72e`, run `32198885560`). The 3.11 leg had been
   red at `dependency audit` on an ambient `setuptools` 79.0.1 (PYSEC-2026-3447);

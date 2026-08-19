@@ -12,8 +12,11 @@ copy, and the CHANGELOG body beyond Unreleased.
 
 ## Where you are (measured 2026-08-18, re-measure anyway)
 
-Repo: `E:\AI\prompt-craft` — HEAD **`e5af2e5`** on `origin/main`, tree clean.
-Version **0.3.0**. Suite **358**. **CI green on both legs** (run `32202494004`).
+Repo: `E:\AI\prompt-craft` — HEAD **`1503769`** on `origin/main`, tree clean.
+Version **0.3.0**. Suite **359**. **CI green on both legs.**
+
+**Nothing is open in this repo.** Every item raised across 2026-08-18 is closed and
+verified on a real run. If the Director does not name a job: measure HEAD, re-count, stop.
 
 ```
 cd E:\AI\prompt-craft
@@ -36,7 +39,7 @@ below unedited -- the ruling is recorded against it, not in place of it.
 
 ---
 
-## Open item 1 — `verify.py` honesty (ADVISOR RULING — DIRECTOR RULED, PARTLY LANDED)
+## Item 1 — `verify.py` honesty (CLOSED 2026-08-18 — all three parts landed)
 
 > **Director ruling, 2026-08-18.** Land **1.1 and 1.3 now**; hold **1.2 (`--audit`)** until
 > its semantics were settled. They were, in the same ruling: **when `--audit` lands, it must

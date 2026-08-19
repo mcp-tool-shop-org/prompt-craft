@@ -6,9 +6,9 @@ the prior Advisor seat was Grok. `grok.md` and `AGENTS.md` were brought current 
 day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
-**HEAD at write:** `e5af2e5` on `origin/main`, tree clean. **CI green on both legs** (run `32202494004`).
+**HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
 **Version:** **0.3.0** (shipped to PyPI + npm 2026-08-18)
-**Suite last counted:** **358** (re-count before quoting)
+**Suite last counted:** **359** (re-count before quoting)
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.
 This file is the standing state and the fences. Measure HEAD and the suite yourself.
@@ -53,7 +53,7 @@ fire a live generate from a test.
 
 | thing | state |
 |---|---|
-| GPU-free suite | **358** |
+| GPU-free suite | **359** |
 | Lint gate | **Declared**, not inherited. 15 families selected; every `ignore` names its reason. `ruff>=0.6,<0.17`, `mypy>=1.11,<3` |
 | CI | **green on both legs** (`ef5f72e`, run `32198885560`). Both land on setuptools 84.0.0; the visible skip table survives |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |
