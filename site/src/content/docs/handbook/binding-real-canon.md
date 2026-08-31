@@ -46,6 +46,12 @@ Every atom carries a `check_type` — which gate tier verifies it:
 | a thing being present | `siglip2` | cheap presence screen, good first pass |
 | composition, wearing, relations | `vqa` | the compositional tier; costs more, sees more |
 
+One install note before you rely on the model tiers: `palette` works from a base install,
+but `siglip2` and `vqa` need packages **no pip extra declares** — `t2v-metrics` for the VQA
+family, `ai-eyes-mcp` for the screen. `pcraft doctor` reports both under "model tier", and
+a gate missing them says SKIPPED rather than silently passing — so wire the atoms now and
+trust the census to tell you when they can actually score.
+
 Severity is the andon cord: `required` atoms block the bind, `optional` atoms warn. Give
 `depends_on` edges where a claim is meaningless without its parent — the sigil depends on
 the tabard, because there is no point scoring a sigil on a garment the gate just decided

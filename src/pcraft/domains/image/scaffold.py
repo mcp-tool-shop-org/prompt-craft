@@ -333,7 +333,7 @@ def _plate(root: Path, value, key: str) -> Path:
     if not path.is_file():
         raise PromptCraftError(
             "INPUT_SCAFFOLD_PLATE",
-            f"{key} {str(value)!r} is not a readable file under {root}",
+            f"{key} '{value}' is not a readable file under {root}",
             hint="Plate paths in the sheet are relative to the sheet itself, so the reference "
             "sheet directory can be moved as one thing.",
         )

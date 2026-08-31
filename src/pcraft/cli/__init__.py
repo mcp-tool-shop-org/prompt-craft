@@ -236,6 +236,12 @@ def _encodable(text: str, stream: Any) -> str:
 def _emit(err: PromptCraftError, debug: bool) -> None:
     # Error text names paths too (INPUT_CONTRACTS_DIR quotes the directory it refused), so
     # the refusal has to survive the same consoles the success path does.
+    #
+    # Flush stdout FIRST: stdout block-buffers under a pipe while stderr does not, so under
+    # `2>&1` the refusal could land mid-transcript -- measured splitting a palette atom's
+    # `saw:` line from its `claim:` (Phase 9, N6). Order on the merged stream is part of
+    # what a capture reads, even though each stream alone was always intact.
+    sys.stdout.flush()
     typer.echo(_encodable(err.to_debug_text() if debug else err.to_safe_text(), sys.stderr), err=True)
     raise typer.Exit(code=err.exit_code)
 
@@ -510,6 +516,11 @@ class DoctorReport(BaseModel):
     # other half of the diagnosis: what the operator configured, beside what actually ran.
     executable: str = ""
     pcraft_python: str | None = None
+    # Additive, defaulted, same contract as the two blocks above. NOT an entry in `extras`:
+    # those are pip extra names a user can install by name, and this census is the opposite
+    # fact -- verifier imports NO extra declares (see sample.MODEL_TIER_MODULES for why).
+    # Putting it in `extras` would render as `[model-tier]` and invite an install that fails.
+    model_tier: ExtraStatus | None = None
 
 
 @app.command()
@@ -607,7 +618,9 @@ def _gate_targets(images: list[Path], batch: Path | None, pattern: str) -> list[
         if not batch.is_dir():
             raise PromptCraftError(
                 "INPUT_GATE_BATCH",
-                f"--batch {str(batch)!r} is not a directory",
+                # '{batch}', not {...!r}: repr doubles Windows backslashes, and the sibling
+                # refusal two branches down already prints its path bare (Phase 9, F5).
+                f"--batch '{batch}' is not a directory",
                 hint="Pass --batch at a folder of rendered images, or name the images as "
                 "IMAGE arguments instead.",
             )
@@ -647,7 +660,14 @@ def _batch_summary(rows: list[_GateRow]) -> list[str]:
     different things. The unreadable images get their own row rather than a parenthetical:
     they are the half of the run that produced no verdict at all, and burying them beside a
     count is how "one file was missing" becomes invisible in a green log.
+
+    The skipped-atom census gets a row for the same reason (Phase 9, N4): a half-installed
+    gate can skip 15 of 18 required atom-checks while the counts above read "3 failed", and
+    this summary is the only line a batch user reads. The single-image path already prints
+    its census ("tiers executed: 1 of 2"); a batch must not say less than one image does.
     """
+    from ..core.gate.thresholds import Zone
+
     passed = [r for r in rows if r.error is None]
     failed = [r for r in rows if r.error is not None and r.error.code == "GATE_FAIL"]
     unconfirmed = [r for r in rows if r.error is not None and r.error.code in _UNCONFIRMED_CODES]
@@ -658,6 +678,20 @@ def _batch_summary(rows: list[_GateRow]) -> list[str]:
     ]
     if unrun:
         lines.append("could not run: " + id_list(str(r.path) for r in unrun))
+    skipped = 0
+    required_total = 0
+    for r in rows:
+        transcript = r.transcript
+        if transcript is None:
+            continue
+        required = transcript.required_atoms()
+        required_total += len(required)
+        skipped += sum(v.zone is Zone.SKIPPED for v in required)
+    if skipped:
+        lines.append(
+            f"skipped: {skipped} of {required_total} required atom-checks produced no score "
+            "-- `pcraft doctor` names what the verifiers need"
+        )
     return lines
 
 
@@ -691,9 +725,9 @@ def _batch_error(rows: list[_GateRow]) -> PromptCraftError | None:
             f"no image produced a score on any required atom "
             f"({len(rows)} image(s), {len(unrun)} of them could not be read or scored)",
             hint="Nothing was graded, so this batch is could-not-run rather than a failure. "
-            "Install the [image] extra (pip install 'prompt-crafter[image]', or from a "
-            "checkout pip install -e '.[image]') so a verifier can score, and check that "
-            "the images listed above are readable.",
+            "Run `pcraft doctor`: it names what a verifier needs -- the [image] extra, or "
+            "the model-tier packages no extra declares (t2v-metrics, ai-eyes-mcp) -- and "
+            "check that the images listed above are readable.",
         )
     failed = [r for r in rows if r.error is not None and r.error.code == "GATE_FAIL"]
     if failed:
@@ -870,7 +904,7 @@ def bind(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     mock: bool = typer.Option(True, help="use deterministic stubs (GPU-free); the default scaffold path"),
-    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it"),
+    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it, and mock runs put their scripted stub PNGs in a _stub_images/ subdirectory of it"),
     as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
@@ -884,8 +918,10 @@ def bind(
       4  the loop could not run and nothing was scored.
 
     2 means the gate ran and refused; 4 means there is no verdict to read.
-    The last line names the receipt it wrote, inside --records-dir; run
-    `pcraft replay` on exactly that path to re-check it.
+    Runs that scored (exits 0, 2, 3) end by naming the receipt they wrote, inside
+    --records-dir; run `pcraft replay` on exactly that path to re-check it. A run
+    that could not score (exit 4, or a refused contract at exit 1) writes no
+    receipt -- there is no measurement to record.
     """
     from ..sample import run_live_loop, run_mock_loop
 
@@ -1091,7 +1127,7 @@ def _refuse_reference_sheet(sheet: Path) -> None:
     """
     raise PromptCraftError(
         "INPUT_SCAFFOLD_REFERENCE_SHEET",
-        f"--reference-sheet {str(sheet)!r} is not wired into `pcraft new` yet",
+        f"--reference-sheet '{sheet}' is not wired into `pcraft new` yet",
         hint="The sheet-driven scaffold emits a faction+character PAIR and names both files "
         "itself, so it cannot honour this command's LEVEL, ID and --out arguments and needs a "
         "verb of its own. Call pcraft.domains.image.scaffold.scaffold_from_reference_sheet "
@@ -1282,7 +1318,7 @@ def new(
 
 @app.command()
 def demo(
-    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it"),
+    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it, and mock runs put their scripted stub PNGs in a _stub_images/ subdirectory of it"),
     as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
@@ -1465,7 +1501,7 @@ def resolve(
                 f"so there is no escalation to resolve",
                 hint="Only an escalated receipt carries a checkpoint a human was asked to "
                 "decide. Point this at the receipt whose run escalated -- `pcraft bind` "
-                "prints the path it wrote at the end of every run.",
+                "names the receipt it wrote whenever its loop scored (exits 0, 2, 3).",
             )
 
         # `record_disposition` owns the entry, its dispositions/ subdirectory, the O_EXCL claim
@@ -1498,7 +1534,11 @@ def resolve(
             as_json=as_json,
         )
         _say(f"receipt: {report.receipt_path}", as_json=as_json)
-        _say(f"  decision: {report.decision} (unchanged -- the receipt was not edited)", as_json=as_json)
+        # "resolve never edits receipts", not "the receipt was not edited": the second reads
+        # as an integrity claim about the file, and replay's drift check does not cover the
+        # decision field -- a hand-edited receipt replays clean (Phase 9, F3). Say only what
+        # this command guarantees about ITSELF.
+        _say(f"  decision: {report.decision} (unchanged -- resolve never edits receipts)", as_json=as_json)
         for line in _wrap(report.note, _term_width(), "  note: ", "        "):
             _say(line, as_json=as_json)
         _say("", as_json=as_json)
@@ -1604,7 +1644,7 @@ def calibrate(
     as_json: bool = typer.Option(False, "--json", help="emit CalibrationResult as JSON on stdout"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Fit threshold bands against a labelled holdout and EMIT a sprite.cal.v2 table.
+    r"""Fit threshold bands against a labelled holdout and EMIT a sprite.cal.v2 table.
 
     Emits, never adopts. The shipped table stays the default until a Director ratifies the
     swap, and every existing receipt keeps replaying under the table that decided it -- so
@@ -1621,7 +1661,7 @@ def calibrate(
     Exit codes:
       0  the holdout was scored and the table was emitted.
       1  the manifest is unusable, or the target refuses the write.
-      2  the [image] extra is missing, or the holdout loader is unavailable.
+      2  the \[image] extra is missing, or the holdout loader is unavailable.
     """
     try:
         # Inside the try, unlike `gate`'s: that command imports modules this package always
@@ -1668,7 +1708,7 @@ def calibrate(
 def doctor(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
-    as_json: bool = typer.Option(False, "--json", help="emit DoctorReport as JSON on stdout"),
+    as_json: bool = typer.Option(False, "--json", help="emit DoctorReport as JSON on stdout (the human report moves to stderr, so a pipe reads pure JSON)"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Check python, optional extras, and that the contract store loads. GPU-free."""
@@ -1707,6 +1747,20 @@ def doctor(
             # instead of restating the status (F-2d223d8e).
             detail = f"  (need {', '.join(missing)})" if missing else ""
             _say(f"[{extra.name}] {mark}{detail}", as_json=as_json)
+        if report.model_tier is not None:
+            # Unbracketed on purpose: `[image]`/`[synth]` are pip extra names, and this row
+            # is the opposite fact -- verifier imports NO extra declares. `[model tier]`
+            # would read as `pip install prompt-crafter[model-tier]`, which fails.
+            tier = report.model_tier
+            tier_mark = "present" if tier.present else "MISSING"
+            tier_missing = [name for name, ok in tier.modules.items() if not ok]
+            tier_detail = (
+                f"  (need {', '.join(tier_missing)}; in no extra -- "
+                "t2v-metrics is on PyPI, ai-eyes-mcp is a separate studio package)"
+                if tier_missing
+                else ""
+            )
+            _say(f"model tier {tier_mark}{tier_detail}", as_json=as_json)
         if report.store_ok:
             _say(
                 f"store ok  {len(report.store_ids)} contracts"
@@ -1751,7 +1805,7 @@ def _same_interpreter(configured: str, running: str) -> bool:
 def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> DoctorReport:
     from ..core.gate.thresholds import load_thresholds
     from ..domains.image.subdomains.sprite import THRESHOLDS_PATH
-    from ..sample import IMAGE_EXTRA_MODULES, load_store
+    from ..sample import IMAGE_EXTRA_MODULES, MODEL_TIER_MODULES, load_store
 
     py = sys.version.split()[0]
     extras = [
@@ -1761,6 +1815,7 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
         _extra_status("image", IMAGE_EXTRA_MODULES),
         _extra_status("synth", ("dspy",)),
     ]
+    model_tier = _extra_status("model tier", MODEL_TIER_MODULES)
     note = version_coherence()
     report = DoctorReport(
         version=package_version(),
@@ -1772,6 +1827,7 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
         version_warning=note,
         executable=sys.executable,
         pcraft_python=os.environ.get("PCRAFT_PYTHON"),
+        model_tier=model_tier,
     )
     try:
         store = load_store(contracts_dirs)

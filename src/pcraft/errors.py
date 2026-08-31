@@ -233,9 +233,10 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     # required atoms are SKIPPED and the sixth's FAIL is the only thing this code reports.
     "GATE_FAIL": "Fix the atom named above or lower its severity in the contract; the transcript "
     "lists each atom, its score and the band that graded it. If most required atoms are SKIPPED "
-    "the gate is half-installed -- install the [image] extra (pip install 'prompt-crafter[image]', "
-    "or pip install -e '.[image]' from a checkout) and re-run before treating this as a content "
-    "failure.",
+    "the gate is half-installed -- run `pcraft doctor`: model-tier atoms need packages beyond "
+    "the [image] extra (t2v-metrics for the VQA family, ai-eyes-mcp for the screen), and doctor "
+    "names whichever is missing. Complete the install it names and re-run before treating this "
+    "as a content failure.",
     "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. "
     "This is the human band, not a pass.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
@@ -299,7 +300,8 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "--thresholds pointed at the table the receipt names, or accept the retune and re-bind the "
     "asset. Do not edit the receipt.",
     "IO_RECORD_READ": "The path does not exist, or the file is not valid JSON -- the message says "
-    "which. Point at a receipt under your records dir (pcraft bind prints the path it wrote).",
+    "which. Point at a receipt under your records dir (pcraft bind names the receipt whenever "
+    "its loop scored).",
     "IO_THRESHOLDS_READ": "Pass --thresholds at a readable calibration JSON, or omit it to use "
     "the shipped sprite table (pcraft.domains.image.subdomains.sprite THRESHOLDS_PATH).",
     "CONFIG_THRESHOLDS_SCHEMA_UNSUPPORTED": "This calibration table was written by a NEWER "

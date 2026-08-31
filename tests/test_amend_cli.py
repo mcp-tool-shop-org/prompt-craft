@@ -1470,6 +1470,42 @@ def _stdout_at(argv, columns="100"):
     return re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout or "")
 
 
+@pytest.mark.parametrize("module", ["pcraft", "pcraft.cli"])
+def test_python_dash_m_reports_the_console_script_name(module):
+    """Phase 9 (F7): the npm launcher spawns `python -m pcraft.cli`, and click derives the
+    usage line from argv -- so every launcher user read `Usage: python -m pcraft.cli ...`
+    for a command they typed as `pcraft` and may not even have on PATH as `python`. Both
+    -m doors pin prog_name to the one name every door answers to.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", module, "--help"],
+        capture_output=True,
+        env={**os.environ, "COLUMNS": "100", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"},
+        timeout=60,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout or "")
+    first = next(line for line in out.splitlines() if line.strip())
+    assert "Usage: pcraft " in first, f"the -m door leaks its own invocation: {first!r}"
+    assert "python -m" not in first, first
+
+
+def test_calibrate_help_does_not_swallow_the_extra_name():
+    """Phase 9 (F4): Rich parsed `[image]` in the rendered docstring panel as a markup tag
+    and dropped it, so the exit-2 line read "the  extra is missing" -- subject deleted, on
+    the one page that explains that exit code. The docstring escapes the bracket; this
+    renders the page the way an operator sees it and reads the sentence back.
+    """
+    text = _stdout_at(["calibrate", "--help"])
+    assert "[image] extra is missing" in text, (
+        f"the exit-2 line lost its subject to markup again: {text!r}"
+    )
+    assert r"\[image]" not in text, "the escape itself leaked into the rendered page"
+
+
 # --------------------------------------------------------------------------- F-f880d5a4
 # The exit-code tables in the gate/bind/replay long-help docstrings put every code and
 # every following sentence at the same rendered margin, so prose that happens to open

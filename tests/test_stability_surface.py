@@ -418,14 +418,18 @@ def test_the_install_hints_name_the_distribution_that_actually_publishes():
 
 
 def test_the_receipt_path_hint_is_backed_by_a_field_that_carries_it():
-    """IO_RECORD_READ tells the operator "pcraft bind prints the path it wrote". That sentence was
-    a promise about a path nothing carried: ``persist()`` returned the Path and ``run()`` dropped
-    it, so the CLI had to re-derive the filename. ``OrchestrationResult.record_path`` is what makes
-    the sentence true, so the sentence and the field are pinned together (F-5b783e17)."""
+    """IO_RECORD_READ tells the operator that bind names the receipt it wrote. That sentence was
+    once a promise about a path nothing carried: ``persist()`` returned the Path and ``run()``
+    dropped it, so the CLI had to re-derive the filename. ``OrchestrationResult.record_path`` is
+    what makes the sentence true, so the sentence and the field are pinned together (F-5b783e17).
+
+    The pinned phrase carries Phase 9's F6 refinement: "at the end of every run" was false on
+    the could-not-score paths (exit 1 and 4 persist nothing), so the promise is now scoped to
+    runs whose loop scored -- and this pin holds the hint to a promise the field can keep."""
     from pcraft.core.loop.orchestrate import OrchestrationResult
     from pcraft.errors import DEFAULT_HINTS
 
-    assert "prints the path it wrote" in DEFAULT_HINTS["IO_RECORD_READ"]
+    assert "names the receipt whenever its loop scored" in DEFAULT_HINTS["IO_RECORD_READ"]
     assert "record_path" in OrchestrationResult.model_fields, (
         "the hint claims the path is printed; the result object has to be able to supply it"
     )

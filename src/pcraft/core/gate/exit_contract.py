@@ -51,8 +51,9 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
             "GATE_UNAVAILABLE",
             "the gate produced no score on any required atom"
             + (f" (skipped: {id_list(skipped)})" if skipped else ""),
-            hint="Install the [image] extra, or this run could not execute. "
-            "It is not a pass.",
+            hint="Run `pcraft doctor`: it names what is missing -- the [image] extra, or the "
+            "model-tier verifier packages no extra declares (t2v-metrics, ai-eyes-mcp). "
+            "This run could not execute; it is not a pass.",
         )
     failed = transcript.failed_required()
     if failed:

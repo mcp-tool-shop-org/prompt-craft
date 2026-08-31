@@ -23,6 +23,12 @@ The distribution is `prompt-crafter`; the import package and the command are `pc
 Python 3.11+. CI runs 3.11 and 3.13 on the core + `[dev]`. The `[image]` extra
 is not claimed on 3.11. The core's only runtime dependency is `pydantic`.
 
+Model tiers are bring-your-own: the model-tier verifiers need `t2v-metrics` (PyPI) and
+`ai-eyes-mcp` (a separate mcp-tool-shop package), which **no extra declares** — no version
+has been integration-tested against this build, and pinning one would claim a compatibility
+nobody measured. `pcraft doctor` reports both under "model tier". The deterministic palette
+verifier needs neither — it reads PNGs with the stdlib, no Pillow required.
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store

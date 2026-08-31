@@ -101,7 +101,7 @@ def _resolved_mask(fill_mask: str | Path) -> Path:
     except FileNotFoundError as err:
         raise PromptCraftError(
             "INPUT_FILL_MASK",
-            f"fill mask {str(fill_mask)!r} is not a readable file",
+            f"fill mask '{fill_mask}' is not a readable file",
             hint="Pass --fill-mask at a painted fist-only mask that exists. Supplying a mask "
             "replaces the built-in fist box AND turns the bracer guard off, so a mistyped path "
             "would disable the one constraint this recipe measures. Do not mask the bracer.",

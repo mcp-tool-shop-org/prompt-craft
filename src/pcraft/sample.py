@@ -54,7 +54,9 @@ def load_store(contracts_dirs: list[Path] | None = None) -> ContractStore:
         if not root.is_dir():
             raise PromptCraftError(
                 "INPUT_CONTRACTS_DIR",
-                f"contracts dir {str(root)!r} is not a directory",
+                # '{root}', not {...!r}: repr doubles every backslash in a Windows path
+                # (Phase 9, F5). Quotes come from the f-string; the path stays readable.
+                f"contracts dir '{root}' is not a directory",
                 hint="Pass --contracts-dir at a folder that contains *.contract.json files.",
             )
     store = ContractStore(roots)
@@ -164,6 +166,38 @@ def missing_image_modules() -> tuple[str, ...]:
 def image_extra_present() -> bool:
     """True when the [image] extra can import. Used by bind --no-mock."""
     return not missing_image_modules()
+
+
+MODEL_TIER_MODULES: Final[tuple[str, ...]] = (
+    "t2v_metrics",
+    "ai_eyes_mcp",
+)
+"""Import names the model-tier VERIFIERS need. Deliberately in NO pip extra.
+
+``[image]`` above is the generator side. The verifiers that score model-tier atoms import
+two more packages the extra does not declare: the VQA family (``vqascore_verifier``,
+``dsg_verifier``) imports ``t2v_metrics``, and the siglip2 screen imports ``ai_eyes_mcp``.
+Before this list existed, ``doctor`` said "[image] present" while 5 of the example's 6
+required atoms could never score, and GATE_FAIL's hint sent the user back to install the
+extra they already had (Phase 9, F2, run swarm-1788165870-6880).
+
+Why they are not in an extra (measured 2026-08-31): ``t2v-metrics`` exists on PyPI (3.0)
+but no version has been integration-tested against this build, and pinning an untested
+dependency claims a compatibility nobody measured; ``ai-eyes-mcp`` is a separate studio
+package that is not on PyPI at all, so an extra naming it would fail every install.
+Naming both here -- in ``doctor``'s census and the gate hints -- is the honest alternative
+until a tested ``[verify]`` extra is ratified. If either lands in pyproject later, move it
+into the extra's module list and delete it here; ``doctor`` renders this list under
+"model tier", never as a bracketed extra name, so users are not invited to
+``pip install prompt-crafter[model-tier]``.
+"""
+
+
+def missing_model_tier_modules() -> tuple[str, ...]:
+    """Which model-tier verifier imports are absent. Empty means the tiers can score."""
+    import importlib.util
+
+    return tuple(m for m in MODEL_TIER_MODULES if importlib.util.find_spec(m) is None)
 
 
 class _AnnouncingGenerator:

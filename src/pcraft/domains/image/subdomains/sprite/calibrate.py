@@ -685,10 +685,16 @@ def calibrate_from_manifest(
     nothing here ships a corpus, and nothing here writes one.
     """
     rows = load_manifest(path)
-    roots = [Path(r) for r in (contracts_dirs or [])]
+    # load_store, not ContractStore([...]): `None` here used to become an EMPTY root list, so
+    # the CLI's promised default ("shipped sprite example") was an empty store and the first
+    # command the handbook publishes failed with INPUT_UNKNOWN_CONTRACT (Phase 9, F1). One
+    # door for "which store is the default", and it carries the INPUT_EMPTY_STORE guard.
+    from pcraft.sample import load_store
+
+    store = load_store([Path(r) for r in contracts_dirs] if contracts_dirs else None)
     return calibrate(
         rows,
-        store=ContractStore(roots),
+        store=store,
         verifiers=verifiers,
         base_table=base_table,
         manifest=str(path),

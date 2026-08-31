@@ -208,6 +208,14 @@ def test_gate_fail_hint_names_a_next_move(sprite_example):
     assert "[image]" in hint or "pip install" in hint, (
         "a gate whose atoms are mostly SKIPPED is half-installed, not a content failure"
     )
+    # Phase 9 (F2): the old hint said "install the [image] extra" to a user whose doctor
+    # already read "[image] present" -- the actual missing packages were the model-tier
+    # verifier imports no extra declares. The hint must name the packages and the command
+    # that diagnoses them, or the next move is a circle.
+    assert "t2v-metrics" in hint and "ai-eyes-mcp" in hint, (
+        "the hint stopped naming the model-tier packages the [image] extra does not carry"
+    )
+    assert "doctor" in hint, "pcraft doctor is the diagnosis; the hint has to send them there"
     assert "identity still gates nothing" not in hint, (
         "the identity_subgate fence is not an operator-facing next move"
     )

@@ -71,6 +71,15 @@ generator and verifier, which is what proves the plugin boundary actually holds.
 extra (torch/diffusers) and `[synth]` extra (DSPy + a hosted LM) wire the real generator,
 verifiers and synthesizer. **Neither is needed to run, test, or evaluate the core.**
 
+**Model tiers are bring-your-own.** The deterministic palette verifier works from a base
+install (it carries its own stdlib PNG reader — no Pillow required). The model-tier
+verifiers need two packages **no extra declares**: `t2v-metrics` (PyPI) for the VQA family,
+and `ai-eyes-mcp` (a separate mcp-tool-shop package, not on PyPI) for the SigLIP screen.
+They are not pinned in `pyproject.toml` because no version has been integration-tested
+against this build — declaring one would claim a compatibility nobody measured. `pcraft
+doctor` reports both under "model tier", and a gate whose model atoms are SKIPPED names
+them in its refusal; SKIPPED is never silently counted as a pass.
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store

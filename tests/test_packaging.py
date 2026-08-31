@@ -212,3 +212,30 @@ def test_the_image_extra_module_list_matches_pyproject():
         f"pcraft.sample.IMAGE_EXTRA_MODULES is {IMAGE_EXTRA_MODULES!r} but pyproject's [image] "
         f"extra declares {declared!r}; the door and the packaging drifted apart once already"
     )
+
+
+def test_the_model_tier_modules_are_deliberately_in_no_extra():
+    """Phase 9 (F2): the model-tier verifiers import t2v_metrics / ai_eyes_mcp, which no
+    extra declared and no doc named -- doctor said "[image] present" while 5 of the
+    example's 6 required atoms could never score. Bring-your-own is a decision, not an
+    oversight (no t2v-metrics version is integration-tested against this build, and
+    ai-eyes-mcp is not on PyPI), so this pins both halves of it: the census list stays
+    what doctor reports, and stays disjoint from every declared extra. If a ratified
+    [verify] extra ever declares one of these, this goes red to force the move from
+    MODEL_TIER_MODULES into that extra's own module list.
+    """
+    from pcraft.sample import IMAGE_EXTRA_MODULES, MODEL_TIER_MODULES
+
+    assert set(MODEL_TIER_MODULES) == {"t2v_metrics", "ai_eyes_mcp"}
+    assert not set(MODEL_TIER_MODULES) & set(IMAGE_EXTRA_MODULES)
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    declared = {
+        _dist_name(r).lower().replace("-", "_")
+        for reqs in data["project"]["optional-dependencies"].values()
+        for r in reqs
+    }
+    overlap = declared & {m.lower() for m in MODEL_TIER_MODULES}
+    assert not overlap, (
+        f"{sorted(overlap)} joined a pip extra; move it out of sample.MODEL_TIER_MODULES "
+        "into that extra's module list and rewrite doctor's census note"
+    )

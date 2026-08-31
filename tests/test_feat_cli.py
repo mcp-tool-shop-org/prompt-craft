@@ -247,6 +247,34 @@ def test_doctor_json_is_a_document():
     assert extra_names == {"image", "synth"}
 
 
+def test_doctor_reports_the_model_tier_census_beside_the_extras():
+    """Phase 9 (F2): doctor said "[image] present" while the model-tier verifiers could not
+    import, so a fully-[image]-installed gate skipped 5 of the example's 6 required atoms
+    with doctor green and GATE_FAIL's hint pointing back at the extra the user already had.
+    The census row gives the missing packages a NAME on the one screen an operator checks
+    -- and is NOT rendered as a bracketed extra, because
+    `pip install prompt-crafter[model-tier]` does not exist and must not be invited.
+    """
+    result = runner.invoke(app, ["doctor"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert "model tier" in text, text
+    assert "[model tier]" not in text and "[model-tier]" not in text, text
+
+
+def test_doctor_json_carries_the_model_tier_census():
+    """Additive, defaulted field -- existing readers of the document are unaffected."""
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    data = json.loads(result.stdout)
+    tier = data["model_tier"]
+    assert tier is not None, "doctor stopped probing the model-tier imports"
+    assert set(tier["modules"]) == {"t2v_metrics", "ai_eyes_mcp"}, tier
+    assert "model tier" not in {e["name"] for e in data["extras"]}, (
+        "the model-tier census is not a pip extra and must not join extras"
+    )
+
+
 def test_doctor_missing_contracts_dir_is_not_ok(tmp_path):
     result = runner.invoke(app, ["doctor", "--contracts-dir", str(tmp_path / "nope")])
     assert result.exit_code == 1
@@ -762,6 +790,31 @@ def test_calibrate_refuses_an_unreadable_manifest_without_a_traceback(tmp_path):
     assert not (tmp_path / "v2.json").exists(), "a refused calibrate must write no table"
 
 
+def test_calibrate_reaches_the_shipped_store_with_no_contracts_dir(tmp_path, monkeypatch):
+    """The promised default ("shipped sprite example") is a real store, not an empty one.
+
+    Phase 9 (F1): `calibrate_from_manifest` turned `None` into an EMPTY root list instead
+    of the shipped tree, so the first command the handbook publishes -- no --contracts-dir
+    -- refused INPUT_UNKNOWN_CONTRACT from any directory, while `validate` on the very same
+    default resolved the very same id. The store default is `load_store`'s now, which also
+    restores the INPUT_EMPTY_STORE guard this path used to bypass. The invocation below is
+    the published one: a manifest and --out, nothing else.
+    """
+    from pcraft.testing import write_solid_png
+
+    monkeypatch.chdir(tmp_path)  # the default store must not depend on the caller's CWD
+    image = write_solid_png(tmp_path / "hold.png")
+    row = {"image": str(image), "contract": "char:ashen-reaver", "atom": "palette", "label": "present"}
+    (tmp_path / "holdout.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["calibrate", str(tmp_path / "holdout.jsonl"), "--out", str(tmp_path / "v2.json")]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "INPUT_UNKNOWN_CONTRACT" not in text, f"the default store is empty again: {text!r}"
+    assert result.exit_code == 0, text
+    assert (tmp_path / "v2.json").exists(), text
+
+
 # ================================================== wave-13 S1 CLI surface: three new doors
 # F-76b0940b (`gate` gets a multi-image door), F-62e7d1f0 (`pcraft new`, the contract
 # scaffold verb) and F-2b04f0b8's CLI half (`pcraft resolve`, the disposition verb for an
@@ -835,6 +888,49 @@ def test_gate_batch_glob_selects_what_it_says_it_selects(tmp_path):
     )
     text = (result.stdout or "") + (result.stderr or "")
     assert "2 images" in text, text
+
+
+def test_gate_batch_summary_carries_the_skipped_census(tmp_path):
+    """Phase 9 (N4): a half-installed gate skipped 15 of 18 required atom-checks and the
+    batch summary -- the only line a batch user reads -- said only how many images failed.
+    The single-image path already prints its census ("tiers executed: 1 of 2"); a batch
+    must not say less than one image does. This suite runs with the model-tier packages
+    absent (the same assumption every gate test here makes), so the census row is due.
+    """
+    images = _pngs(tmp_path, "a.png", "b.png")
+    result = runner.invoke(app, ["gate", *[str(p) for p in images]])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "required atom-checks produced no score" in text, text
+    assert "pcraft doctor" in text, text
+
+
+def test_refused_paths_render_bare_not_repr(tmp_path):
+    """Phase 9 (F5): `{path!r}` doubles every backslash in a Windows path, so two refusals
+    printed `C:\\\\Users\\\\...` while sibling lines in the SAME handlers printed their
+    paths bare. One path rendering, everywhere. On POSIX the doubled form cannot occur, so
+    the regression assertions below only bite on Windows -- which is the only place the
+    defect could ever render.
+    """
+    sheet = tmp_path / "sheet.png"
+    sheet.write_bytes(b"not a real png")
+    result = runner.invoke(
+        app,
+        ["new", "faction", "faction:p9", "--contracts-dir", str(tmp_path / "c"),
+         "--reference-sheet", str(sheet)],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_SCAFFOLD_REFERENCE_SHEET" in text, text
+    doubled = str(sheet).replace("\\", "\\\\")
+    if doubled != str(sheet):
+        assert doubled not in text, f"the refusal repr'd the path again: {text!r}"
+
+    result = runner.invoke(app, ["gate", "--batch", str(tmp_path / "nodir")])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "INPUT_GATE_BATCH" in text, text
+    doubled = str(tmp_path / "nodir").replace("\\", "\\\\")
+    if doubled != str(tmp_path / "nodir"):
+        assert doubled not in text, f"the refusal repr'd the path again: {text!r}"
     assert "notes.txt" not in text, text
 
 
