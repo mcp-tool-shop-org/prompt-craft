@@ -34,10 +34,15 @@ catch, so it is not left to good intentions.
 **The exit-code contract is covered**, and it is the part most likely to be scripted:
 
 ```
-0  success            1  user error (INPUT_/CONFIG_/CONTRACT_)
+0  success            1  user error (INPUT_/CONFIG_/CONTRACT_, and IO_RECORD_SCHEMA_UNSUPPORTED)
 2  runtime error      3  partial — required atom unconfirmed (PARTIAL_)
 4  could not run      (GATE_UNAVAILABLE, IO_GATE_INPUT)
 ```
+
+`IO_RECORD_SCHEMA_UNSUPPORTED` is a deliberate per-code override: despite its `IO_` prefix it
+exits **1**, matching its contract sibling `CONTRACT_SCHEMA_UNSUPPORTED` — a well-formed receipt
+written by a newer prompt-craft is your input to upgrade for, not a tool crash. (It briefly
+exited 2 in v1.0.0; aligned in the first patch after, before any minor shipped.)
 
 `4` is deliberate and load-bearing: **could-not-check is not checked-clean**, and collapsing it
 onto `2` would let a CI branch read "the gate ran and failed" when the gate never ran.

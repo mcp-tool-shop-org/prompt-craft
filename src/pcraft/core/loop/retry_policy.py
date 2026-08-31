@@ -39,7 +39,7 @@ class Verdict(StrEnum):
 
 class OutcomeClass(StrEnum):
     TRANSIENT = "transient"  # auto-retry: generate error / timeout
-    SEMANTIC = "semantic"  # human-gated: schema-invalid output, contract relaxation
+    SEMANTIC = "semantic"  # non-retryable: schema-invalid output, contract relaxation, missing dep
 
 
 class RepairAction(StrEnum):
@@ -106,13 +106,26 @@ def verdict_from_transcript(transcript: GateTranscript) -> Verdict:
 
     ADVANCE also requires the tier census to be complete: Zone and the census are two independent
     facts and neither is folded into the other (the roll-up to Zone.PASS is still computed purely
-    from Zone; the census is consulted here as a second, separate gate on top of it). Reachable
-    example: a required atom's home tier is unregistered, harness._pick falls forward to a
-    different tier's verifier, and that verifier's score happens to clear the band for the atom's
-    *nominal* check_type — Zone rolls up to PASS, but the atom's actually-required tier never ran
-    (see GATE-002). TierCensus.executed is filtered to tiers already in .required
-    (harness._tier_census), so n can never exceed m — a plain ``n < m`` check is equivalent to
-    requiring ``n == m``."""
+    from Zone; the census is consulted here as a second, separate gate on top of it).
+
+    CORRECTED IN PLACE (F-c1832100). This paragraph used to justify the census with a "Reachable
+    example": a required atom's home tier is unregistered, ``harness._pick`` falls forward to a
+    different tier's verifier, and that score clears the band for the atom's nominal check_type,
+    so Zone rolls up to PASS while the required tier never ran. That mechanism was REMOVED by
+    F-175c3b3e -- ``_pick`` returns ``(None, None)`` for a missing tier and the atom is SKIPPED --
+    and ``exit_contract.error_from_transcript`` says so directly on its own census branch ("Not
+    reachable via harness.evaluate() today"). One docstring calling the scenario reachable while
+    a sibling in the same domain calls it unreachable, both citing the same fix id, is the defect
+    class this package exists to catch. The bare tracker id it cited alongside that example
+    resolved nowhere in this repo except itself and the test that copied it, so it is dropped
+    rather than redefined -- naming a dead identifier is what keeps it looking alive.
+
+    What the census actually is: the independent net UNDERNEATH the Zone roll-up, not a path
+    ``harness.evaluate`` can reach today. It is kept deliberately so a future routing change
+    cannot make a short census invisible again -- defence in depth, stated as such.
+
+    TierCensus.executed is filtered to tiers already in .required (harness._tier_census), so n can
+    never exceed m -- a plain ``n < m`` check is equivalent to requiring ``n == m``."""
     census = transcript.tier_census
     if transcript.overall is Zone.PASS and census.n >= census.m:
         return Verdict.ADVANCE
@@ -142,10 +155,20 @@ def choose_repair(transcript: GateTranscript, budget: RetryBudget, dag: Question
     return RepairAction.REROLL_NEW_SEED
 
 
+# CORRECTED IN PLACE (F-9ee95e14). ``DEP_`` and ``RUNTIME_GENERATOR_LOAD_FAILED`` used to fall
+# through to TRANSIENT, so the loop re-rolled them for the whole best-of-N budget -- and for a real
+# generator each retry re-attempts a model load. A second seed does not install torch and does not
+# repair a checkpoint: these cannot succeed on a retry, so retrying them is pure waste that also
+# destroys the one error whose hint was the actual answer. They are non-retryable by name, not by
+# widening the RUNTIME_ prefix, because a plain RUNTIME_ timeout is exactly what best-of-N is for.
+_SEMANTIC_PREFIXES = ("SYNTH_", "CONTRACT_", "GATE_", "INPUT_", "DEP_")
+_SEMANTIC_CODES = frozenset({"RUNTIME_GENERATOR_LOAD_FAILED"})
+
+
 def classify_failure(error_code: str) -> OutcomeClass:
-    """Transient (auto-retry) vs semantic (human-gated). Mirrors state-machine.js BLOCKED vs
-    REDISPATCHABLE: schema/contract defects are blocked; transient runtime errors redispatch."""
-    semantic_prefixes = ("SYNTH_", "CONTRACT_", "GATE_", "INPUT_")
-    if any(error_code.startswith(p) for p in semantic_prefixes):
+    """Transient (auto-retry) vs semantic (non-retryable, human-gated). Mirrors state-machine.js
+    BLOCKED vs REDISPATCHABLE: schema/contract defects and unsatisfiable preconditions are blocked;
+    transient runtime errors redispatch."""
+    if error_code in _SEMANTIC_CODES or any(error_code.startswith(p) for p in _SEMANTIC_PREFIXES):
         return OutcomeClass.SEMANTIC
     return OutcomeClass.TRANSIENT

@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from ...errors import PromptCraftError
 from .schema import SUPPORTED_CONTRACT_SCHEMAS, Contract, IdentityRef, ResolvedContract, Severity
 
@@ -68,7 +70,31 @@ def _read_contract(path: Path) -> Contract:
             f"contract {path} declares $schema {declared!r}; this build reads "
             f"{sorted(SUPPORTED_CONTRACT_SCHEMAS)}",
         )
-    return Contract.model_validate(data)
+    try:
+        return Contract.model_validate(data)
+    except PromptCraftError:
+        # A guard inside a @model_validator (duplicate atom ids) already speaks the
+        # structured shape and carries a precise code. Pydantic does not wrap these --
+        # only ValueError/TypeError/AssertionError -- so pass it through untouched.
+        raise
+    except ValidationError as err:
+        # THE THIRD failure mode of reading a contract, closed last. The read and the
+        # JSON parse above were already structured; the schema validation was not, so a
+        # misspelled key, a bad enum value, or a wrong field type left this function as a
+        # raw pydantic_core.ValidationError. Nothing between here and the CLI's
+        # `except Exception` backstop catches that, so an ordinary authoring typo exited
+        # 2 with RUNTIME_UNEXPECTED -- whose own hint calls it "the backstop, not a
+        # diagnosis" -- where errors.py's namespace table and STABILITY.md's covered
+        # exit-code contract both promise 1 with a CONTRACT_ code.
+        raise PromptCraftError(
+            "CONTRACT_INVALID",
+            f"contract {path} does not match the contract schema",
+            hint=(
+                "Fix the field the validator names, or run `pcraft schema` to dump the "
+                "authoring JSON Schema. Re-run with --debug to see which field failed."
+            ),
+            cause=err,
+        ) from err
 
 
 def resolve(contract: Contract, lookup) -> ResolvedContract:
@@ -77,6 +103,9 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     A faction resolves to itself. A character merges its faction base then its own atoms,
     enforcing the no-relaxation rule."""
     if contract.level == "faction" or contract.extends is None:
+        _reject_unknown_depends_on(
+            contract.must_have, contract.must_not, contract_id=contract.id
+        )
         return ResolvedContract(
             id=contract.id,
             level=contract.level,
@@ -99,6 +128,9 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     identity_refs = _merge_identity_refs(
         base.identity_refs, contract.identity_ref, child_id=contract.id
     )
+    # Referential check runs POST-merge: a character legitimately depends on an atom it
+    # inherits rather than declares, so checking the raw child would refuse valid contracts.
+    _reject_unknown_depends_on(merged_must_have, merged_must_not, contract_id=contract.id)
 
     return ResolvedContract(
         id=contract.id,
@@ -146,14 +178,81 @@ def _merge_identity_refs(
     return merged
 
 
+# Blocking power, ascending. Written out rather than derived from the enum: `Severity`
+# declares `required` FIRST, so `{s: i for i, s in enumerate(Severity)}` would rank
+# required below optional and silently invert every comparison below -- turning the
+# fail-closed relaxation guard into a pass-open one. Declaration order is not severity
+# order, and no future reordering of the enum may be allowed to imply that it is.
+#
+# What this table must not do is fall through. `_SEVERITY_RANK[atom.severity]` was a bare
+# subscript, so the day a third member joins `Severity` every merge touching it raises a
+# raw KeyError out of the loader -- an exception from outside the PromptCraftError
+# hierarchy crossing the boundary this module documents, exactly like the pydantic
+# ValidationError closed in `_read_contract`. `_severity_rank` is the only sanctioned
+# reader; `test_the_severity_rank_table_covers_every_severity_member` goes red the day a
+# member is added without a rank, which is the intended place to find out.
 _SEVERITY_RANK = {Severity.optional: 0, Severity.required: 1}
+
+
+def _severity_rank(severity) -> int:
+    """Rank a severity, or refuse in the documented shape. Never KeyError."""
+    rank = _SEVERITY_RANK.get(severity)
+    if rank is None:
+        raise PromptCraftError(
+            "CONTRACT_UNKNOWN_SEVERITY",
+            f"this build cannot rank severity {severity!r}",
+            hint=(
+                "A severity was added to the Severity enum without a blocking-power rank. "
+                "Add it to _SEVERITY_RANK in core/contract/loader.py, ordered by how much "
+                "it blocks -- the loader refuses rather than guess whether it relaxes an "
+                "inherited requirement."
+            ),
+        )
+    return rank
+
+
+def _reject_unknown_depends_on(must_have, must_not, *, contract_id: str) -> None:
+    """Fail closed on a ``depends_on`` that names no atom in this contract (F-19f97de2).
+
+    The loader already refuses a dangling ``extends`` (``CONTRACT_MISSING_BASE``) and a
+    duplicate atom id (``CONTRACT_DUPLICATE_ATOM_ID``) but never checked that a dependency
+    edge resolves. A typo'd parent did not fail -- it silently DEMOTED its atom to a root:
+    ``QuestionDAG.topological()``'s ``if q.depends_on and q.depends_on in index`` skips the
+    unknown edge, so the atom is evaluated unconditionally and the "a NO parent forces NO on
+    descendants" guarantee -- the entire reason ``depends_on`` exists -- quietly does not
+    apply to it. The gate then verifies the colour of an axe that is not there, which is the
+    exact false confidence the DAG was built to kill.
+
+    Runs on the RESOLVED lists, never on a raw child contract: a character legitimately
+    depends on an atom it inherits rather than declares, so a pre-merge check would refuse
+    correct contracts. The id namespace spans must_have AND must_not because
+    ``compile_questions`` indexes both into one DAG keyed by ``atom_id`` -- the check mirrors
+    the index the walk actually uses.
+    """
+    known = {a.id for a in must_have} | {m.id for m in must_not}
+    for item in (*must_have, *must_not):
+        parent = getattr(item, "depends_on", None)
+        if parent is None:
+            continue
+        if parent not in known:
+            raise PromptCraftError(
+                "CONTRACT_UNKNOWN_DEPENDS_ON",
+                f"{contract_id!r} atom {item.id!r} depends_on {parent!r}, "
+                f"which is not an atom of this contract",
+                hint=(
+                    "depends_on must name an id declared in this contract's must_have or "
+                    "must_not (inherited atoms count, after extends is resolved). An "
+                    "unresolvable parent is not 'no parent' -- the atom would be gated "
+                    "unconditionally instead of only when its parent passes."
+                ),
+            )
 
 
 _RELAXATION_HINT = (
     "A character contract may not drop or relax a faction-required atom, and may not "
     "rewrite an inherited atom's claim, check_type, spatial, enum, or depends_on, "
     "or neutralize an inherited identity plate. Raise the severity or weight, or add "
-    "a new id or plate — never substitute an existing id's content."
+    "a new id or plate -- never substitute an existing id's content."
 )
 
 
@@ -191,7 +290,7 @@ def _rewritten_must_not_fields(base, child) -> list[str]:
 
 
 def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
-    """Union by atom id. A child override may only RAISE severity, never lower it — and may
+    """Union by atom id. A child override may only RAISE severity, never lower it -- and may
     never rewrite an inherited id's content, at any severity. Raising severity is not a
     licence to substitute what the atom checks for, where it is checked, or what it
     depends on."""
@@ -201,7 +300,7 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
     for atom in child_atoms:
         base_atom = by_id.get(atom.id)
         if base_atom is not None:
-            if _SEVERITY_RANK[atom.severity] < _SEVERITY_RANK[base_atom.severity]:
+            if _severity_rank(atom.severity) < _severity_rank(base_atom.severity):
                 raise PromptCraftError(
                     "CONTRACT_RELAXATION",
                     f"character {child_id!r} relaxes faction atom {atom.id!r} "
@@ -222,7 +321,7 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
             by_id[atom.id] = atom
 
     # A character cannot silently DROP a faction-required atom: it simply isn't in child_ids,
-    # so the base version survives the union above. That is the fail-closed default — inherited
+    # so the base version survives the union above. That is the fail-closed default -- inherited
     # required atoms always carry through UNCHANGED except for a severity raise.
     del child_ids  # (kept for readability of the invariant; not used)
     # Preserve base order, then append child-only atoms in declared order.
@@ -233,28 +332,28 @@ def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):
 
 
 def _merge_must_not(base, child, *, child_id: str):
-    """Union by id, fail-closed on severity — the same rule ``_merge_atoms_fail_closed`` enforces.
+    """Union by id, fail-closed on severity -- the same rule ``_merge_atoms_fail_closed`` enforces.
 
-    ⚑ This guard was ADDED when ``MustNot`` gained a severity, and it closes a hole that change
+    [!] This guard was ADDED when ``MustNot`` gained a severity, and it closes a hole that change
     opened. Before the field existed every negation was required by construction, so a plain
     override could not relax anything and none was needed. The moment a negation can be
     ``optional``, a character contract could override an inherited ``required`` negation down to
-    ``optional`` and the loader would allow it — silently relaxing the exact kind of inherited
+    ``optional`` and the loader would allow it -- silently relaxing the exact kind of inherited
     requirement this module exists to protect.
 
     Measured before the fix: a faction declaring ``no_gun`` required and a character re-declaring
     it optional resolved to optional, no error.
 
-    ⚑ SECOND GUARD, same finding (F-a5fa3f8b). Severity-lowering was the *loud* attack; a child
+    [!] SECOND GUARD, same finding (F-a5fa3f8b). Severity-lowering was the *loud* attack; a child
     could still keep ``no_gun``'s id and severity while rewriting its claim from "a firearm" to
-    "a rubber duck" — same blocking power, different (or no) actual constraint. Claim/check_type
+    "a rubber duck" -- same blocking power, different (or no) actual constraint. Claim/check_type
     are now frozen on a redeclared id, exactly as for ``must_have`` in ``_merge_atoms_fail_closed``.
     """
     by_id = {m.id: m for m in base}
     for m in child:
         base_mn = by_id.get(m.id)
         if base_mn is not None:
-            if _SEVERITY_RANK[m.severity] < _SEVERITY_RANK[base_mn.severity]:
+            if _severity_rank(m.severity) < _severity_rank(base_mn.severity):
                 raise PromptCraftError(
                     "CONTRACT_RELAXATION",
                     f"character {child_id!r} relaxes faction must_not {m.id!r} "

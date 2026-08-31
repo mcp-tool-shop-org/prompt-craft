@@ -11,11 +11,77 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
+Health wave over the v1.0.0 surface (dogfood swarm, 2026-08-31): 29 findings fixed, suite
+394 -> 516. The recurring shape, again: checks that read as live while checking less than
+they appear — this time including one on the bind door itself.
+
 ### Added
+
+- `pcraft doctor` reports version coherence: installed distribution metadata vs the tree's
+  declared version, loudly, on the box where stale editable dist-info has now bitten three
+  times. `pcraft --version` warns on stderr when the mismatch is detectable; stdout stays
+  the bare version line.
+- The kontext recipe receipt computes `do_not_mask_bracer` (`bool | None`) instead of
+  asserting a hardcoded `True` nothing checked; `None` is the honest answer for a
+  caller-painted mask, and the terminal banner now tracks the receipt.
 
 ### Fixed
 
+- **A dangling `depends_on` can no longer flip escalate into bind.** The loader refuses a
+  contract whose `depends_on` names no atom (`CONTRACT_UNKNOWN_DEPENDS_ON`, exit 1), and
+  the harness fails closed (SKIPPED, never PASS) if one still arrives by construction.
+  Measured before the fix: a one-character typo in the shipped example turned
+  AMEND/escalate into ADVANCE/bind with a clean census and exit 0.
+- **An unknown `identity_ref.method` can no longer silently drop the identity lock while
+  the receipt stamps the plate.** The dead deny-list (an empty frozenset) is now an
+  allow-list refusing on both generate paths; `assemble()` honors `method` instead of
+  bucketing every plate by scope; Flux refuses a wrong-family lock before writing a recipe.
+- The stdlib PNG fallback refuses (`RUNTIME_VERIFIER_CALL_FAILED`) when it decodes fewer
+  pixels than the header declares, instead of scoring a fraction of the image with
+  confidence.
+- Malformed contracts and pinned artifacts raise the documented error shape
+  (`CONTRACT_INVALID` exit 1 / `IO_ARTIFACT_INVALID`) instead of leaking a raw pydantic
+  `ValidationError` as a crash (exit 2) — the covered exit-code table now holds at both
+  doors.
+- `pcraft replay` on a receipt from a newer prompt-craft exits **1** with an upgrade hint,
+  matching its contract sibling (`CONTRACT_SCHEMA_UNSUPPORTED`); it briefly exited 2 in
+  v1.0.0. STABILITY.md names the per-code override.
+- The release workflow's tag==version gate now runs on every trigger standing on a tag —
+  `workflow_dispatch` runs skipped the exact check built after two stale-version releases.
+  Statically validated; a live dispatch run remains to be observed.
+- The bind door (`bind --no-mock`) checks the full `[image]` extra including
+  `transformers`, from one source of truth shared with `doctor`, so an incomplete
+  environment refuses cleanly (`DEP_IMAGE_MISSING`) instead of crashing deep in the
+  pipeline.
+- Every user-facing string in the CLI, errors, and contract layers is pure ASCII, pinned
+  by cp437-encode tests: em dashes in help text crashed `pcraft --help` outright under the
+  default `cmd.exe` codepage, and the same class sat in live refusal hints.
+- Compiled-artifact ids are collision-free across distinct compiles (content fingerprint;
+  `_next_version` returned a constant per optimizer).
+- Failed generate attempts are recorded on the receipt with their real error chained into
+  `RUNTIME_GENERATE_EXHAUSTED` (previously discarded whole — a diagnostic dead end that
+  destroyed the `DEP_IMAGE_MISSING` hint on the exact path where it was the answer), and
+  missing-dependency failures are no longer retried.
+- `LoopConfig.thresholds_version` is a live assertion (`CONFIG_THRESHOLDS_INVALID` on
+  mismatch with the table) instead of a knob nothing read.
+- Tier0Router names the instrument that actually scored (`last_delegate`), and text-enum
+  atoms fall through to SigLIP2 as its docstring always claimed.
+- The stability-surface test now guards drift in both directions (document -> test), pins
+  `Verifier` and the `code`/`message`/`hint` shape, and the verify gate's `-O` leg carries
+  the reachability pin every other leg already had.
+- Atom/MustNot/Contract ids require `min_length=1`, closing the surviving mutant's
+  equivalence argument at the root; `_severity_rank()` raises a named refusal instead of
+  `KeyError` on an unknown severity.
+- Registry long-descriptions and the operating docs no longer assert the retired pre-1.0
+  position against a shipped v1.0.0: README.pypi.md and npm/README.md carry the
+  interfaces-not-pictures paragraph (reaches the registries at the next publish), and
+  grok.md / AGENTS.md / ADVISOR.md / HANDOFF.md / SHIP_GATE.md fences read 1.0.0.
+
 ### Changed
+
+- `IO_RECORD_SCHEMA_UNSUPPORTED` exit code: 2 -> 1 (see Fixed; documented as a deliberate
+  per-code override in STABILITY.md, aligned in the first patch after v1.0.0 before any
+  minor shipped).
 
 ## [1.0.0] — 2026-08-18
 

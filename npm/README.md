@@ -62,7 +62,9 @@ A live GEPA compile ran on local Ollama `hermes3:8b` (not 600B) and pinned
 `sprite.synth.v1-gepa.json`. The identity sub-gate is not wired. The
 project's own front door says so.
 
-Pre-1.0 deliberately. Promotion should follow evidence, not a version bump.
+v1.0.0 covers interfaces, not pictures: the CLI surface, the exit-code contract, and
+both on-disk formats are semver-covered (`STABILITY.md` in the repo names each one and
+what is excluded). The capability gaps above stay disclosed and close in minor releases.
 
 ---
 

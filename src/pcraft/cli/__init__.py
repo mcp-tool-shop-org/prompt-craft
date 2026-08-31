@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict
 # `click` package. pyproject declares `typer>=0.12`, so BOTH are inside the range this
 # package says it supports and neither import works on its own. Reaching for one and
 # not the other made the whole CLI unimportable on a conforming install
-# (ModuleNotFoundError at import time, before any command runs) — caught only because
+# (ModuleNotFoundError at import time, before any command runs) -- caught only because
 # the swarm's deterministic floor happened to run on a different interpreter than the
 # dev venv. These are the exception types Click raises for its OWN parser errors; there
 # is no public re-export of them under either layout, so the fallback is the portable
@@ -44,7 +44,7 @@ except ModuleNotFoundError:  # typer < 0.26
     )
 from typer.core import TyperGroup
 
-from .. import package_version
+from .. import package_version, version_coherence
 from ..errors import PromptCraftError, wrap_error
 from ..gate_report import format_transcript  # local helper (see below)
 
@@ -110,6 +110,12 @@ app = typer.Typer(
 def _show_version(value: bool) -> None:
     if value:
         typer.echo(f"pcraft {package_version()}")
+        # stdout stays exactly one bare version line -- that shape is scripted and covered.
+        # A stale dist-info makes the line above a lie (F-4d031e47), so the contradiction
+        # is said out loud on stderr, where it cannot corrupt a `pcraft --version` capture.
+        note = version_coherence()
+        if note is not None:
+            typer.echo(f"warning: {note}", err=True)
         raise typer.Exit()
 
 
@@ -177,6 +183,12 @@ class DoctorReport(BaseModel):
     store_ids: list[str] = []
     store_error: str | None = None
     thresholds_version: str | None = None
+    # Additive, both defaulted: `version` above is read from installed metadata, which can
+    # be stale (F-4d031e47 -- measured at 0.2.1 against a 1.0.0 tree). Reporting a number
+    # with no way to say "and it disagrees with the source" is the defect. Existing readers
+    # of this document are unaffected; nothing was renamed or removed.
+    version_coherent: bool = True
+    version_warning: str | None = None
 
 
 @app.command()
@@ -293,7 +305,7 @@ def bind(
         _print_result(result, as_json=as_json)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same
-        # number to a caller — the merge the four-way contract exists to prevent.
+        # number to a caller -- the merge the four-way contract exists to prevent.
         _exit_from_result(result, debug)
     except PromptCraftError as err:
         _emit(err, debug)
@@ -445,6 +457,12 @@ def doctor(
     try:
         report = _run_doctor(contracts_dir or None, thresholds)
         _say(f"pcraft {report.version}", as_json=as_json)
+        if report.version_warning is not None:
+            # Loud on purpose. The number on the line above is what `pcraft --version`
+            # reports, and a user who does not know the dist-info is stale has no way to
+            # tell that from here -- the whole reason this check moved out of the
+            # maintainer-only `verify.py --installed` leg.
+            _say(f"  VERSION MISMATCH: {report.version_warning}", as_json=as_json)
         py_mark = "ok" if report.python_ok else "FAIL"
         _say(f"python {report.python}  ({py_mark}; need >= 3.11)", as_json=as_json)
         for extra in report.extras:
@@ -480,19 +498,25 @@ def _extra_status(name: str, modules: tuple[str, ...]) -> ExtraStatus:
 def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> DoctorReport:
     from ..core.gate.thresholds import load_thresholds
     from ..domains.image.subdomains.sprite import THRESHOLDS_PATH
-    from ..sample import load_store
+    from ..sample import IMAGE_EXTRA_MODULES, load_store
 
     py = sys.version.split()[0]
     extras = [
-        _extra_status("image", ("torch", "diffusers", "transformers", "PIL")),
+        # IMAGE_EXTRA_MODULES, not a second literal: doctor's list and bind --no-mock's
+        # live door drifted apart once (F-62bb6e8d), and the door was the weaker of the
+        # two. One constant, both call sites.
+        _extra_status("image", IMAGE_EXTRA_MODULES),
         _extra_status("synth", ("dspy",)),
     ]
+    note = version_coherence()
     report = DoctorReport(
         version=package_version(),
         python=py,
         python_ok=sys.version_info >= (3, 11),
         extras=extras,
         store_ok=False,
+        version_coherent=note is None,
+        version_warning=note,
     )
     try:
         store = load_store(contracts_dirs)
@@ -554,7 +578,7 @@ def recipe(
     contract: str = typer.Option("char:ashen-reaver", help="contract id whose plates feed the stitch"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     out: Path = typer.Option(Path("kontext-fill.recipe.json"), "--out", help="write the Comfy API graph here"),
-    fill_region: str = typer.Option("fist", help="Fill mask region. fist only — hands/weapon ate the bracer"),
+    fill_region: str = typer.Option("fist", help="Fill mask region. fist only -- hands/weapon ate the bracer"),
     fill_mask: Path | None = typer.Option(None, help="optional painted fist-only mask (overrides --fill-region)"),
     seed: int = typer.Option(169405236028824, help="KSampler seed (the measured stitch used this)"),
     image_name: list[str] = typer.Option(
@@ -589,7 +613,12 @@ def recipe(
         report = report.model_copy(update={"graph_path": str(out.resolve())})
         _say(f"recipe {report.recipe_id}", as_json=as_json)
         _say(f"stages: {' -> '.join(report.stages)}", as_json=as_json)
-        _say(f"crop: {report.crop}  fill: {report.fill_region}  bracer: not masked", as_json=as_json)
+        bracer_line = {
+            True: "bracer: not masked",
+            False: "bracer: MASKED",
+            None: "bracer: unverified (caller-painted mask)",
+        }[report.do_not_mask_bracer]
+        _say(f"crop: {report.crop}  fill: {report.fill_region}  {bracer_line}", as_json=as_json)
         _say(f"graph: {report.graph_path}", as_json=as_json)
         _say(f"measured: {report.measured_graph}", as_json=as_json)
         if as_json:
@@ -607,7 +636,7 @@ def compile(  # noqa: A001 - the verb is the command name
     seed: bool = typer.Option(False, help="(re)write the scaffold SEED artifact"),
     debug: bool = typer.Option(False),
 ) -> None:
-    """Offline synthesizer compile (GEPA). Heavy + Director-gated — not on a per-asset path."""
+    """Offline synthesizer compile (GEPA). Heavy + Director-gated -- not on a per-asset path."""
     try:
         if seed:
             from ..core.optimize.compile import write_seed_artifact
@@ -646,19 +675,33 @@ def sync_rules(
     debug: bool = typer.Option(False),
 ) -> None:
     """Regenerate domains/image/rules/encoder_craft.md from the readouts prompt-craft lane."""
-    script = _find_sync_script()
-    if script is None:
-        _emit(PromptCraftError("IO_SCRIPT_MISSING", "scripts/sync_rules_from_readouts.py not found "
-              "(run from the repo checkout)"), debug)
-    spec = importlib.util.spec_from_file_location("_pcraft_sync", script)
-    module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    out = module.DEFAULT_OUT
-    db_path = db or module.DEFAULT_DB
+    # The one command body that used to run unguarded. Only SystemExit was caught, which
+    # happens to be how the current script reports a missing DB -- so the contract looked
+    # honoured by luck. A PromptCraftError out of module.generate(), an AttributeError from
+    # the dynamically loaded script's interface drifting (DEFAULT_OUT / DEFAULT_DB /
+    # generate), or a broken transitive import inside it all escaped this file's entire
+    # error contract as a raw traceback with Python's default exit 1 -- this contract's
+    # code for USER error, for what is an internal defect. (F-dc0ca73f)
     try:
-        module.generate(Path(db_path), Path(out))
-    except SystemExit as err:
-        raise typer.Exit(code=int(err.code) if isinstance(err.code, int) else 2) from err
+        script = _find_sync_script()
+        if script is None:
+            _emit(PromptCraftError("IO_SCRIPT_MISSING", "scripts/sync_rules_from_readouts.py not found "
+                  "(run from the repo checkout)"), debug)
+        spec = importlib.util.spec_from_file_location("_pcraft_sync", script)
+        module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        out = module.DEFAULT_OUT
+        db_path = db or module.DEFAULT_DB
+        try:
+            module.generate(Path(db_path), Path(out))
+        except SystemExit as err:
+            raise typer.Exit(code=int(err.code) if isinstance(err.code, int) else 2) from err
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
 def _find_sync_script() -> Path | None:
@@ -676,15 +719,15 @@ def _exit_from_result(result, debug: bool) -> None:
 
     Fold-time gap between two wave-2 fixes that could not see each other: core-loop began
     CLASSIFYING a failed generate() instead of letting it escape as a traceback, returning
-    `decision="escalated"` with the code in `reason` — a RESULT, not a raised error. The CLI
+    `decision="escalated"` with the code in `reason` -- a RESULT, not a raised error. The CLI
     only ever wired exit codes to a raised PromptCraftError, so `pcraft demo` printed
     `decision: ESCALATED (error[RUNTIME_GENERATE_EXHAUSTED])` and exited **0**. Measured
     against the real subprocess, not CliRunner.
 
-    The mapping is not invented here — it is `error_from_transcript`'s, so the escalation path
+    The mapping is not invented here -- it is `error_from_transcript`'s, so the escalation path
     reports exactly what `pcraft gate` would for the same transcript. When the loop never got
     far enough to produce a record, there is no transcript to consult and nothing scored: that
-    is `GATE_UNAVAILABLE` (exit 4, could-not-run), never exit 2 — nothing ran to fail.
+    is `GATE_UNAVAILABLE` (exit 4, could-not-run), never exit 2 -- nothing ran to fail.
     """
     if result.decision == "bound":
         return

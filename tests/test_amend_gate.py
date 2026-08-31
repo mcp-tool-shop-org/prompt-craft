@@ -215,3 +215,123 @@ def test_demo_shaped_partial_run_is_not_exit_zero(sprite_example):
     err = error_from_transcript(t)
     assert err is not None
     assert err.exit_code != 0
+
+
+# --------------------------------------------------------------------------------------------
+# F-19f97de2 -- the parent-gating branch read `if q.depends_on and q.depends_on in verdicts:`.
+# The `in verdicts` clause silently turned "the declared parent could not be resolved" into
+# "this atom has no parent": the edge was DELETED, with no error, no SKIPPED, and no reason
+# string recording that it had been dropped. Nothing upstream catches it either --
+# QuestionDAG.topological() applies the identical `depends_on in index` guard, so evaluate()
+# never even KeyErrors. A one-character typo in a depends_on therefore promoted a child from
+# "not evaluated, because its parent is absent" to "independently confirmed".
+#
+# Both directions are pinned below. The harness half is the fail-closed net; a load-time
+# referential check on depends_on is the other half of this fix and lives in
+# core/contract/loader.py (a different domain, landed in parallel).
+# --------------------------------------------------------------------------------------------
+
+
+def _parent_child_dag(*, depends_on: str, parent_severity: Severity) -> QuestionDAG:
+    """tabard (the parent) -> sigil (the child), plus an unrelated required atom that scores.
+
+    The third atom is load-bearing, not decoration: with only tabard+sigil present, every
+    required atom ends up unscored and ``_rollup`` reports UNAVAILABLE, which masks the flip
+    this test exists to catch. ``silhouette`` keeps at least one required score on the books so
+    the roll-up is decided by the child's zone -- the same shape the shipped sprite contract has.
+    """
+    return QuestionDAG(
+        contract_id="test:pin-19f97de2",
+        questions=[
+            Question(
+                atom_id="tabard", text="Does this show a crimson tabard?",
+                check_type=CheckType.vqa, polarity=Polarity.affirm, severity=parent_severity,
+            ),
+            Question(
+                atom_id="sigil", text="Does this show a sigil on the tabard?",
+                check_type=CheckType.vqa, polarity=Polarity.affirm, severity=Severity.required,
+                depends_on=depends_on,
+            ),
+            Question(
+                atom_id="silhouette", text="Does this show the silhouette?",
+                check_type=CheckType.vqa, polarity=Polarity.affirm, severity=Severity.required,
+            ),
+        ],
+    )
+
+
+# tabard is absent (0.01 <= the vqa band's low of 0.40 -> FAIL); everything else reads present.
+_SIGIL_SCORES = {"tabard": 0.01, "sigil": 0.95, "silhouette": 0.95}
+
+
+def _evaluate_sigil_dag(thresholds, *, depends_on: str, parent_severity: Severity):
+    v = ScriptedVerifier(_SIGIL_SCORES, family="clip-flant5", tier=1, verifier_id="scripted.vqa.v0")
+    dag = _parent_child_dag(depends_on=depends_on, parent_severity=parent_severity)
+    t = harness.evaluate(dag, "x.png", {1: v}, thresholds, generator_family="stable-diffusion")
+    return t, {x.atom_id: x for x in t.verdicts}
+
+
+def test_an_intact_failing_parent_still_forces_the_child_to_na(sprite_example):
+    """Direction 1: the behaviour the fix must NOT disturb. A parent that resolves and fails
+    still gates its child to NA with the existing 'did not pass' reason -- SKIPPED is reserved
+    for a parent that could not be resolved at all, so the two causes stay distinguishable in
+    the transcript."""
+    _s, _resolved, thresholds, _c = sprite_example
+    t, verdicts = _evaluate_sigil_dag(thresholds, depends_on="tabard", parent_severity=Severity.required)
+    assert verdicts["tabard"].zone is Zone.FAIL
+    assert verdicts["sigil"].zone is Zone.NA
+    assert verdicts["sigil"].score is None
+    assert "did not pass" in verdicts["sigil"].reason
+    assert t.overall is Zone.FAIL  # the required parent's own failure still decides the roll-up
+
+
+def test_a_dangling_depends_on_is_skipped_not_silently_unparented(sprite_example):
+    """Direction 2: a depends_on that names no atom in this contract must fail CLOSED.
+
+    Before the fix the child was scored independently and returned PASS 0.95 -- the gate
+    confirming a sigil on a tabard it had just decided was absent. SKIPPED already never rolls
+    up to PASS, so routing an unresolvable parent there closes the hole without a new zone, and
+    the reason string names the id that did not resolve instead of dropping the edge in silence.
+    """
+    _s, _resolved, thresholds, _c = sprite_example
+    t, verdicts = _evaluate_sigil_dag(
+        thresholds, depends_on="tabard_typo", parent_severity=Severity.required
+    )
+    assert verdicts["sigil"].zone is Zone.SKIPPED, (
+        "an unresolvable parent must not read as 'this atom has no parent'"
+    )
+    assert verdicts["sigil"].score is None, "the child must not be scored independently"
+    assert "tabard_typo" in verdicts["sigil"].reason, "the dropped edge has to be named"
+    assert t.overall is not Zone.PASS
+
+
+def test_a_dangling_depends_on_cannot_flip_amend_into_advance(sprite_example):
+    """The measured consequence, end to end: a one-character typo flipped the loop verdict from
+    AMEND (escalate to a human) to ADVANCE (bind to canon).
+
+    The parent is ``optional`` here so it does not block on its own -- that is what let the
+    child's false PASS decide the roll-up. The tier census is complete in BOTH runs, so the
+    ANDON watchdog never fired and nothing else in the stack caught it.
+    """
+    from pcraft.core.loop.retry_policy import Verdict, verdict_from_transcript
+
+    _s, _resolved, thresholds, _c = sprite_example
+    intact, intact_verdicts = _evaluate_sigil_dag(
+        thresholds, depends_on="tabard", parent_severity=Severity.optional
+    )
+    dangling, _dangling_verdicts = _evaluate_sigil_dag(
+        thresholds, depends_on="tabard_typo", parent_severity=Severity.optional
+    )
+
+    # the census is clean either way -- this defect was never visible to the watchdog
+    assert intact.tier_census.n == intact.tier_census.m
+    assert dangling.tier_census.n == dangling.tier_census.m
+
+    assert intact_verdicts["sigil"].zone is Zone.NA
+    assert intact.overall is Zone.UNCERTAIN
+    assert verdict_from_transcript(intact) is Verdict.AMEND
+
+    assert dangling.overall is not Zone.PASS, "a dropped edge must not manufacture a clean gate"
+    assert verdict_from_transcript(dangling) is Verdict.AMEND, (
+        "a typo in depends_on must never be the difference between escalate and bind"
+    )

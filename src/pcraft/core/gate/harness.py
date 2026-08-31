@@ -3,8 +3,9 @@
 Routing is cheapest-decides-first: ``siglip2``/``palette`` atoms hit the Tier-0 screen; ``vqa`` atoms
 hit Tier-1 (VQAScore); a Tier-1 UNCERTAIN/FAIL escalates to Tier-2 (DSG) for per-atom localization.
 Evaluation is parent-first: a non-passing parent forces its children to N/A (a NO parent forces NO on
-descendants). A required atom that cannot be confirmed (SKIPPED / NA / UNCERTAIN) never rolls up to a
-silent PASS — it routes the whole asset to the UNCERTAIN (human) band."""
+descendants), and a ``depends_on`` naming no atom in this contract is SKIPPED, not treated as an atom
+with no parent. A required atom that cannot be confirmed (SKIPPED / NA / UNCERTAIN) never rolls up to
+a silent PASS -- it routes the whole asset to the UNCERTAIN (human) band."""
 
 from __future__ import annotations
 
@@ -136,13 +137,31 @@ def evaluate(
 
     for q in dag.topological():
         # Parent gating: a non-passing parent forces this atom to N/A.
-        if q.depends_on and q.depends_on in verdicts:
-            parent_zone = verdicts[q.depends_on].zone
-            if parent_zone in (Zone.FAIL, Zone.NA, Zone.SKIPPED):
+        if q.depends_on:
+            # CORRECTED IN PLACE (F-19f97de2). This branch read
+            # ``if q.depends_on and q.depends_on in verdicts:``. The ``in verdicts`` clause was
+            # not a guard, it was a silent DELETE: it turned "the declared parent could not be
+            # resolved" into "this atom has no parent", and the atom was then scored on its own
+            # -- no error, no SKIPPED, no reason string, nothing in the transcript recording that
+            # the edge had been dropped. Nothing upstream catches it either: QuestionDAG
+            # .topological() applies the identical ``depends_on in index`` guard, so a dangling
+            # edge never even raises a KeyError here. Measured consequence: retyping one edge to
+            # a one-character typo took a child from NA (its parent was judged absent) to a
+            # confident PASS, and flipped the loop verdict from AMEND (escalate) to ADVANCE
+            # (bind to canon), with a clean tier census in both runs -- so the ANDON watchdog
+            # never saw it. An unresolvable parent is now an explicit outcome. SKIPPED already
+            # never rolls up to PASS, so this closes the hole without inventing a new zone.
+            parent = verdicts.get(q.depends_on)
+            if parent is None:
+                verdicts[q.atom_id] = _skipped(
+                    q, f"parent {q.depends_on!r} is not an atom in this contract"
+                )
+                continue
+            if parent.zone in (Zone.FAIL, Zone.NA, Zone.SKIPPED):
                 verdicts[q.atom_id] = AtomVerdict(
                     atom_id=q.atom_id, polarity=q.polarity, severity=q.severity,
                     score=None, zone=Zone.NA, tier_used=None, verifier_id=None,
-                    reason=f"parent {q.depends_on!r} did not pass ({parent_zone.value})",
+                    reason=f"parent {q.depends_on!r} did not pass ({parent.zone.value})",
                 )
                 continue
 

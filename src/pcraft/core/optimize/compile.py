@@ -8,12 +8,13 @@ offline compile; the compiled, pinned prompt then runs on a cheap local model pe
 GEPA reads the gate's natural-language per-atom failure text and reflectively evolves the prompt
 against a Pareto frontier. This module is OFFLINE ONLY. It is never imported by the per-asset
 loop. The default runner is ``dspy.GEPA`` (the ``[synth]`` extra). Tests inject a runner so the
-suite stays GPU-free. The metric is always EXTERNAL — the optimizer never scores its own text.
+suite stays GPU-free. The metric is always EXTERNAL -- the optimizer never scores its own text.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -58,7 +59,7 @@ def compile_synthesizer(
 ) -> CompiledProgram:
     """Run an offline optimize loop and pin the result.
 
-    ``gate_metric(contract, prompt) -> [0,1]`` is the EXTERNAL gate pass-rate — the optimizer
+    ``gate_metric(contract, prompt) -> [0,1]`` is the EXTERNAL gate pass-rate -- the optimizer
     never scores its own output. A missing ``[synth]`` extra is ``DEP_SYNTH_MISSING`` unless
     a ``runner`` is injected (the test door).
     """
@@ -85,13 +86,19 @@ def compile_synthesizer(
             "the optimizer returned an empty instruction",
             hint="The compile ran and produced nothing to pin. Check the runner / dspy.GEPA log.",
         )
+    source_hash = _source_hash(trainset, name)
     program = CompiledProgram(
         program_id=program_id,
-        version=_next_version(name),
+        version=_next_version(
+            name,
+            instruction=result.instruction,
+            demos=result.demos,
+            source_hash=source_hash,
+        ),
         instruction=result.instruction,
         demos=list(result.demos),
         generated_by=name,
-        source_hash=_source_hash(trainset, name),
+        source_hash=source_hash,
     )
     pin(program, out_path)
     return program
@@ -111,8 +118,40 @@ def write_seed_artifact(out_path: str | Path, program_id: str, instruction: str)
     return seed
 
 
-def _next_version(optimizer: str) -> str:
-    return f"v1-{optimizer}"
+def _next_version(
+    optimizer: str, *, instruction: str, demos: list[dict], source_hash: str
+) -> str:
+    """A version that actually distinguishes one compile from the next (F-4184d73f).
+
+    This returned ``f"v1-{optimizer}"`` -- a pure function of the optimizer NAME, with no
+    counter, no lookup of prior pins, nothing that varies run to run. Since
+    ``CompiledProgram.artifact_id`` is ``f"{program_id}@{version}"``, the ordinary
+    iterate-and-recompile workflow (change the trainset or the base instruction, re-run
+    gepa) produced two artifacts with different ``instruction``/``demos``/``source_hash``
+    and the SAME artifact id. That id is what every asset receipt carries as the claim
+    "this run is replayable bit-for-bit", so the one property this module exists to provide
+    was the one it did not.
+
+    The suffix is a CONTENT fingerprint, not a clock and not a counter. Two compiles that
+    produce byte-identical output land on the same id -- which is correct, and is what makes
+    replay checkable -- while any change to what was pinned changes the id. No wall-clock or
+    filesystem state enters, so a compile is reproducible offline and the property is
+    testable without freezing time.
+
+    ``source_hash`` alone would not do it: it covers the trainset and the optimizer name but
+    not ``base_instruction``, so a re-compile that changed only the instruction would still
+    collide. Hashing the pinned content closes both cases at once.
+    """
+    h = hashlib.sha256()
+    h.update(optimizer.encode("utf-8"))
+    h.update(b"\0")
+    h.update(source_hash.encode("utf-8"))
+    h.update(b"\0")
+    h.update(instruction.encode("utf-8"))
+    h.update(b"\0")
+    # Sort keys so an equal-content demo dict cannot change the id through key order.
+    h.update(json.dumps(list(demos), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8"))
+    return f"v1-{optimizer}-{h.hexdigest()[:12]}"
 
 
 def _source_hash(trainset: list[ResolvedContract], optimizer: str) -> str:

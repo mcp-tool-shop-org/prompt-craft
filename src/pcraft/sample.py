@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from .core.contract.compile_questions import Question
 from .core.contract.loader import ContractStore
@@ -122,11 +123,47 @@ def run_mock_loop(
     return orchestrate.run(resolved, synth, gen, verifiers, table, config=config)
 
 
-def image_extra_present() -> bool:
-    """True when the [image] extra can import. Used by bind --no-mock."""
+IMAGE_EXTRA_MODULES: Final[tuple[str, ...]] = (
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "PIL",
+    "numpy",
+)
+"""Import names for every distribution in pyproject's ``[image]`` extra. ONE list.
+
+There used to be two. ``image_extra_present()`` -- the door that gates ``bind --no-mock``
+-- checked ``torch/diffusers/PIL``, while ``doctor``'s ``_extra_status("image", ...)``
+checked those plus ``transformers``, and the extra itself declares six distributions. So
+the two answers to "is [image] installed" disagreed, and the one actually guarding the live
+pipeline was the weaker one: an env with torch + diffusers + Pillow but no transformers
+walked past the refusal and died inside the VQA-family verifiers, which downgraded an
+actionable ``DEP_IMAGE_MISSING`` (whose hint names the exact install command) to the
+generic ``RUNTIME_UNEXPECTED`` backstop. Both map to exit 2, so the exit-code contract
+hid the difference and only the CODE -- the part STABILITY.md says is parseable --
+degraded.
+
+Not read from installed metadata at runtime, deliberately. ``Requires-Dist`` comes from the
+same dist-info that this repo has now twice been caught serving stale (F-4d031e47: a 0.2.1
+dist-info against a 1.0.0 tree), so deriving the door from it would make a safety check
+depend on the exact artifact that is known to go stale -- and would put a metadata parse on
+every ``bind`` invocation. The correspondence to pyproject is pinned by
+``tests/test_packaging.py::test_the_image_extra_module_list_matches_pyproject`` instead,
+which fails loudly when the extra gains or loses a distribution.
+"""
+
+
+def missing_image_modules() -> tuple[str, ...]:
+    """Which of the [image] extra's modules cannot be imported. Empty means complete."""
     import importlib.util
 
-    return all(importlib.util.find_spec(name) is not None for name in ("torch", "diffusers", "PIL"))
+    return tuple(m for m in IMAGE_EXTRA_MODULES if importlib.util.find_spec(m) is None)
+
+
+def image_extra_present() -> bool:
+    """True when the [image] extra can import. Used by bind --no-mock."""
+    return not missing_image_modules()
 
 
 def run_live_loop(
@@ -142,12 +179,16 @@ def run_live_loop(
     """
     from .domains.image import ImagePlugin
 
+    # `image_extra_present()` stays the single gate: it is the seam the suite monkeypatches
+    # to exercise both sides of this door GPU-free, so the decision must not be re-derived
+    # here. The missing-module list is only used to make the refusal actionable.
     if not image_extra_present():
         from .errors import PromptCraftError
 
+        missing = missing_image_modules() or IMAGE_EXTRA_MODULES
         raise PromptCraftError(
             "DEP_IMAGE_MISSING",
-            "real bind needs the [image] extra (torch + diffusers + Pillow)",
+            f"real bind needs the [image] extra; missing: {', '.join(missing)}",
             hint="pip install -e '.[image]'. Use --mock for the GPU-free scaffold.",
         )
     _store, resolved, table, compiled = load_workspace(

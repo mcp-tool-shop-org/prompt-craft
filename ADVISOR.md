@@ -7,9 +7,9 @@ day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
 **HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
-**Version:** **0.4.0** (shipped to PyPI + npm 2026-08-18, tag `v0.4.0`)
-**Suite last counted:** **359** (re-count before quoting)
-**Released:** v0.4.0 — both registries confirmed; handbook + all seven translations current at the tag
+**Version:** **1.0.0** (shipped to PyPI + npm 2026-08-18, tag `v1.0.0`; `STABILITY.md` is the promise)
+**Suite last counted:** **394** (2026-08-31; re-count before quoting)
+**Released:** v1.0.0 — both registries confirmed; handbook + all seven translations current at the tag; the pre-1.0 ruling is RETIRED (its flip criteria were met — see the RULING block in `HANDOFF.md`)
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.
 This file is the standing state and the fences. Measure HEAD and the suite yourself.
@@ -112,7 +112,8 @@ python -m venv <tmp>/civenv                       # once per CI python: 3.11 AND
 ## Fences
 
 - `identity_subgate.py`: **no delete, no promote, no wire.** Thresholds 0.55 / 0.05 stay.
-- Version **0.3.0** unless the Director says bump.
+- Version **1.0.0** unless the Director says bump. (This fence read 0.3.0 through two
+  releases — the defect class this repo prosecutes, in its own fence list. Keep it current.)
 - **Do not run Phase 10 / publish / tag** unless asked.
 - Do not lower a gate to make it green.
 - No mutmut, no dependabot. Gates `raise`, never bare `assert`. ASCII in tool output.

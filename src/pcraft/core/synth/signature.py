@@ -61,7 +61,7 @@ class TemplateSynthesizer:
         depictable = sorted((r for r in inventory if r.depictable), key=lambda r: r.front_load_rank)
         atom_coverage = {r.atom_id: r.token for r in depictable}
         prompt = ", ".join([r.token for r in depictable] + RENDER_BOILERPLATE)
-        # must_not feeds a SOFT negative prior only — satisfaction is confirmed by the gate on pixels.
+        # must_not feeds a SOFT negative prior only -- satisfaction is confirmed by the gate on pixels.
         negative_prompt = ", ".join(mn.claim for mn in resolved.must_not)
         return SynthResult(
             prompt=prompt,

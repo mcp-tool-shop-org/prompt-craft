@@ -198,6 +198,120 @@ def test_cli_compile_without_seed_is_not_a_silent_ok():
     assert "not wired" not in text.lower()
 
 
+# ---------------------------------------------------------------------------
+# F-4184d73f -- artifact_id must actually distinguish two different compiles
+#
+# _next_version(optimizer) returned f"v1-{optimizer}" -- a pure function of the optimizer
+# NAME. Since artifact_id is f"{program_id}@{version}", the normal iterate-and-recompile
+# workflow (change the trainset or the base instruction, re-run gepa) produced two artifacts
+# with different instruction/demos/source_hash and the SAME artifact_id -- and that id is
+# what every asset receipt carries as the claim "this run is replayable bit-for-bit".
+# ---------------------------------------------------------------------------
+
+
+class _EchoInstruction:
+    """Pins the base instruction verbatim, so the test controls the compiled content."""
+
+    def compile(self, *, trainset, gate_metric, base_instruction):
+        gate_metric(trainset[0], base_instruction)
+        return OptimizedPrompt(instruction=base_instruction, demos=[], metric_calls=1)
+
+
+def _compile(tmp_path, name, *, base_instruction, trainset, program_id="sprite.synth"):
+    return compile_synthesizer(
+        trainset,
+        lambda _c, _p: 1.0,
+        out_path=tmp_path / name,
+        program_id=program_id,
+        base_instruction=base_instruction,
+        runner=_EchoInstruction(),
+    )
+
+
+def test_two_different_compiles_do_not_share_an_artifact_id(tmp_path):
+    """The finding's repro: same program_id, same optimizer, different compiled content."""
+    _s, resolved, _t, _c = load_sprite_example()
+    first = _compile(tmp_path, "a.json", base_instruction="Convert atoms to a prompt.", trainset=[resolved])
+    second = _compile(tmp_path, "b.json", base_instruction="Front-load the tabard.", trainset=[resolved])
+
+    assert first.instruction != second.instruction
+    assert first.version != second.version
+    assert first.artifact_id != second.artifact_id
+
+
+def test_a_changed_trainset_also_changes_the_artifact_id(tmp_path):
+    """The other half of the iterate-and-recompile workflow the finding names."""
+    _s, resolved, _t, _c = load_sprite_example()
+    trimmed = resolved.model_copy(update={"must_have": list(resolved.must_have[:1])})
+    full = _compile(tmp_path, "a.json", base_instruction="Same text.", trainset=[resolved])
+    partial = _compile(tmp_path, "b.json", base_instruction="Same text.", trainset=[trimmed])
+
+    assert full.source_hash != partial.source_hash
+    assert full.artifact_id != partial.artifact_id
+
+
+def test_an_identical_compile_still_reproduces_the_same_artifact_id(tmp_path):
+    """Determinism is the point, not novelty: the id is a content fingerprint, never a clock
+    or a random. Two byte-identical compiles MUST land on the same id or replay is a lie."""
+    _s, resolved, _t, _c = load_sprite_example()
+    first = _compile(tmp_path, "a.json", base_instruction="Convert atoms to a prompt.", trainset=[resolved])
+    second = _compile(tmp_path, "b.json", base_instruction="Convert atoms to a prompt.", trainset=[resolved])
+
+    assert first.artifact_id == second.artifact_id
+
+
+def test_the_version_still_names_the_optimizer_that_produced_it(tmp_path):
+    """Provenance the old scheme did carry, and the fix must not drop."""
+    _s, resolved, _t, _c = load_sprite_example()
+    prog = _compile(tmp_path, "a.json", base_instruction="x", trainset=[resolved])
+    assert prog.version.startswith("v1-gepa")
+    assert prog.version != "v1-gepa"
+
+
+def test_a_pinned_artifact_round_trips_its_distinct_version(tmp_path):
+    _s, resolved, _t, _c = load_sprite_example()
+    prog = _compile(tmp_path, "a.json", base_instruction="x", trainset=[resolved])
+    assert load_pinned(tmp_path / "a.json").artifact_id == prog.artifact_id
+
+
+# ---------------------------------------------------------------------------
+# F-45c39f7d (artifact door) -- load_pinned's model_validate was unguarded too
+# ---------------------------------------------------------------------------
+
+
+def test_a_schema_invalid_pinned_artifact_is_a_structured_refusal(tmp_path):
+    """The finding's sibling repro: a pinned artifact with "version": 123 (wrong type) left
+    load_pinned as a raw pydantic ValidationError, one line after the JSONDecodeError door
+    that already returns the structured shape."""
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps({"program_id": "x", "version": 123, "instruction": "y"}), encoding="utf-8"
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        load_pinned(bad)
+    assert exc.value.code == "IO_ARTIFACT_INVALID"
+    assert exc.value.cause is not None
+    assert "version" in exc.value.to_debug_text()
+
+
+def test_a_pinned_artifact_missing_a_required_field_is_also_structured(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"program_id": "x"}), encoding="utf-8")
+    with pytest.raises(PromptCraftError) as exc:
+        load_pinned(bad)
+    assert exc.value.code == "IO_ARTIFACT_INVALID"
+
+
+def test_a_valid_pinned_artifact_still_loads(tmp_path):
+    """Collateral guard for the new try/except."""
+    good = tmp_path / "good.json"
+    good.write_text(
+        json.dumps({"program_id": "x", "version": "v1-test", "instruction": "y"}),
+        encoding="utf-8",
+    )
+    assert load_pinned(good).artifact_id == "x@v1-test"
+
+
 def test_cli_compile_seed_still_pins(tmp_path, monkeypatch):
     from pcraft.core.optimize.compile import write_seed_artifact
 

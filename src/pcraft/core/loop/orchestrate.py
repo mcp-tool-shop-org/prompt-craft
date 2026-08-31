@@ -17,9 +17,11 @@ still happens after the budget. The contrastive checkpoint is the human artifact
 door (STANDARDS #5). Nothing binds without ADVANCE.
 
 A TRANSIENT generator error (timeout / rate limit / GPU OOM, i.e. an uncoded exception or a coded
-one outside the SYNTH_/CONTRACT_/GATE_/INPUT_ prefixes) is auto-retried within the existing
-best-of-N / repair budget; a SEMANTIC one escalates immediately — never an automatic re-roll
-(retry_policy.classify_failure).
+one outside the SYNTH_/CONTRACT_/GATE_/INPUT_/DEP_ prefixes and not RUNTIME_GENERATOR_LOAD_FAILED)
+is auto-retried within the existing best-of-N / repair budget; a SEMANTIC one escalates immediately
+-- never an automatic re-roll (retry_policy.classify_failure). Every failed generate still records
+an Attempt row naming its code, and the exhaustion error quotes and chains the last failure, so a
+permanently broken generator is not reported as a transient exhaustion that names nothing.
 
 The contract is used TWICE here: ``synthesize`` covers its atoms, and ``compile_questions`` gates the
 same atoms — one declarative source, two consumers."""
@@ -62,7 +64,22 @@ from .retry_policy import (
 class LoopConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     encoder_rules: str = ""
-    thresholds_version: str = "unversioned"
+    thresholds_version: str = ""
+    """The threshold table version the caller believes it is running. Empty means "no claim".
+
+    CORRECTED IN PLACE (F-badd2eba). Nothing read this field: grep across ``src/`` found
+    exactly one occurrence, the declaration. ``_build_record`` stamps the receipt from the
+    ``ThresholdTable`` argument's own ``version``, not from here -- which is the RIGHT thing to
+    stamp, so no receipt ever carried wrong data. The defect was that the knob looked live:
+    both public entry points set it, four test files set it, and a caller who set it to a
+    version the table did not have got no error and no effect.
+
+    ``run()`` now asserts it. Setting it is a statement about which table you are running, and
+    a table that disagrees is refused (``CONFIG_THRESHOLDS_INVALID``) -- the replay-drift check
+    ``asset_record.replay`` performs after the fact, applied at bind time instead. The default
+    changed from ``"unversioned"`` to ``""`` so that "unset" is falsy and therefore asserts
+    nothing; a sentinel string would have made the hook fire for every caller who never set it.
+    """
     records_dir: str = "records"
     base_seed: int = 1000
     max_resynth: int = 3  # coverage-assert backtrack cap
@@ -107,6 +124,22 @@ def run(
     compensators: CompensatorRegistry | None = None,
 ) -> OrchestrationResult:
     config = config or LoopConfig()
+
+    # --- CONFIG: the caller's threshold-version claim, if it made one, must be the table it got.
+    # F-badd2eba: this field was inert. Asserting it here refuses a run whose table is not the one
+    # the caller believes it is running, BEFORE any pixels are generated -- the same drift check
+    # `asset_record.replay` applies to a finished receipt, moved to the door.
+    if config.thresholds_version and config.thresholds_version != thresholds.version:
+        raise PromptCraftError(
+            "CONFIG_THRESHOLDS_INVALID",
+            f"config.thresholds_version is {config.thresholds_version!r} but the threshold table "
+            f"passed to run() is {thresholds.version!r}; the receipt would be stamped "
+            f"{thresholds.version!r}, so the same scores would land in a different zone from the "
+            f"table you named",
+            hint="Pass the version of the table you are actually running (table.version), or "
+            "leave config.thresholds_version unset to assert nothing.",
+        )
+
     compensators = compensators or default_registry()
     budget = config.budget.model_copy()
     attempts: list[Attempt] = []
@@ -262,22 +295,46 @@ def _assemble_conditioning(resolved: ResolvedContract, identity_weight_bump: flo
 
 def _safe_generate(
     generator: Generator, prompt: str, negative_prompt: str, conditioning: dict, seed: int
-) -> GenerationResult | None:
+) -> tuple[GenerationResult | None, PromptCraftError | None]:
     """Call generator.generate(), classifying any raised error per the TRANSIENT/SEMANTIC split
     retry_policy documents (F-83c3ad00). A bare exception is wrapped first
     (``RUNTIME_GENERATE_FAILED`` carries none of classify_failure's semantic prefixes, so it reads
     as TRANSIENT -- the same bucket a raw timeout/network error belongs in) so an uncoded crash is
-    treated the same as a coded one. TRANSIENT returns None so the caller's own retry loop
-    (best-of-N or the repair ladder) naturally moves on within its existing budget -- no extra
-    budget is granted. SEMANTIC raises _GenerationBlockedError so run() escalates immediately: never an
-    automatic re-roll for a semantic defect."""
+    treated the same as a coded one. TRANSIENT returns ``(None, err)`` so the caller's own retry
+    loop (best-of-N or the repair ladder) naturally moves on within its existing budget -- no extra
+    budget is granted. SEMANTIC raises _GenerationBlockedError so run() escalates immediately: never
+    an automatic re-roll for a non-retryable defect.
+
+    CORRECTED IN PLACE (F-9ee95e14). This returned a bare ``None`` on the TRANSIENT path and the
+    classified error was discarded whole -- code, message, hint and cause chain. Both callers then
+    did ``continue`` and appended no Attempt, so a permanently broken generator was reported as a
+    transient exhaustion that named nothing, and the receipt's attempts list systematically omitted
+    exactly the runs that went wrong. The error is now handed back so the caller can record it.
+    """
     try:
-        return generator.generate(prompt, negative_prompt, conditioning, seed)
+        return generator.generate(prompt, negative_prompt, conditioning, seed), None
     except Exception as err:  # noqa: BLE001 - classified immediately below, never swallowed
         wrapped = wrap_error(err, "RUNTIME_GENERATE_FAILED")
         if classify_failure(wrapped.code) is OutcomeClass.SEMANTIC:
             raise _GenerationBlockedError(wrapped) from wrapped
-        return None
+        return None, wrapped
+
+
+def _failed_generate_attempt(attempts, seed: int, err: PromptCraftError | None, repair=None) -> Attempt:
+    """One Attempt row for a generate that never produced an image (F-9ee95e14).
+
+    ``overall`` is UNAVAILABLE because nothing was gated -- the same Zone the roll-up uses for
+    "no required atom produced a score" -- and the verdict is AMEND, since a failed generate is
+    never an ADVANCE. The code goes in ``note`` so the receipt names the real failure rather than
+    recording a gap where an attempt happened."""
+    return Attempt(
+        attempt=len(attempts) + 1,
+        seed=seed,
+        overall=Zone.UNAVAILABLE,
+        verdict=Verdict.AMEND,
+        repair=repair,
+        note=f"generate failed [{err.code}]" if err is not None else "generate failed",
+    )
 
 
 def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: str):
@@ -299,12 +356,18 @@ def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: s
 
 def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget):
     candidates: list[tuple[GenerationResult, harness.GateTranscript]] = []
+    last_err: PromptCraftError | None = None
     n = max(1, budget.best_of_n)
     for i in range(n):
         seed = config.base_seed + i
-        gen = _safe_generate(generator, synth.prompt, synth.negative_prompt, conditioning, seed)
+        gen, gen_err = _safe_generate(generator, synth.prompt, synth.negative_prompt, conditioning, seed)
         if gen is None:
-            continue  # TRANSIENT generate() failure -- auto-retry with the next seed, same budget
+            # TRANSIENT generate() failure -- auto-retry with the next seed, same budget. The
+            # attempt is RECORDED (F-9ee95e14): it happened, it burned a seed, and dropping it
+            # made retry_count and the receipt under-report the runs that failed.
+            last_err = gen_err
+            attempts.append(_failed_generate_attempt(attempts, seed, gen_err))
+            continue
         transcript = _gate(gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=transcript.overall,
                                 verdict=verdict_from_transcript(transcript), note="best-of-N"))
@@ -316,9 +379,17 @@ def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, condition
         # every attempt in the loop above was a TRANSIENT generate() failure -- the auto-retry
         # budget (best-of-N) is now exhausted with nothing to gate. Escalate rather than hand
         # _select_best an empty list.
+        #
+        # CORRECTED IN PLACE (F-9ee95e14): this used to be raised with no ``cause=`` and no
+        # mention of the code that actually failed, so the escalation reason -- which the CLI
+        # surfaces verbatim, then wraps in GATE_UNAVAILABLE whose hint says "check the
+        # generator/verifier the reason names" -- named nothing at all. The last failure is now
+        # both quoted in the message and chained as the cause, so --debug recovers its traceback.
+        message = f"every best-of-{n} generate() attempt raised a transient error; none produced an image"
+        if last_err is not None:
+            message += f". Last failure: [{last_err.code}] {last_err.message}"
         raise _GenerationBlockedError(PromptCraftError(
-            "RUNTIME_GENERATE_EXHAUSTED",
-            f"every best-of-{n} generate() attempt raised a transient error; none produced an image",
+            "RUNTIME_GENERATE_EXHAUSTED", message, cause=last_err,
         ))
     return _select_best(candidates)
 
@@ -382,12 +453,16 @@ def _repair_ladder(
             }
             budget.inpaints -= 1
 
-        new_gen = _safe_generate(
+        new_gen, gen_err = _safe_generate(
             generator, current_synth.prompt, current_synth.negative_prompt, cond, seed
         )
         if new_gen is None:
-            continue  # TRANSIENT generate() failure on this repair attempt -- repairs_left and
-                      # the action's own sub-budget above are already charged; try the next one
+            # TRANSIENT generate() failure on this repair attempt -- repairs_left and the action's
+            # own sub-budget above are already charged; try the next one. F-9ee95e14: the row is
+            # recorded, carrying the repair that was attempted, so the receipt shows a repair that
+            # was paid for and never ran instead of showing nothing.
+            attempts.append(_failed_generate_attempt(attempts, seed, gen_err, repair=repair))
+            continue
         new_t = _gate(new_gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=new_t.overall,
                                 verdict=verdict_from_transcript(new_t), repair=repair, note="repair"))

@@ -116,9 +116,11 @@ Two rules that will bite you:
 
 ## Fences
 
-- Version stays **0.4.0** unless the Director says bump. Pre-1.0 is a standing
-  ruling: a generate that ran is not a stability claim. The landing-page badge says
-  `pre-1.0, deliberately` — that is a published position, not an oversight.
+- Version stays **1.0.0** unless the Director says bump. The pre-1.0 standing ruling
+  is RETIRED: it argued from capability, and v1.0.0 (shipped 2026-08-18) is a claim
+  about interfaces, not pictures — `STABILITY.md` names what is covered and what is
+  not. The landing badge no longer says pre-1.0. Do not re-derive the old position
+  from this file's history sections below.
 - `identity_subgate.py`: no delete, no promote, no wire. Thresholds 0.55 / 0.05 stay.
 - No mutmut, no dependabot.
 - Do not lower a gate to make it green. Widening a rule set and then blanket-ignoring
@@ -136,8 +138,9 @@ Two rules that will bite you:
 
 ## What is true (re-measure before quoting)
 
-- **v0.4.0 shipped** to PyPI + npm 2026-08-18 (tag `v0.4.0`, both registries
-  confirmed). Suite last counted **359**. Re-count before quoting.
+- **v1.0.0 shipped** to PyPI + npm 2026-08-18 (tag `v1.0.0`, both registries
+  confirmed; `STABILITY.md` is the promise). Suite last counted **394** (2026-08-31).
+  Re-count before quoting.
 - The gate **checks itself**: the lint and typecheck legs cover `verify.py`, pinned by
   `test_the_gate_checks_the_file_that_defines_the_gate` so they cannot narrow back.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.

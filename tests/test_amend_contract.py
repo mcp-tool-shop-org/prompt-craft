@@ -10,15 +10,30 @@ from the finding, watched RED against the pre-fix source, then GREEN after the f
                 guard does not catch.
     F-fb7194d3  Duplicate atom ids within one contract are never rejected, so
                 QuestionDAG.topological() silently drops the second declaration.
+
+A later wave (swarm-1788165870-6880) added two more, same shape -- an exception escaping
+the loader's own documented boundary:
+
+    F-45c39f7d  A structurally-invalid contract file raises a raw pydantic ValidationError
+                out of _read_contract, so the CLI exits 2/RUNTIME_UNEXPECTED where the
+                covered exit-code contract promises 1 with a CONTRACT_ code.
+    F-84788251  _SEVERITY_RANK is a hand-maintained literal subscripted with [], so a
+                Severity member this build cannot rank escapes as a raw KeyError.
 """
 
 from __future__ import annotations
 
+import ast
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+from pcraft.cli import app
 from pcraft.core.contract.compile_questions import compile_questions
-from pcraft.core.contract.loader import resolve
+from pcraft.core.contract.loader import ContractStore, resolve
 from pcraft.core.contract.schema import (
     Atom,
     CheckType,
@@ -31,6 +46,8 @@ from pcraft.core.contract.schema import (
     SpatialKind,
 )
 from pcraft.errors import PromptCraftError
+
+runner = CliRunner()
 
 
 def _lookup(contracts):
@@ -613,3 +630,337 @@ def test_resolved_contract_rejects_cross_list_id_collision():
             must_not=[MustNot(id="sigil", claim="the legion sigil")],
         )
     assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"
+
+
+# ---------------------------------------------------------------------------
+# F-45c39f7d -- a structurally-invalid contract is a STRUCTURED refusal, exit 1
+# ---------------------------------------------------------------------------
+
+
+def _write_contract(directory, name: str, payload: dict):
+    path = directory / name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _bad_check_type_payload() -> dict:
+    """The finding's own repro: a check_type outside the CheckType enum."""
+    return {
+        "$schema": "prompt-craft/contract.v1",
+        "id": "faction:typo",
+        "level": "faction",
+        "must_have": [
+            {"id": "tabard", "claim": "a tabard", "check_type": "not_a_real_check_type"}
+        ],
+    }
+
+
+def test_a_structurally_invalid_contract_file_is_a_structured_refusal(tmp_path):
+    """Before the fix `Contract.model_validate(data)` in _read_contract was unguarded, so a
+    bad enum value left the loader as a raw pydantic_core.ValidationError -- an exception
+    class from outside the PromptCraftError hierarchy crossing the loader's boundary."""
+    _write_contract(tmp_path, "typo.contract.json", _bad_check_type_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert exc.value.code.startswith("CONTRACT_")
+    assert exc.value.exit_code == 1
+
+
+def test_a_structurally_invalid_contract_names_the_file_and_keeps_the_cause(tmp_path):
+    """A diagnosis, not just a reclassification: the refusal must say WHICH file, and keep
+    the pydantic error as `cause` so --debug can still show the field-level detail."""
+    path = _write_contract(tmp_path, "typo.contract.json", _bad_check_type_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert str(path) in exc.value.message or path.name in exc.value.message
+    assert exc.value.cause is not None
+    assert "check_type" in exc.value.to_debug_text()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # extra/misspelled key under extra="forbid"
+        {"id": "faction:x", "level": "faction", "must_hav": []},
+        # wrong field type
+        {"id": "faction:x", "level": "faction", "must_have": "tabard"},
+        # the literal "$schema": null the finding calls out
+        {"$schema": None, "id": "faction:x", "level": "faction"},
+        # missing a required field
+        {"level": "faction"},
+    ],
+    ids=["extra-key", "wrong-type", "null-schema", "missing-id"],
+)
+def test_every_structural_contract_defect_is_a_contract_error(tmp_path, payload):
+    _write_contract(tmp_path, "bad.contract.json", payload)
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert exc.value.code.startswith("CONTRACT_")
+    assert exc.value.exit_code == 1
+
+
+def test_the_cli_exits_1_not_2_on_a_structurally_invalid_contract(tmp_path):
+    """The end-to-end repro from the finding, via typer's CliRunner. STABILITY.md's covered
+    exit-code contract says 1 = user error (INPUT_/CONFIG_/CONTRACT_); this path was landing
+    on the RUNTIME_UNEXPECTED backstop at 2, which the code's own hint calls
+    'the backstop, not a diagnosis'."""
+    _write_contract(tmp_path, "typo.contract.json", _bad_check_type_payload())
+    result = runner.invoke(app, ["synth", "--contracts-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "RUNTIME_UNEXPECTED" not in text
+    assert "CONTRACT_" in text
+
+
+def test_a_well_formed_contract_tree_still_loads(tmp_path):
+    """The collateral guard: wrapping the third failure mode must not refuse valid input."""
+    _write_contract(
+        tmp_path,
+        "ok.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:ok",
+            "level": "faction",
+            "must_have": [{"id": "tabard", "claim": "a tabard", "check_type": "vqa"}],
+        },
+    )
+    store = ContractStore([tmp_path])
+    assert store.ids() == ["faction:ok"]
+
+
+def test_a_promptcrafterror_raised_inside_a_validator_still_passes_through(tmp_path):
+    """The guard must re-raise, not re-wrap: schema.py's duplicate-id check raises a
+    PromptCraftError from inside a @model_validator, and pydantic does NOT wrap those.
+    Its code must survive the new try/except unchanged."""
+    _write_contract(
+        tmp_path,
+        "dupe.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:dupe",
+            "level": "faction",
+            "must_have": [
+                {"id": "face", "claim": "a face", "check_type": "vqa"},
+                {"id": "face", "claim": "another face", "check_type": "vqa"},
+            ],
+        },
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"
+
+
+# ---------------------------------------------------------------------------
+# F-84788251 -- an unrankable severity fails loud-and-STRUCTURED, not raw KeyError
+# ---------------------------------------------------------------------------
+
+
+def test_the_severity_rank_table_covers_every_severity_member():
+    """The exhaustiveness proof. This is the test that goes red the day a third member is
+    added to the Severity enum without a rank -- which is the whole point of the finding."""
+    from pcraft.core.contract.loader import _SEVERITY_RANK
+
+    assert set(_SEVERITY_RANK) == set(Severity)
+
+
+def test_an_unrankable_severity_is_a_structured_refusal():
+    from pcraft.core.contract.loader import _severity_rank
+
+    with pytest.raises(PromptCraftError) as exc:
+        _severity_rank("advisory")
+    assert exc.value.code == "CONTRACT_UNKNOWN_SEVERITY"
+
+
+def test_severity_rank_still_orders_optional_below_required():
+    """The rank must not be derived from enum declaration order -- Severity declares
+    `required` first, so enumerate() would invert the comparison and turn the whole
+    fail-closed relaxation guard into a pass-open one."""
+    from pcraft.core.contract.loader import _severity_rank
+
+    assert _severity_rank(Severity.optional) < _severity_rank(Severity.required)
+
+
+def test_a_severity_this_build_cannot_rank_does_not_escape_the_loader_as_a_keyerror():
+    """Through the real merge path. `_SEVERITY_RANK[atom.severity]` was a bare subscript,
+    so an unranked member left `resolve()` as a raw KeyError -- the same boundary breach as
+    F-45c39f7d, different mechanism."""
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[Atom(id="hat", claim="a hat", check_type=CheckType.vqa)],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[Atom(id="hat", claim="a hat", check_type=CheckType.vqa)],
+    )
+    # A member a future Severity could carry; this build has no rank for it.
+    character.must_have[0].severity = "advisory"
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_UNKNOWN_SEVERITY"
+
+
+def test_an_unrankable_must_not_severity_is_also_structured():
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_not=[MustNot(id="no_gun", claim="a firearm")],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_not=[MustNot(id="no_gun", claim="a firearm")],
+    )
+    character.must_not[0].severity = "advisory"
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    assert exc.value.code == "CONTRACT_UNKNOWN_SEVERITY"
+
+
+# ---------------------------------------------------------------------------
+# F-fd21bd37 -- user-facing text in this domain must survive a cp437 console
+#
+# Family-of-call-sites sibling of the em-dash crash the cli-ux and core-gate-loop
+# agents closed in their own files. A structured refusal is worth nothing if PRINTING it
+# raises: `_emit` writes the message and hint to stdout, and a classic cmd.exe console is
+# cp437, which has no U+2014. The refusal then dies as a UnicodeEncodeError -- turning a
+# clean exit-1 diagnosis into a traceback, at exactly the moment the user has a broken
+# contract and needs to read the hint.
+#
+# Two live hint literals in this domain carried an em dash: loader.py's _RELAXATION_HINT
+# (raised by every CONTRACT_RELAXATION) and schema.py's CONTRACT_DUPLICATE_ATOM_ID hint.
+#
+# `pcraft schema` is a near miss worth recording rather than a second bug. It dumps
+# Contract.model_json_schema(), and pydantic DOES fold each model's docstring into that JSON
+# as `description` (measured: Atom's docstring is in the output) -- so docstrings in
+# schema.py are user-facing text. That path survives today only because the CLI calls
+# json.dumps without ensure_ascii=False, and the default escapes every non-ASCII character
+# to a \\uXXXX sequence. The protection is json's default, not the text being printable;
+# one ensure_ascii=False would expose it.
+#
+# So the sweep below covers whole files rather than a hand-picked list of strings: which
+# text is user-facing is not a stable property of where that text sits.
+# ---------------------------------------------------------------------------
+
+_CONSOLE_ENCODING = "cp437"
+
+_OWNED_SOURCE_GLOBS = (
+    "core/contract/*.py",
+    "core/synth/*.py",
+    "core/optimize/*.py",
+    "core/plugin.py",
+    "core/__init__.py",
+)
+
+
+def _owned_sources():
+    import pcraft
+
+    root = Path(pcraft.__file__).parent
+    found: list[Path] = []
+    for pattern in _OWNED_SOURCE_GLOBS:
+        found.extend(sorted(root.glob(pattern)))
+    assert found, "owned-source globs matched nothing; the fixture is broken, not the code"
+    return found
+
+
+def _string_constants_under(node) -> list[str]:
+    """Every str literal beneath a node, f-string fragments included."""
+    return [
+        n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+
+
+def _user_facing_literals(path: Path) -> list[tuple[str, str]]:
+    """(where, text) for every refusal message/hint literal in one owned source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        # every string inside a PromptCraftError(...) construction: code, message, hint
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = getattr(func, "id", None) or getattr(func, "attr", None)
+            if name == "PromptCraftError":
+                where = f"{path.name}:{node.lineno} PromptCraftError"
+                out.extend((where, text) for text in _string_constants_under(node))
+        # and every module-level hint constant those calls point at by name
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.endswith("_HINT"):
+                    where = f"{path.name}:{node.lineno} {target.id}"
+                    out.extend((where, text) for text in _string_constants_under(node.value))
+    return out
+
+
+def test_every_refusal_message_and_hint_encodes_on_a_cp437_console():
+    offenders = []
+    for path in _owned_sources():
+        for where, text in _user_facing_literals(path):
+            try:
+                text.encode(_CONSOLE_ENCODING, errors="strict")
+            except UnicodeEncodeError as err:
+                offenders.append(f"{where}: {err.reason} at {text[err.start:err.end]!r}")
+    assert not offenders, "user-facing text that a cp437 console cannot print:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_the_relaxation_hint_the_loader_raises_most_is_printable():
+    """The specific literal that carried the em dash, named so a regression is unmissable."""
+    from pcraft.core.contract.loader import _RELAXATION_HINT
+
+    _RELAXATION_HINT.encode(_CONSOLE_ENCODING, errors="strict")
+
+
+def test_a_raised_contract_refusal_renders_on_a_cp437_console():
+    """End to end through the real object: to_safe_text is what `_emit` hands to the console."""
+    faction = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[Atom(id="hat", claim="a hat", check_type=CheckType.vqa)],
+    )
+    character = Contract(
+        id="char:y",
+        level="character",
+        extends="faction:x",
+        must_have=[
+            Atom(id="hat", claim="a hat", check_type=CheckType.vqa, severity=Severity.optional)
+        ],
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(character, _lookup([faction, character]))
+    exc.value.to_safe_text().encode(_CONSOLE_ENCODING, errors="strict")
+
+
+def test_the_dumped_contract_json_schema_is_printable():
+    """`pcraft schema` writes this to stdout. Green before the sweep as well as after --
+    kept because it pins the reason. Pydantic folds every model docstring into the schema as
+    `description`, so schema.py's prose IS in this output; what keeps it printable is that
+    the CLI leaves json.dumps' ensure_ascii default alone. This test is what goes red if
+    someone "fixes" that call by passing ensure_ascii=False.
+    """
+    from pcraft.core.contract.schema import export_json_schema
+
+    dumped = json.dumps(export_json_schema(), indent=2)  # exactly what cli/__init__.py does
+    assert "description" in dumped  # the docstrings really are in the printed surface
+    dumped.encode(_CONSOLE_ENCODING, errors="strict")
+
+
+def test_no_owned_source_file_carries_a_non_ascii_character():
+    """The sweep guard that keeps the three tests above true as this domain is edited.
+
+    ASCII rather than cp437: cp437 would accept a handful of accented characters that then
+    break on a UTF-8-only reader, and no message in this domain needs one. Holding the whole
+    file to ASCII means nobody has to re-decide which literals are user-facing.
+    """
+    offenders = []
+    for path in _owned_sources():
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            bad = {c for c in line if ord(c) > 127}
+            if bad:
+                codepoints = ", ".join(sorted(f"U+{ord(c):04X}" for c in bad))
+                offenders.append(f"{path.name}:{lineno}: {codepoints}")
+    assert not offenders, "non-ASCII in owned source:\n" + "\n".join(offenders)

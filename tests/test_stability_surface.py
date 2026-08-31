@@ -25,7 +25,7 @@ from pcraft.core.receipt.asset_record import (
     load,
     replay,
 )
-from pcraft.errors import PromptCraftError, exit_code_for
+from pcraft.errors import DEFAULT_HINTS, PromptCraftError, exit_code_for
 from pcraft.sample import load_sprite_example, run_mock_loop
 
 # --------------------------------------------------------------------------------------
@@ -63,6 +63,52 @@ def test_a_receipt_from_the_future_is_refused_by_a_named_code_not_as_corruption(
     assert excinfo.value.code == "IO_RECORD_SCHEMA_UNSUPPORTED"
     assert excinfo.value.code != "IO_RECORD_INVALID", "a future receipt is not a corrupt one"
     assert "99" in str(excinfo.value)
+    # F-4846c12e: the code was pinned and the exit code was not, so only half this invariant was
+    # proven -- and the unproven half disagreed with its own sibling. STABILITY.md introduces
+    # IO_RECORD_SCHEMA_UNSUPPORTED and CONTRACT_SCHEMA_UNSUPPORTED together, as one idea applied
+    # to the two on-disk formats, but the IO_ prefix mapped this one to 2 ("prompt-craft
+    # crashed") while the contract sibling got 1 ("fix your input") -- pinned at line 102 below
+    # with the same reasoning. A file that is perfectly well formed and merely newer is user
+    # input. Mirrors that assertion so both halves are proven on both siblings.
+    assert exit_code_for(excinfo.value.code) == 1, "a receipt from the future is user input, exit 1"
+    # The distinct code has to deliver distinct guidance too. IO_RECORD_INVALID -- the code
+    # STABILITY.md says this must not be confused with -- carries a hint telling you to re-bind;
+    # this one carried none at all, so to_safe_text() emitted no hint line and the reader was
+    # left with the re-bind advice from the code they were explicitly not given.
+    assert excinfo.value.hint, "a distinct code with no distinct guidance is half a refusal"
+    assert "hint:" in excinfo.value.to_safe_text()
+    assert "re-bind" in excinfo.value.hint.lower(), "the actionable half is: do not re-bind this file"
+
+
+def test_every_error_hint_prints_on_a_legacy_windows_console():
+    """F-fd21bd37, this file's family of call sites: every DEFAULT_HINTS value is printed
+    verbatim by ``to_safe_text()``, which is the CLI's whole error surface. Three of them carried
+    U+2014 EM DASH (GATE_SAME_FAMILY, GATE_UNAVAILABLE, CONTRACT_RELAXATION).
+
+    On a cp437 console -- classic cmd.exe -- that is not mojibake, it is a hard
+    UnicodeEncodeError while printing: the error path CRASHES instead of telling the user what
+    went wrong, and it crashes hardest on GATE_UNAVAILABLE, whose entire job is to explain a
+    could-not-run. Pinned as ASCII rather than merely cp437-encodable, because ASCII is the only
+    codepage-independent guarantee and these strings are advice, not typography."""
+    offenders: dict[str, str] = {}
+    for code, hint in DEFAULT_HINTS.items():
+        try:
+            hint.encode("ascii")
+        except UnicodeEncodeError as err:
+            offenders[code] = hint[err.start : err.end]
+    assert not offenders, (
+        f"DEFAULT_HINTS values must be pure ASCII; these are not: {offenders}. "
+        "They print straight to a console whose codepage we do not control."
+    )
+
+
+def test_the_whole_rendered_error_survives_cp437():
+    """The end-to-end shape of the same crash: it is the composed to_safe_text() line that gets
+    written, not the hint in isolation, so the assertion is made against the real output for
+    every code that has a hint."""
+    for code in sorted(DEFAULT_HINTS):
+        rendered = PromptCraftError(code, "probe message").to_safe_text()
+        rendered.encode("cp437")  # raises UnicodeEncodeError if a console could not print it
 
 
 def test_a_genuinely_malformed_receipt_still_reports_as_invalid(tmp_path):

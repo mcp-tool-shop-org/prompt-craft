@@ -5,7 +5,7 @@ hint / cause? / retryable?) and renamed. Every user-facing error carries a machi
 namespaced ``code``, a human ``message``, and an actionable ``hint``. ``to_safe_text`` is the
 end-user / LLM / MCP surface (no traceback); ``to_debug_text`` is gated behind ``--debug``.
 
-Error-code namespaces (prefix → CLI exit code):
+Error-code namespaces (prefix -> CLI exit code):
     INPUT_   bad user input / missing args / invalid contract      -> exit 1
     CONFIG_  misconfiguration (missing key, bad threshold table)    -> exit 1
     CONTRACT_ contract resolution / relaxation violations           -> exit 1
@@ -49,6 +49,13 @@ _EXIT_BY_PREFIX: Final[dict[str, int]] = {
 _EXIT_BY_CODE: Final[dict[str, int]] = {
     "GATE_UNAVAILABLE": 4,
     "IO_GATE_INPUT": 4,
+    # CORRECTED IN PLACE (F-4846c12e). STABILITY.md introduces this code and
+    # CONTRACT_SCHEMA_UNSUPPORTED together, as the same idea applied to the two on-disk
+    # formats -- and they did not get the same exit code. The IO_ prefix mapped a receipt
+    # from the future to 2 ("prompt-craft crashed") while its contract sibling got 1 ("fix
+    # your input"). A receipt that is perfectly well formed and merely written by a newer
+    # build is user input, not a runtime fault, so it takes the same 1 the sibling takes.
+    "IO_RECORD_SCHEMA_UNSUPPORTED": 1,
 }
 
 DEFAULT_HINTS: Final[dict[str, str]] = {
@@ -59,7 +66,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "STATE_COMPILE_NOT_WIRED": "Use optimizer='gepa' or 'miprov2'. Unknown names refuse.",
     "STATE_COMPILE_EMPTY": "The optimizer returned nothing to pin. Check the runner.",
     "GATE_SAME_FAMILY": "The generator and the gate verifier are the same model family. "
-    "Use a different-family verifier — a model must never be its own gate.",
+    "Use a different-family verifier -- a model must never be its own gate.",
     "GATE_FAMILIES_NOT_A_LIST": "Pass a list of verifier family names. A bare string is iterated as characters and the guard cannot fire.",
     "GATE_CLIPSCORE_BANNED": "CLIPScore is banned as the gate metric (bag-of-concepts, blind to "
     "binding/counts). Use SigLIP2 (Tier-0), VQAScore (Tier-1), or DSG (Tier-2).",
@@ -73,18 +80,25 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "and inpaint_from. A missing plate is a refuse, not a plain text-to-image render.",
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom, "
     "and may not rewrite inherited content (claim, check_type, spatial, enum, depends_on). "
-    "Raise the severity, or add a new id — never substitute an existing id's content.",
+    "Raise the severity, or add a new id -- never substitute an existing id's content.",
     "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom. Exit 4.",
-    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score. Exit 4, not 2 — this is not a failed atom.",
+    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score. Exit 4, not 2 -- this is not a failed atom.",
     "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",
     "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
+    "IO_RECORD_SCHEMA_UNSUPPORTED": "This receipt was written by a NEWER prompt-craft than the "
+    "one reading it. Upgrade prompt-craft to read it. Do NOT re-bind: the file is well formed, "
+    "not corrupt, and re-binding would destroy a good receipt. Exit 1 (your input), not 2.",
     "CONFIG_THRESHOLDS_INVALID": "Each band needs high >= low and both in [0, 1]. Recalibrate or fix the table.",
     "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
     "INPUT_IMAGE_NAME": "Pass --image-name as local.png=cloud-hash.png (repeatable).",
     "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",
     "RUNTIME_UNEXPECTED": "An unclassified error escaped the command. Re-run with --debug to see "
     "the underlying traceback; this code is the backstop, not a diagnosis.",
+    "RUNTIME_GENERATE_EXHAUSTED": "Every best-of-N generate() attempt failed before an image "
+    "existed, so nothing was gated. The message names the last failure -- fix THAT code, not the "
+    "seed. A failure that repeats on every attempt is not transient: check the generator's model "
+    "load and its dependencies. Re-run with --debug for the underlying traceback.",
 }
 
 

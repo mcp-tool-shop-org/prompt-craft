@@ -190,6 +190,66 @@ def test_cli_recipe_hands_is_a_refuse(tmp_path):
     assert "bracer" in text
 
 
+# ============================================== F-90667b30 (the receipt may not assert what nothing checked)
+# RecipeReport.do_not_mask_bracer was declared `= True` and never assigned anywhere; report_for()
+# did not accept or consider fill_mask at all. Meanwhile build_graph's bracer guard is bypassed
+# whenever fill_mask is not None -- both refusals are gated on `fill_mask is None`. MEASURED:
+# from_conditioning(fill_region='hands', fill_mask=<a plate>) was ACCEPTED and returned a report
+# carrying fill_region='hands' AND do_not_mask_bracer=True. The module's single measured safety
+# constraint (2026-08-18: a hands/weapon region ate the bone-spike bracer) was being handed to the
+# operator as an unconditional success claim.
+
+
+def test_a_supplied_mask_may_not_claim_the_bracer_was_spared(tmp_path):
+    mask = write_solid_png(tmp_path / "painted-mask.png")
+    _graph, report = kontext_fill.from_conditioning(
+        _lock_conditioning(tmp_path), fill_region="hands", fill_mask=str(mask)
+    )
+    # A painted mask's coverage is not inspectable here, so the honest value is "unverified",
+    # never True. True is the one answer the code has no evidence for.
+    assert report.do_not_mask_bracer is not True
+    assert report.mask_source == "supplied-mask"
+    # the graph does not use the region string at all once a mask is supplied
+    assert report.fill_region != "hands"
+    assert report.requested_fill_region == "hands"
+
+
+def test_the_builtin_fist_path_is_the_only_one_that_stamps_the_constraint(tmp_path):
+    _graph, report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    assert report.do_not_mask_bracer is True
+    assert report.mask_source == "builtin-fist"
+    assert report.fill_region == "fist"
+    assert report.requested_fill_region == "fist"
+
+
+def test_the_field_tracks_the_graph_not_the_request(tmp_path):
+    """The mask nodes the graph actually builds must agree with what the receipt says built them."""
+    mask = write_solid_png(tmp_path / "painted-mask.png")
+    supplied, supplied_report = kontext_fill.from_conditioning(
+        _lock_conditioning(tmp_path), fill_mask=str(mask)
+    )
+    builtin, builtin_report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    supplied_types = {n["class_type"] for n in supplied.values()}
+    builtin_types = {n["class_type"] for n in builtin.values()}
+    # supplied mask -> ImageToMask off a LoadImage; builtin -> the SolidMask/MaskComposite fist blob
+    assert "ImageToMask" in supplied_types and "MaskComposite" not in supplied_types
+    assert "MaskComposite" in builtin_types and "ImageToMask" not in builtin_types
+    assert supplied_report.mask_source == "supplied-mask"
+    assert builtin_report.mask_source == "builtin-fist"
+    assert builtin_report.do_not_mask_bracer is True
+    assert supplied_report.do_not_mask_bracer is not True
+
+
+def test_report_for_alone_cannot_claim_a_constraint_it_was_not_told_about(tmp_path):
+    """report_for() is public. Called with the same mask the graph got, it must agree with it."""
+    from pcraft.domains.image.generator.reference_lock import assemble
+
+    mask = write_solid_png(tmp_path / "painted-mask.png")
+    lock = assemble(_lock_conditioning(tmp_path))
+    assert kontext_fill.report_for(lock).do_not_mask_bracer is True
+    assert kontext_fill.report_for(lock, fill_mask=str(mask)).do_not_mask_bracer is not True
+
+
 def test_shipped_example_builds_a_graph():
     from pcraft.core.loop.orchestrate import _assemble_conditioning
     from pcraft.sample import load_sprite_example
@@ -201,3 +261,24 @@ def test_shipped_example_builds_a_graph():
     assert "ashen-reaver-front.png" in report.identity
     assert "two-hand-weapon.openpose.png" in report.pose
     assert any(n["class_type"] == "ImageCropV2" for n in graph.values())
+
+
+# Coordinator fold-edit (wave 2): the terminal line at cli/__init__.py used to print the literal
+# "bracer: not masked" unconditionally -- an honest receipt under a dishonest banner. The line now
+# reads report.do_not_mask_bracer; these pin both directions so the banner cannot drift from the
+# receipt again.
+def test_cli_recipe_terminal_line_tracks_the_receipt_for_a_painted_mask(tmp_path):
+    mask = write_solid_png(tmp_path / "painted-mask.png")
+    result = runner.invoke(
+        app,
+        ["recipe", "--fill-mask", str(mask), "--out", str(tmp_path / "r.json")],
+    )
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert "bracer: unverified (caller-painted mask)" in result.stdout
+    assert "bracer: not masked" not in result.stdout
+
+
+def test_cli_recipe_terminal_line_still_claims_the_builtin_fist_constraint(tmp_path):
+    result = runner.invoke(app, ["recipe", "--out", str(tmp_path / "r.json")])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert "bracer: not masked" in result.stdout

@@ -55,15 +55,75 @@ DEFAULT_FILL_PROMPT = (
 STAGES = ("stitch", "kontext", "crop_left", "fill_fist")
 
 
+BUILTIN_FIST_MASK = "builtin-fist"
+SUPPLIED_MASK = "supplied-mask"
+
+
+class MaskPlan(BaseModel):
+    """What the Fill pass will ACTUALLY mask -- computed once, then both built and reported.
+
+    F-90667b30: ``RecipeReport.do_not_mask_bracer`` used to be a hardcoded ``= True`` that nothing
+    ever assigned, while ``build_graph``'s bracer guard was bypassed entirely whenever a painted
+    ``fill_mask`` was supplied (both refusals are gated on ``fill_mask is None``). So
+    ``fill_region='hands'`` plus any mask was accepted AND stamped as bracer-safe. The receipt may
+    not assert a constraint nothing checked: this type is the one place the answer is computed, and
+    ``build_graph`` and ``report_for`` both read it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    source: str  # BUILTIN_FIST_MASK | SUPPLIED_MASK
+    region: str  # what the graph masks, NOT what was asked for
+    requested_region: str
+    # True only for the measured fist-only box. None = UNVERIFIED: a caller-painted mask's coverage
+    # is not inspectable from here, so neither "spared" nor "eaten" is a claim this code can make.
+    do_not_mask_bracer: bool | None
+
+
+def resolve_mask_plan(fill_region: str = "fist", fill_mask: str | Path | None = None) -> MaskPlan:
+    """Refuse the measured-unsafe regions, then say what the Fill pass will actually mask."""
+    requested = (fill_region or "fist").strip().lower()
+    if fill_mask is None:
+        if requested in BRACER_REGIONS:
+            raise PromptCraftError(
+                "GATE_CONDITIONING_UNSUPPORTED",
+                f"fill region {requested!r} masks the bracer; the keeper used fist-only",
+                hint="Use fill_region=fist, or pass a painted fist-only mask. "
+                "Do not mask the bracer.",
+            )
+        if requested != "fist":
+            raise PromptCraftError(
+                "GATE_CONDITIONING_UNSUPPORTED",
+                f"fill region {requested!r} is not the measured fist-only mask",
+                hint="The Fill pass is fist-only. Use fill_region=fist.",
+            )
+        return MaskPlan(
+            source=BUILTIN_FIST_MASK,
+            region="fist",
+            requested_region=requested,
+            do_not_mask_bracer=True,
+        )
+    # A painted mask replaces the region box outright -- the region string is unused in graph
+    # construction from here on, so the receipt must stop repeating it as if it were applied.
+    return MaskPlan(
+        source=SUPPLIED_MASK,
+        region=SUPPLIED_MASK,
+        requested_region=requested,
+        do_not_mask_bracer=None,
+    )
+
+
 class RecipeReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     recipe_id: str = RECIPE_ID
     stages: list[str] = list(STAGES)
     identity: str
+    identity_method: str = ""  # the method the contract DECLARED for the stitched plate
     pose: str
     crop: str = "left-half"
-    fill_region: str = "fist"
-    do_not_mask_bracer: bool = True
+    fill_region: str = "fist"  # what the Fill pass masks, not what was requested
+    requested_fill_region: str = "fist"
+    mask_source: str = BUILTIN_FIST_MASK
+    do_not_mask_bracer: bool | None = True  # None = unverified (caller-painted mask)
     kontext_prompt: str
     fill_prompt: str
     seed: int
@@ -137,20 +197,9 @@ def build_graph(
             "the Kontext stitch needs a pose map",
             hint="A spatial.kind=pose atom names the OpenPose plate.",
         )
-    region = (fill_region or "fist").strip().lower()
-    if fill_mask is None and region in BRACER_REGIONS:
-        raise PromptCraftError(
-            "GATE_CONDITIONING_UNSUPPORTED",
-            f"fill region {region!r} masks the bracer; the keeper used fist-only",
-            hint="Use fill_region=fist, or pass a painted fist-only mask. "
-            "Do not mask the bracer.",
-        )
-    if fill_mask is None and region != "fist":
-        raise PromptCraftError(
-            "GATE_CONDITIONING_UNSUPPORTED",
-            f"fill region {region!r} is not the measured fist-only mask",
-            hint="The Fill pass is fist-only. Use fill_region=fist.",
-        )
+    # One computation of what gets masked, shared with report_for() so the receipt cannot drift
+    # from the graph (F-90667b30).
+    resolve_mask_plan(fill_region, fill_mask)
 
     identity = str(refs[0])
     pose = lock.pose[0]
@@ -308,13 +357,21 @@ def report_for(
     kontext_prompt: str = DEFAULT_KONTEXT_PROMPT,
     fill_prompt: str = DEFAULT_FILL_PROMPT,
     fill_region: str = "fist",
+    fill_mask: str | Path | None = None,
     seed: int = 169405236028824,
     graph_path: str = "",
 ) -> RecipeReport:
+    """Report what the graph WILL do. ``fill_mask`` is required to answer the bracer question."""
+    plan = resolve_mask_plan(fill_region, fill_mask)
+    identity = lock.identity[0] if lock.identity else ""
     return RecipeReport(
-        identity=lock.identity[0] if lock.identity else "",
+        identity=identity,
+        identity_method=lock.method_for(identity),
         pose=lock.pose[0] if lock.pose else "",
-        fill_region=fill_region,
+        fill_region=plan.region,
+        requested_fill_region=plan.requested_region,
+        mask_source=plan.source,
+        do_not_mask_bracer=plan.do_not_mask_bracer,
         kontext_prompt=kontext_prompt,
         fill_prompt=fill_prompt,
         seed=seed,
@@ -346,5 +403,6 @@ def from_conditioning(
         kontext_prompt=kontext_prompt,
         fill_prompt=fill_prompt,
         fill_region=fill_region,
+        fill_mask=fill_mask,
         seed=seed,
     )

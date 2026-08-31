@@ -7,6 +7,7 @@ wrong code does. If the fixture cannot fail, it does not belong here.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from pcraft.core.contract.compile_questions import (
     Polarity,
@@ -15,7 +16,7 @@ from pcraft.core.contract.compile_questions import (
     compile_questions,
 )
 from pcraft.core.contract.loader import resolve
-from pcraft.core.contract.schema import CheckType, Contract, MustNot, Severity
+from pcraft.core.contract.schema import Atom, CheckType, Contract, MustNot, Severity
 from pcraft.core.gate import harness
 from pcraft.core.gate.thresholds import Zone
 from pcraft.core.loop.retry_policy import RepairAction, RetryBudget, choose_repair
@@ -43,6 +44,43 @@ def test_a_depends_on_missing_id_does_not_crash_topo_sort():
     )
     order = dag.topological()
     assert [q.atom_id for q in order] == ["leaf"]
+
+
+def test_an_atom_id_may_not_be_the_empty_string():
+    """CQ58 drop-first: `if q.depends_on in index:` -- judged EQUIVALENT, and this fixture is
+    what makes that judgement airtight rather than an assumption.
+
+    The mutant diverges from the original on exactly one input class: some atom carries
+    `depends_on=""` while another atom's `id` is also `""`. The original short-circuits on
+    the falsy depends_on and never looks the parent up; the mutant finds `"" in index` and
+    visits it, reordering the DAG walk. That input class was REACHABLE -- `Atom(id="", ...)`
+    constructed without complaint, because no id field carried a length floor.
+
+    What this looks like if wrong: the "equivalent, leave it" classification for
+    compile_questions.py:58 rests on a schema guarantee the schema does not make.
+    """
+    with pytest.raises(ValidationError):
+        Atom(id="", claim="a ghost", check_type=CheckType.vqa)
+
+
+def test_a_must_not_id_may_not_be_the_empty_string():
+    """Same input class via the other list -- compile_questions indexes both by atom_id."""
+    with pytest.raises(ValidationError):
+        MustNot(id="", claim="a ghost")
+
+
+def test_a_contract_id_may_not_be_the_empty_string():
+    with pytest.raises(ValidationError):
+        Contract(id="", level="faction")
+
+
+def test_the_dag_index_can_never_contain_an_empty_key(sprite_example):
+    """The property the three constraints above buy, stated once at the DAG level: because
+    no id can be empty, `"" in index` is False for every constructible contract, so the
+    CQ58 drop-first mutant cannot diverge from the original."""
+    _s, resolved, _t, _c = sprite_example
+    dag = compile_questions(resolved)
+    assert all(q.atom_id for q in dag.questions)
 
 
 def test_a_character_with_no_extends_resolves_as_itself():

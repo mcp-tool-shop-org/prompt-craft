@@ -1,7 +1,7 @@
 """Canonical contract hash for provenance (PIN_PER_STEP).
 
 The hash is computed over the RESOLVED contract (faction + character merged), so the same hash
-implies the same atom list, the same must_not set, and the same identity refs — i.e. the same gate.
+implies the same atom list, the same must_not set, and the same identity refs -- i.e. the same gate.
 It is stored in every asset receipt; a replay recomputes it and asserts equality."""
 
 from __future__ import annotations

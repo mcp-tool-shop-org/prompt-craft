@@ -1,9 +1,9 @@
 """The domain-plugin registry + fail-closed ``detect`` (the readouts shared-core/plugins pattern).
 
-A plugin declares its three secrets — a ``Generator``, a tiered set of ``Verifier``s, and the path to
-its (generated) encoder-craft rules — plus an optional subdomain hook. Adding ``video`` or
+A plugin declares its three secrets -- a ``Generator``, a tiered set of ``Verifier``s, and the path to
+its (generated) encoder-craft rules -- plus an optional subdomain hook. Adding ``video`` or
 ``workflow`` is one ``register`` call; ``core/`` never changes. ``detect`` selects a plugin by name and
-FAILS CLOSED when none matches (no silent default — a silent fallback would bind the wrong
+FAILS CLOSED when none matches (no silent default -- a silent fallback would bind the wrong
 generator to the wrong contract)."""
 
 from __future__ import annotations

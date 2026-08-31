@@ -337,12 +337,13 @@ def test_an_explicit_sampler_override_is_also_reported_as_unapplied(monkeypatch,
     assert "not applied" in result.sampler.lower()
 
 
-def test_flux_sampler_claim_is_unchanged_and_out_of_scope(monkeypatch, tmp_path):
-    """F-4409b547 names SDXLGenerator specifically. FluxGenerator's hardcoded 'flow-match' is
-    plausibly accurate (FLUX ships a flow-match-family scheduler by default, unconfigured) and is
-    deliberately left untouched -- this pins the current reported value so any future change to it
-    is a conscious decision, not silent drift. FluxGenerator also has no `sampler` constructor
-    param at all (nothing for a caller to be misled by)."""
+def test_flux_sampler_names_itself_as_the_pipeline_default(monkeypatch, tmp_path):
+    """F-4409b547 named SDXLGenerator specifically and this pin deliberately left FluxGenerator's
+    hardcoded 'flow-match' alone as a flat assertion. F-cd07fe00 is the conscious change that pin
+    was waiting for: 'flow-match' is accurate only because nothing here ever configures a scheduler,
+    which is exactly the fact the SDXL receipt spells out and the Flux receipt did not. FluxGenerator
+    still has no `sampler` constructor param (nothing for a caller to request), so the honest stamp
+    is "this is the checkpoint default", not "this algorithm was chosen"."""
     import inspect
 
     assert "sampler" not in inspect.signature(FluxGenerator.__init__).parameters
@@ -351,7 +352,8 @@ def test_flux_sampler_claim_is_unchanged_and_out_of_scope(monkeypatch, tmp_path)
     _install_fake_diffusers(monkeypatch, pipeline_attr="FluxPipeline")
     gen = FluxGenerator(out_dir=tmp_path / "out")
     result = gen.generate("p", "n", {}, seed=1)
-    assert result.sampler == "flow-match"
+    assert result.sampler.startswith("flow-match")
+    assert "default" in result.sampler
 
 
 # =========================================================================== F-2ef1bb79 (generators)
@@ -638,6 +640,217 @@ def test_dsg_family_label_is_unchanged():
     checks generator-vs-verifier, never verifier-vs-verifier. shares_model_with is the chosen fix
     instead of a family rename."""
     assert DSGVerifier().family == "dsg-qg"
+
+
+# ================================================ F-916e73b6 / F-43da2300 (identity lock honesty)
+# One defect family: a plate can be stamped on the receipt as a bound identity lock that no
+# generator ever applied.
+#
+# F-916e73b6 -- _UNIMPLEMENTED_METHODS was an EMPTY frozenset, so refuse_unimplemented_identity()
+# was a structurally dead refusal: an unrecognised method ('ip-adapter', 'pulid', ...) passed the
+# bare-`str` contract field, was resolved and existence-checked by bind_refs, then dropped by every
+# method-specific accessor -- while the receipt still carried the resolved absolute plate path. The
+# deny-list is now an allow-list.
+#
+# F-43da2300 -- reference_lock.assemble() bucketed by `scope` alone, so method=none (documented in
+# conditioning.py as a skip) was promoted into lock.identity and became THE Kontext stitch identity,
+# shadowing the real method=reference plate purely by list order.
+
+
+def _stub_flux_load(monkeypatch):
+    """Same containment as _stub_sdxl_load: no pipeline, no weights, no GPU."""
+
+    def boom(self, kind="base"):
+        raise PromptCraftError("DEP_IMAGE_MISSING", "test stub — do not load a pipeline")
+
+    monkeypatch.setattr(FluxGenerator, "_load", boom)
+
+
+@pytest.mark.parametrize("method", ["ip-adapter", "ipadapter", "pulid", "faceid", "IP_Adapter"])
+def test_sdxl_refuses_an_unrecognised_identity_method(monkeypatch, tmp_path, method):
+    """The measured shape: SDXL.generate() SUCCEEDED with method='ip-adapter' and returned a
+    receipt whose conditioning.identity_refs carried the resolved plate, while applied.ip_adapter
+    was []. It must refuse by name instead."""
+    _stub_sdxl_load(monkeypatch)
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        SDXLGenerator(out_dir=tmp_path / "out").generate(
+            "p", "n", {"identity_refs": [{"plate": str(plate), "method": method}]}, seed=1
+        )
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert method in exc.value.message
+
+
+@pytest.mark.parametrize("method", ["ip-adapter", "pulid"])
+def test_flux_refuses_an_unrecognised_identity_method(monkeypatch, tmp_path, method):
+    _stub_flux_load(monkeypatch)
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator(out_dir=tmp_path / "out").generate(
+            "p", "n", {"identity_refs": [{"plate": str(plate), "method": method}]}, seed=1
+        )
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert method in exc.value.message
+
+
+@pytest.mark.parametrize("method", ["ip_adapter", "reference", "lora", "instantid", "none"])
+def test_the_five_named_methods_are_not_refused_as_unsupported(tmp_path, method):
+    """The allow-list must not over-refuse. This is the guard on the inversion itself."""
+    from pcraft.domains.image.generator import conditioning as cond
+
+    plate = write_solid_png(tmp_path / "face.png")
+    conditioning = {"identity_refs": [{"plate": str(plate), "method": method}]}
+    assert cond.unsupported_identity_methods(conditioning) == []
+    cond.refuse_unimplemented_identity("sdxl.base-1.0.v1", conditioning)  # no raise
+
+
+def test_method_none_never_lands_in_the_reference_lock(tmp_path):
+    """MEASURED before the fix: assemble() returned lock.identity == [<the method=none plate>].
+    method=none is documented as a skip; a skipped plate is not an identity lock."""
+    from pcraft.domains.image.generator.reference_lock import assemble
+
+    disabled = write_solid_png(tmp_path / "disabled.png")
+    real = write_solid_png(tmp_path / "real.png")
+    lock = assemble(
+        {
+            "pose_refs": [str(write_solid_png(tmp_path / "pose.openpose.png"))],
+            "identity_refs": [
+                {"plate": str(disabled), "method": "none", "scope": "face"},
+                {"plate": str(real), "method": "reference", "scope": "face"},
+            ],
+        }
+    )
+    assert str(disabled) not in lock.all_paths()
+    assert lock.identity == [str(real)]
+
+
+def test_a_ghost_method_none_plate_is_never_stitched_into_the_cloud_graph(tmp_path):
+    """The full measured chain: bind_refs deliberately does not resolve a skip-method plate, so a
+    path that does NOT exist escaped GATE_CONDITIONING_REF_MISSING, was bucketed by scope, and then
+    became the ImageStitch identity LoadImage of an emitted Cloud graph. Dropped is the fix; a
+    disabled plate must never reach the graph."""
+    from pcraft.domains.image.generator import kontext_fill
+
+    real = write_solid_png(tmp_path / "ashen-reaver-front.png")
+    pose = write_solid_png(tmp_path / "two-hand.openpose.png")
+    graph, report = kontext_fill.from_conditioning(
+        {
+            "pose_refs": [str(pose)],
+            "identity_refs": [
+                {"plate": "does/not/exist/ghost-plate.png", "method": "none", "scope": "face"},
+                {"plate": str(real), "method": "reference", "scope": "face"},
+            ],
+        }
+    )
+    loaded = {n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"}
+    assert "ghost-plate.png" not in loaded
+    assert "ghost-plate" not in report.identity
+    assert report.identity == str(real)
+
+
+def test_assemble_refuses_an_unrecognised_method_rather_than_bucketing_it(tmp_path):
+    """assemble() honours method or refuses. It must not silently bucket by scope alone."""
+    from pcraft.domains.image.generator.reference_lock import assemble
+
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        assemble({"identity_refs": [{"plate": str(plate), "method": "pulid", "scope": "face"}]})
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "pulid" in exc.value.message
+
+
+def test_flux_refuses_a_wrong_family_lock_before_it_writes_a_recipe(tmp_path):
+    """Ordering half of F-43da2300: flux_generator tested reference_refs BEFORE calling
+    refuse_unmeasured_family, so a conditioning carrying BOTH a reference ref and an ip_adapter ref
+    wrote the Cloud recipe and raised GATE_CLOUD_SUBMIT without ever refusing the wrong-family
+    lock. No recipe file may exist after the refusal."""
+    out = tmp_path / "out"
+    identity = write_solid_png(tmp_path / "face.png")
+    costume = write_solid_png(tmp_path / "costume.png")
+    pose = write_solid_png(tmp_path / "pose.openpose.png")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator(out_dir=out).generate(
+            "p",
+            "n",
+            {
+                "pose_refs": [str(pose)],
+                "identity_refs": [
+                    {"plate": str(identity), "method": "reference", "scope": "face"},
+                    {"plate": str(costume), "method": "ip_adapter", "scope": "costume"},
+                ],
+            },
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "ip_adapter" in exc.value.message
+    assert not list(out.glob("*.json")), "a recipe was written before the wrong-family refusal"
+
+
+# ============================================== F-cd07fe00 (the discarded negative prompt)
+# FluxGenerator.generate() accepts negative_prompt and builds its call dict as
+# {prompt, num_inference_steps, generator} -- the negative is never referenced again, with nothing
+# on the receipt saying so. Dropping it is CORRECT for the model (rules/encoder_craft.md:843: on
+# FLUX-dev/schnell negatives are ignored), so this is a receipt-honesty gap, not a wrong render.
+# The tell is the asymmetry with sdxl_generator, which goes to deliberate lengths to stamp
+# "requested, NOT applied" for exactly this situation. Upstream the negative is not vestigial:
+# core/synth/signature.py builds it by joining every must_not claim and cli/__init__.py PRINTS it,
+# so a Flux run showed the operator a negative composed of their must_not claims that the pipeline
+# never received.
+
+
+def test_flux_records_the_negative_prompt_it_discards(monkeypatch, tmp_path):
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    captured = _install_fake_diffusers(monkeypatch, pipeline_attr="FluxPipeline")
+    gen = FluxGenerator(out_dir=tmp_path / "out")
+    result = gen.generate("p", "no tusks, no crimson sash", {}, seed=1)
+
+    # Dropping it stays correct -- this is not a request to start passing it.
+    assert "negative_prompt" not in captured["pipe"].call_kwargs
+    dropped = result.conditioning["applied"]["negative_prompt"]
+    assert dropped["requested"] == "no tusks, no crimson sash"
+    assert dropped["applied"] is False
+    assert dropped["reason"]
+
+
+def test_flux_records_the_drop_on_the_fill_branch_too(monkeypatch, tmp_path):
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    captured = _install_fake_diffusers(monkeypatch, pipeline_attr="FluxFillPipeline")
+    src = write_solid_png(tmp_path / "prev.png")
+    gen = FluxGenerator(out_dir=tmp_path / "out")
+    result = gen.generate(
+        "p", "no bracer damage", {"inpaint_from": str(src), "inpaint_region": "fist"}, seed=2
+    )
+    assert "negative_prompt" not in captured["pipe"].call_kwargs
+    assert result.conditioning["applied"]["negative_prompt"]["applied"] is False
+
+
+def test_flux_does_not_stamp_a_negative_it_was_never_given(monkeypatch, tmp_path):
+    """An empty negative is not a drop. The receipt records the drop, not a ceremony."""
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    _install_fake_diffusers(monkeypatch, pipeline_attr="FluxPipeline")
+    result = FluxGenerator(out_dir=tmp_path / "out").generate("p", "", {}, seed=3)
+    assert result.conditioning["applied"]["negative_prompt"] is None
+
+
+def test_flux_method_reference_still_raises_cloud_submit(tmp_path):
+    """Established fact, pinned so the ordering fix above cannot regress it: a clean
+    method=reference conditioning still writes the recipe and refuses with GATE_CLOUD_SUBMIT --
+    the pose map it carries is the recipe's own input, not an SDXL ControlNet request."""
+    out = tmp_path / "out"
+    identity = write_solid_png(tmp_path / "face.png")
+    pose = write_solid_png(tmp_path / "pose.openpose.png")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator(out_dir=out).generate(
+            "p",
+            "n",
+            {
+                "pose_refs": [str(pose)],
+                "identity_refs": [{"plate": str(identity), "method": "reference", "scope": "face"}],
+            },
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CLOUD_SUBMIT"
+    assert (out / "flux.kontext-stitch-crop-fill.v1.json").is_file()
 
 
 # =========================================================================== suite hygiene canary

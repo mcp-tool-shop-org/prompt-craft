@@ -97,3 +97,82 @@ def test_the_version_fallback_matches_pyproject():
         f"pcraft._FALLBACK_VERSION is {_FALLBACK_VERSION!r} but pyproject declares {declared!r}; "
         "bump both together or an uninstalled checkout misreports its own version"
     )
+
+
+# --------------------------------------------------------------------------- F-4d031e47
+# The other direction of the same defect: metadata that IS found but is stale. The fallback
+# test above only covers the not-installed path, which is why an editable dist-info
+# declaring 0.2.1 against a 1.0.0 tree reported 0.2.1 from `pcraft --version` and
+# `pcraft doctor` with no warning of any kind.
+
+
+def test_version_coherence_names_both_numbers_when_metadata_is_stale(monkeypatch):
+    import pcraft
+
+    monkeypatch.setattr(pcraft, "version", lambda _name: "0.2.1")
+    note = pcraft.version_coherence()
+    assert note is not None, "stale installed metadata reported as coherent"
+    assert "0.2.1" in note and pcraft._FALLBACK_VERSION in note, (
+        "the warning has to name BOTH numbers or it cannot be acted on"
+    )
+    assert pcraft.package_version() == "0.2.1", (
+        "package_version() must keep reporting installed metadata; the coherence check is "
+        "a separate signal, not a rewrite of a covered import path"
+    )
+
+
+def test_version_coherence_is_silent_when_metadata_agrees_with_the_tree(monkeypatch):
+    import pcraft
+
+    monkeypatch.setattr(pcraft, "version", lambda _name: pcraft._FALLBACK_VERSION)
+    assert pcraft.version_coherence() is None
+
+
+def test_version_coherence_is_silent_when_nothing_is_installed(monkeypatch):
+    """No dist-info means no second opinion to disagree with -- not a warning."""
+    import pcraft
+
+    def _absent(_name):
+        raise pcraft.PackageNotFoundError
+
+    monkeypatch.setattr(pcraft, "version", _absent)
+    assert pcraft.version_coherence() is None
+    assert pcraft.package_version() == pcraft._FALLBACK_VERSION
+
+
+# --------------------------------------------------------------------------- F-62bb6e8d
+# The [image] door and doctor's [image] report read one shared constant. That constant is
+# only honest while it still matches what pyproject's extra actually declares, so the
+# correspondence is pinned here rather than left to whoever next edits the extra.
+
+_IMAGE_DIST_TO_IMPORT = {
+    "torch": "torch",
+    "diffusers": "diffusers",
+    "transformers": "transformers",
+    "accelerate": "accelerate",
+    "pillow": "PIL",
+    "numpy": "numpy",
+}
+
+
+def _dist_name(requirement: str) -> str:
+    name = requirement.split(";", maxsplit=1)[0].strip()
+    for sep in ("[", "=", "<", ">", "!", "~", " "):
+        name = name.split(sep, maxsplit=1)[0]
+    return name.strip().lower().replace("_", "-")
+
+
+def test_the_image_extra_module_list_matches_pyproject():
+    from pcraft.sample import IMAGE_EXTRA_MODULES
+
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    declared = [_dist_name(r) for r in data["project"]["optional-dependencies"]["image"]]
+    unmapped = [d for d in declared if d not in _IMAGE_DIST_TO_IMPORT]
+    assert not unmapped, (
+        f"pyproject's [image] extra gained {unmapped}; add the dist->import mapping here and "
+        "decide deliberately whether the live door must require it"
+    )
+    assert set(IMAGE_EXTRA_MODULES) == {_IMAGE_DIST_TO_IMPORT[d] for d in declared}, (
+        f"pcraft.sample.IMAGE_EXTRA_MODULES is {IMAGE_EXTRA_MODULES!r} but pyproject's [image] "
+        f"extra declares {declared!r}; the door and the packaging drifted apart once already"
+    )

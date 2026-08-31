@@ -92,6 +92,13 @@ class FluxGenerator:
     def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int) -> GenerationResult:
         conditioning = cond.assert_refs_readable(conditioning, generator_id=self.generator_id)
         cond.refuse_unimplemented_identity(self.generator_id, conditioning)
+        # F-43da2300 (ordering): a wrong-family identity lock is refused BEFORE the reference branch
+        # can write a recipe. Testing reference_refs first meant a conditioning carrying both a
+        # reference ref and an ip_adapter/lora/instantid ref emitted a Cloud graph and raised
+        # GATE_CLOUD_SUBMIT with the wrong-family lock never refused at all. The pose half of
+        # refuse_unmeasured_family stays BELOW: on the reference path the pose map is the recipe's
+        # own ImageStitch input, not an SDXL ControlNet request.
+        cond.refuse_unmeasured_identity_family(self.generator_id, self.family, conditioning)
         if cond.reference_refs(conditioning):
             path = self._write_reference_recipe(conditioning)
             raise PromptCraftError(
@@ -109,8 +116,30 @@ class FluxGenerator:
             import torch  # type: ignore
 
             generator = torch.Generator(device=getattr(pipe, "device", "cpu")).manual_seed(seed)
+            # F-cd07fe00: negative_prompt is accepted and then DROPPED. Dropping it is correct for
+            # the model -- rules/encoder_craft.md:843, FLUX-dev/schnell are guidance-distilled and
+            # ignore negatives, so every token there is dead weight. What was wrong was the silence:
+            # core/synth/signature.py builds the negative by joining every must_not claim and the
+            # CLI prints it, so the operator saw a suppression the pipeline never received. Record
+            # the drop the way sdxl_generator records its unapplied sampler.
+            # The FluxFillPipeline branch drops it too: wiring that pipeline's negative_prompt /
+            # true_cfg_scale is a real diffusers change this pass cannot verify (diffusers is not
+            # installed here), so the choice made is "still dropped, and stamped as dropped".
             call = {"prompt": prompt, "num_inference_steps": self.steps, "generator": generator}
-            applied: dict = {"kind": kind, "inpaint": None}
+            applied: dict = {
+                "kind": kind,
+                "inpaint": None,
+                "negative_prompt": (
+                    {
+                        "requested": negative_prompt,
+                        "applied": False,
+                        "reason": "FLUX.1-dev is guidance-distilled; negative_prompt is inert "
+                        "without a true-CFG pass, so it is not passed to the pipeline",
+                    }
+                    if negative_prompt
+                    else None
+                ),
+            }
             src = cond.inpaint_from(conditioning)
             if src:
                 init = cond.open_image(src)
@@ -136,7 +165,10 @@ class FluxGenerator:
         return GenerationResult(
             image_path=str(path),
             seed=seed,
-            sampler="flow-match",
+            # Nothing in this file configures a scheduler, so "flow-match" is what the checkpoint
+            # shipped with, not an algorithm anyone chose. Say so (F-cd07fe00), the way
+            # sdxl_generator says so for its requested-but-unapplied sampler.
+            sampler="flow-match [pipeline default]",
             generator_id=self.generator_id,
             generator_family=self.family,
             conditioning={**conditioning, "applied": applied},

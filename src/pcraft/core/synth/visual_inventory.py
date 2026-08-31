@@ -5,7 +5,7 @@ Reason-before-write: each contract atom becomes an inventory row tagged ``depict
 emits rows for backstory / emotion / intent and marks them ``depictable=False`` so they are pruned
 *before* the prompt is composed.
 
-The guard — ``assert_tokens_trace`` — enforces the single strongest rule against the model's
+The guard -- ``assert_tokens_trace`` -- enforces the single strongest rule against the model's
 prose-dumping tendency: **every content token in the final prompt must trace to a depictable
 inventory row** (render/style boilerplate is the only other thing allowed). An injected
 "epic cinematic masterpiece, trending on artstation" has no atom behind it and is rejected."""
@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from ...errors import PromptCraftError
 from ..contract.schema import ResolvedContract, Severity
 
-# Render/style direction that is NOT an identity atom — the only non-atom tokens a prompt may carry.
+# Render/style direction that is NOT an identity atom -- the only non-atom tokens a prompt may carry.
 # (From the supersession audit: do NOT turn 'front-facing view'/'plain white background' into atoms.)
 RENDER_BOILERPLATE: list[str] = [
     "full body visible",
@@ -82,8 +82,8 @@ def assert_tokens_trace(prompt: str, inventory: list[InventoryRow]) -> None:
         if norm in allowed:
             continue
         # A segment that is a fragment of a known token (norm in tok) is the
-        # intended looseness: "tabard" traces to "a grey-ash tabard worn…".
-        # tok in norm is the other direction — extra words around a full claim.
+        # intended looseness: "tabard" traces to "a grey-ash tabard worn...".
+        # tok in norm is the other direction -- extra words around a full claim.
         # That arm is the same shape as the _is_identity_atom substring defect:
         # a short token ("a", "or", "art") is a substring of almost any English
         # segment. Only tokens long enough to be a phrase may match that way.

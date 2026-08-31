@@ -1,8 +1,8 @@
 """The Synthesizer plugin interface and its result shape.
 
 A synthesizer turns a resolved contract + the domain's encoder rules into a prompt whose every
-token traces to a depictable atom. The result carries provenance — ``backend`` (which LM produced
-it) and ``degraded`` (did a cloud->local fallback happen) — so the loop NEVER silently accepts a
+token traces to a depictable atom. The result carries provenance -- ``backend`` (which LM produced
+it) and ``degraded`` (did a cloud->local fallback happen) -- so the loop NEVER silently accepts a
 worse proposal."""
 
 from __future__ import annotations

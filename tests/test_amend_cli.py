@@ -12,7 +12,10 @@ plus the Director-requested `pcraft gate` / --generator-family same-family regre
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from pcraft.cli import app
@@ -293,3 +296,231 @@ def test_gate_default_generator_family_comes_from_the_registered_plugin(tmp_path
         f"expected the default generator-family plumbing to reach harness.evaluate "
         f"cleanly; got: {text!r}. Expected-red-until-fold (see test above)."
     )
+
+
+# --------------------------------------------------------------------------- F-fd21bd37
+# Non-ASCII in a --help string crashes the CLI on a cp437 console (the classic Windows
+# OEM codepage): Click/Typer renders help OUTSIDE every command body's try/except, so the
+# UnicodeEncodeError escapes as a raw traceback and exit 1 -- this contract's own code for
+# "bad user input" -- while --debug, which the module docstring says gates raw tracebacks,
+# changes nothing. The em-dash in `compile`'s docstring also rendered inside the ROOT
+# `pcraft --help` listing, so a single character took the whole front door down.
+#
+# cp437 is the assertion rather than str.isascii() on the RENDERED page because Rich draws
+# the help panels with box characters (U+2500/2502/250C/2510/2514/2518) that cp437 encodes
+# fine. The source-declared strings are checked for pure ASCII separately, below.
+
+
+def _help_argvs() -> list[list[str]]:
+    group = typer.main.get_command(app)
+    return [["--help"], *[[name, "--help"] for name in sorted(group.commands)]]
+
+
+@pytest.mark.parametrize("argv", _help_argvs(), ids=lambda a: "-".join(a).replace("--", ""))
+def test_every_rendered_help_page_encodes_on_a_cp437_console(argv):
+    result = runner.invoke(app, argv)
+    assert result.exit_code == 0, f"pcraft {' '.join(argv)} did not render"
+    text = (result.stdout or "") + (result.stderr or "")
+    try:
+        text.encode("cp437")
+    except UnicodeEncodeError as exc:
+        offending = text[exc.start : exc.end]
+        pytest.fail(
+            f"pcraft {' '.join(argv)} renders U+{ord(offending[0]):04X} ({offending!r}), which a "
+            "cp437 console cannot encode -- on such a console this help page dies with an "
+            "unhandled UnicodeEncodeError and exit 1, outside every --debug gate"
+        )
+
+
+def _declared_help_strings() -> list[tuple[str, str]]:
+    group = typer.main.get_command(app)
+    out: list[tuple[str, str]] = [("pcraft (help)", group.help or "")]
+    out += [(f"pcraft --{p.name}", getattr(p, "help", None) or "") for p in group.params]
+    for name, sub in sorted(group.commands.items()):
+        out.append((f"{name} (help)", sub.help or ""))
+        out.append((f"{name} (short_help)", getattr(sub, "short_help", None) or ""))
+        out += [(f"{name} --{p.name}", getattr(p, "help", None) or "") for p in sub.params]
+    return out
+
+
+def test_declared_help_and_docstrings_are_pure_ascii():
+    """The source half of the same guard, independent of how Rich frames the page.
+
+    Checks what this repo WROTE (command docstrings Typer renders as help, plus every
+    option's help=) rather than what the renderer produced, so the class cannot come back
+    through a string that happens not to be reachable on the terminal width of the day.
+    """
+    offenders = [
+        (where, text) for where, text in _declared_help_strings() if not text.isascii()
+    ]
+    assert not offenders, "non-ASCII in help text the CLI renders: " + "; ".join(
+        f"{where}: " + " ".join(f"U+{ord(c):04X}" for c in text if not c.isascii())
+        for where, text in offenders
+    )
+
+
+# --------------------------------------------------------------------------- F-62bb6e8d
+# bind --no-mock's live door and `doctor`'s [image] report were two different answers to
+# "is the [image] extra installed": the door checked torch/diffusers/PIL, doctor checked
+# those plus transformers, and pyproject's extra actually declares six distributions. An
+# env missing only transformers therefore passed the door and crashed deep inside the
+# VQA-family verifiers, downgrading an actionable DEP_IMAGE_MISSING refusal to the generic
+# RUNTIME_UNEXPECTED backstop. Both codes exit 2, so the exit contract hid the difference.
+
+
+def _find_spec_with(monkeypatch, absent: set[str], present: set[str]):
+    """Force a specific [image] install shape without touching the real environment."""
+    real = importlib.util.find_spec
+
+    def fake(name, package=None):
+        if name in absent:
+            return None
+        if name in present:
+            return object()
+        return real(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake)
+
+
+def test_live_door_refuses_when_only_transformers_is_missing(monkeypatch, tmp_path):
+    from pcraft.sample import IMAGE_EXTRA_MODULES
+
+    _find_spec_with(
+        monkeypatch,
+        absent={"transformers"},
+        present=set(IMAGE_EXTRA_MODULES) - {"transformers"},
+    )
+    result = runner.invoke(app, ["bind", "--no-mock", "--records-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "DEP_IMAGE_MISSING" in text, (
+        f"a torch+diffusers+PIL env with no transformers walked past the live door; got {text!r}"
+    )
+    assert "RUNTIME_UNEXPECTED" not in text
+    assert "Traceback" not in text
+    assert result.exit_code == 2
+
+
+def test_live_door_lets_a_complete_image_extra_through(monkeypatch, tmp_path):
+    """The other half: the stricter door must not refuse a fully installed extra."""
+    from pcraft.sample import IMAGE_EXTRA_MODULES, image_extra_present
+
+    _find_spec_with(monkeypatch, absent=set(), present=set(IMAGE_EXTRA_MODULES))
+    assert image_extra_present() is True
+
+
+def test_doctor_and_the_live_door_check_the_same_module_list():
+    """One list, two call sites -- the drift is what made the door the weaker check."""
+    import json
+
+    from pcraft.sample import IMAGE_EXTRA_MODULES
+
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    data = json.loads(result.stdout)
+    image = next(e for e in data["extras"] if e["name"] == "image")
+    assert set(image["modules"]) == set(IMAGE_EXTRA_MODULES), (
+        "doctor's [image] report and bind --no-mock's door must read the same list"
+    )
+
+
+# --------------------------------------------------------------------------- F-4d031e47
+# package_version() returns installed dist metadata and only falls back to the tree's
+# declared version when NOTHING is installed. A stale editable dist-info (reproduced live
+# in this checkout: metadata 0.2.1 against a 1.0.0 tree) is therefore reported as fact --
+# silently wrong by a major version, with the only existing guard buried in the
+# maintainer-only `verify.py --installed` leg. doctor already has a report shape; the
+# coherence check belongs there, and on --version's stderr.
+
+
+def _stale_metadata(monkeypatch, installed: str):
+    import pcraft
+
+    monkeypatch.setattr(pcraft, "version", lambda _name: installed)
+
+
+def test_doctor_reports_a_stale_installed_version_loudly(monkeypatch):
+    import json
+
+    import pcraft
+
+    _stale_metadata(monkeypatch, "0.2.1")
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    data = json.loads(result.stdout)
+    assert data["version"] == "0.2.1"
+    assert data["version_coherent"] is False, (
+        "doctor read stale 0.2.1 metadata against a "
+        f"{pcraft._FALLBACK_VERSION} tree and called it coherent"
+    )
+    assert pcraft._FALLBACK_VERSION in (data["version_warning"] or "")
+    banner = (result.stderr or "") + (result.stdout or "")
+    assert "0.2.1" in banner and pcraft._FALLBACK_VERSION in banner
+
+
+def test_doctor_is_quiet_when_the_installed_version_matches_the_tree(monkeypatch):
+    import json
+
+    import pcraft
+
+    _stale_metadata(monkeypatch, pcraft._FALLBACK_VERSION)
+    result = runner.invoke(app, ["doctor", "--json"])
+    data = json.loads(result.stdout)
+    assert data["version_coherent"] is True
+    assert data["version_warning"] is None
+
+
+def test_version_flag_warns_on_stderr_and_keeps_stdout_a_bare_version(monkeypatch):
+    """--version's stdout shape is covered by STABILITY.md, so the warning goes to stderr."""
+    import pcraft
+
+    _stale_metadata(monkeypatch, "0.2.1")
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert (result.stdout or "").strip() == "pcraft 0.2.1"
+    assert pcraft._FALLBACK_VERSION in (result.stderr or ""), (
+        "a stale dist-info must say so somewhere; stdout stays the bare version line"
+    )
+
+
+# --------------------------------------------------------------------------- F-dc0ca73f
+# sync-rules was the one command body with no try/except PromptCraftError wrap: the
+# dynamic load (_find_sync_script / spec_from_file_location / exec_module) and any
+# PromptCraftError out of module.generate() bypassed this module's documented error
+# contract entirely and produced a raw traceback with Python's default exit code.
+
+
+def _plant_sync_script(monkeypatch, tmp_path, body: str) -> None:
+    import pcraft.cli as cli_mod
+
+    script = tmp_path / "sync_rules_from_readouts.py"
+    script.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(cli_mod, "_find_sync_script", lambda: script)
+
+
+def test_sync_rules_wraps_a_promptcrafterror_from_the_loaded_script(monkeypatch, tmp_path):
+    _plant_sync_script(
+        monkeypatch,
+        tmp_path,
+        "from pcraft.errors import PromptCraftError\n"
+        "DEFAULT_OUT = 'out.md'\n"
+        "DEFAULT_DB = 'recipes.db'\n"
+        "def generate(db, out):\n"
+        "    raise PromptCraftError('IO_SYNC_DB', 'synthetic sync failure for the amend test')\n",
+    )
+    result = runner.invoke(app, ["sync-rules"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "Traceback" not in text, f"sync-rules leaked a raw traceback: {text!r}"
+    assert "error[IO_SYNC_DB]" in text
+    assert result.exit_code == 2
+
+
+def test_sync_rules_wraps_interface_drift_in_the_loaded_script(monkeypatch, tmp_path):
+    """The loaded script's interface drifting (no DEFAULT_OUT / no generate) is an
+    internal defect, so it must arrive as RUNTIME_UNEXPECTED / exit 2 -- not as a bare
+    AttributeError traceback exiting 1, which is this contract's 'user error' band."""
+    _plant_sync_script(monkeypatch, tmp_path, "SOMETHING_ELSE = 1\n")
+    result = runner.invoke(app, ["sync-rules"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "Traceback" not in text, f"sync-rules leaked a raw traceback: {text!r}"
+    assert "RUNTIME_UNEXPECTED" in text
+    assert result.exit_code == 2

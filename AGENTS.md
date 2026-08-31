@@ -10,7 +10,8 @@ Load-bearing:
 - Executor: code + tests + CHANGELOG Unreleased.
 - Advisor: README / handbook / landing / PyPI / npm / translations.
 - Tests ride the change-set. Quote counts only after a run.
-- Version **0.3.0** (shipped 2026-08-18). `identity_subgate.py` stays unwired.
+- Version **1.0.0** (shipped 2026-08-18; interfaces covered per `STABILITY.md`).
+  `identity_subgate.py` stays unwired.
 - The lint rule set is **declared** in `[tool.ruff.lint]`, not inherited. Every
   `ignore` names its reason. Do not re-open those rejections.
 - Cloud Comfy default. Local 5090 only if asked. The greened live generate

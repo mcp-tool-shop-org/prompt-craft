@@ -51,25 +51,50 @@ class PaletteVerifier:
 class Tier0Router:
     """Tier-0 door: palette atoms hit the histogram; everything else hits SigLIP2.
 
-    family stays ``siglip2`` so family_guard and the existing plugin smoke test
-    keep seeing one Tier-0 family. The histogram is a local function, not a
-    second registered family.
+    ``family`` stays ``siglip2`` so family_guard and the existing plugin smoke test keep seeing one
+    Tier-0 family. The histogram is a local delegate, not a second registered family.
+
+    F-f68f59ff: the router used to declare ``family='siglip2'``, ``verifier_id='tier0.router.v1'``
+    for EVERY Tier-0 score, including ones produced by ``PaletteVerifier`` -- a deterministic stdlib
+    RGB histogram that declares ``family='palette-hist'``, ``verifier_id='palette.hist.v1'``. So a
+    palette atom's evidence line attributed a no-model histogram result to the SigLIP2 neural
+    family. ``last_delegate`` now names whichever sub-verifier actually produced the score, so the
+    receipt can say what ran; the single ``family`` the guard needs is unchanged and the reason it
+    is single is stated here rather than only in a docstring elsewhere.
     """
 
     family = "siglip2"
     tier = 0
     verifier_id = "tier0.router.v1"
     version = "v1"
+    # The one Tier-0 family family_guard sees. Named on the receipt so "siglip2" on a palette line
+    # reads as "the router's guard family", not "SigLIP2 measured this".
+    family_is_shared_for_guard = True
 
     def __init__(self) -> None:
         from .siglip2_screen import SigLIP2Screen
 
         self._siglip = SigLIP2Screen()
         self._palette = PaletteVerifier()
+        self.last_delegate: dict[str, str] | None = None
+
+    def _record(self, delegate) -> None:
+        self.last_delegate = {
+            "verifier_id": delegate.verifier_id,
+            "version": delegate.version,
+            "family": delegate.family,
+        }
 
     def score(self, image_path: str, question: Question) -> float | None:
         if question.check_type.value == "palette":
-            return self._palette.score(image_path, question)
+            score = self._palette.score(image_path, question)
+            if score is not None:
+                self._record(self._palette)
+                return score
+            # The enum carried no hex colours ('gold heraldry'). palette_verifier's module docstring
+            # says those "belong to SigLIP2" -- but routing on check_type ALONE returned None here,
+            # so the atom was skipped at Tier-0 entirely instead of being screened. Fall through.
+        self._record(self._siglip)
         return self._siglip.score(image_path, question)
 
 
@@ -107,14 +132,22 @@ def _presence(pixels: list[tuple[int, int, int]], target: tuple[int, int, int]) 
 
 
 def load_rgb(path: str | Path) -> list[tuple[int, int, int]]:
-    """RGB pixels. PIL if present; else filter-0 8-bit RGB PNG (write_solid_png)."""
+    """RGB pixels. PIL if present; else filter-0 8-bit RGB PNG (write_solid_png).
+
+    F-f6646790: the try block used to span three statements -- the import, ``Image.open().convert``,
+    and ``list(im.getdata())`` -- so an ImportError raised from INSIDE Pillow during open/convert/
+    decode (a lazy codec or plugin import failing) was misread as "Pillow is not installed" and
+    silently rerouted to the stdlib reader, or reported DEP_IMAGE_MISSING "needs Pillow" about an
+    installed Pillow. Only the import statement may be guarded; a decode-time ImportError has to
+    propagate so ``PaletteVerifier.score`` classifies it as RUNTIME_VERIFIER_CALL_FAILED with the
+    real cause attached.
+    """
     try:
         from PIL import Image  # type: ignore
-
-        im = Image.open(path).convert("RGB")
-        return list(im.getdata())
     except ImportError:
         return _load_png_filter0(path)
+    im = Image.open(path).convert("RGB")
+    return list(im.getdata())
 
 
 def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
@@ -133,11 +166,27 @@ def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
         chunk = data[pos + 8 : pos + 8 + length]
         pos += 12 + length
         if typ == b"IHDR":
-            width, height, bit, color, *_rest = struct.unpack(">IIBBBBB", chunk)
+            # F-5ca8ecd3: compression / filter-method / interlace used to be discarded into
+            # *_rest, so an Adam7 layout would have been decoded as a plain row sequence.
+            width, height, bit, color, compression, filter_method, interlace = struct.unpack(
+                ">IIBBBBB", chunk
+            )
             if bit != 8 or color != 2:
                 raise PromptCraftError(
                     "DEP_IMAGE_MISSING",
                     "stdlib PNG reader only handles 8-bit RGB; install Pillow",
+                )
+            if interlace != 0:
+                raise PromptCraftError(
+                    "DEP_IMAGE_MISSING",
+                    f"stdlib PNG reader cannot decode interlaced (Adam7) PNGs "
+                    f"(interlace={interlace}); install Pillow",
+                )
+            if compression != 0 or filter_method != 0:
+                raise PromptCraftError(
+                    "DEP_IMAGE_MISSING",
+                    f"stdlib PNG reader only handles compression 0 / filter method 0 "
+                    f"(got {compression}/{filter_method}); install Pillow",
                 )
         elif typ == b"IDAT":
             idat += chunk
@@ -150,8 +199,8 @@ def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
     pixels: list[tuple[int, int, int]] = []
     for y in range(height):
         row = raw[y * row_bytes : (y + 1) * row_bytes]
-        if not row:
-            break
+        if len(row) != row_bytes:
+            break  # short IDAT -- the completeness check below refuses; never a partial score
         if row[0] != 0:
             raise PromptCraftError(
                 "DEP_IMAGE_MISSING",
@@ -161,4 +210,16 @@ def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
         for x in range(width):
             i = x * 3
             pixels.append((body[i], body[i + 1], body[i + 2]))
+    # F-5ca8ecd3: the row loop used to break on the first empty slice and return whatever it had,
+    # and nothing compared the count against the IHDR. _presence() then produced an ordinary float
+    # in [0,1] over a fraction of the image and the receipt could not tell the difference -- a
+    # silently-wrong verdict in the one verifier that is supposed to be deterministic.
+    if len(pixels) != width * height:
+        raise PromptCraftError(
+            "RUNTIME_VERIFIER_CALL_FAILED",
+            f"PNG {path} declares {width}x{height} ({width * height} pixels) but only "
+            f"{len(pixels)} decoded",
+            hint="The file is truncated or its IDAT is short (an interrupted write, a partial "
+            "copy). A palette score over a fraction of the image is not a measurement.",
+        )
     return pixels

@@ -5,7 +5,7 @@ prompt; this module uses the same atoms to build the gate's questions. Each ``mu
 ``affirm`` probe; each ``must_not`` -> one ``negate`` (inverted) probe (reject if P('Yes') is high).
 
 The DAG carries ``depends_on`` edges so the gate can evaluate parents first and mark a child N/A when
-its parent fails (a NO parent forces NO on descendants) — killing the "verify the colour of an axe
+its parent fails (a NO parent forces NO on descendants) -- killing the "verify the colour of an axe
 that isn't there" class of false confidence."""
 
 from __future__ import annotations
@@ -97,10 +97,10 @@ def compile_questions(resolved: ResolvedContract) -> QuestionDAG:
             text=_negate_text(mn.claim),
             check_type=mn.check_type,
             polarity=Polarity.negate,
-            # ⚑ CORRECTED IN PLACE. This read `Severity.required` with the comment "a violated
+            # [!] CORRECTED IN PLACE. This read `Severity.required` with the comment "a violated
             # must_not is always blocking". That was a claim about the CONTRACT that only held
             # because the schema could not express anything else. A negation's blocking power
-            # now tracks the evidence behind the check enforcing it — see MustNot.severity.
+            # now tracks the evidence behind the check enforcing it -- see MustNot.severity.
             # The schema default is still `required`, so no existing contract changed meaning.
             severity=mn.severity,
             depends_on=None,

@@ -95,8 +95,10 @@ better in minor releases; what stops moving is the surface you build against.
   `sprite.synth.v1-gepa.json`. The seed artifact is untouched. The per-asset loop
   still uses `TemplateSynthesizer`.
 - The identity sub-gate is **not wired**. Its thresholds have no holdout.
-- Pre-1.0 deliberately, and a test enforces it. Promotion should follow evidence, not a version
-  bump.
+- v1.0.0 is a claim about interfaces, not pictures. The CLI commands, the exit-code
+  contract, the listed import paths, and both on-disk formats are semver-covered --
+  `STABILITY.md` in the repo names each one, and names what is excluded. The capability
+  gaps above stay disclosed and close in minor releases.
 
 ## Trust
 

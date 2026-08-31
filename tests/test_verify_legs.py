@@ -93,6 +93,49 @@ def _verify_legs() -> dict[str, list[str]]:
     return {label: argv for _, label, argv in sorted(found)}
 
 
+def _leg_env_var(label: str) -> str | None:
+    """The NAME of the env mapping handed to the ``_run`` call labelled ``label``.
+
+    Read from the call graph for the same reason ``_verify_legs`` is. Half of what the
+    ``-O`` leg does lives in its third argument and nowhere else, so a grep for
+    ``PYTHONOPTIMIZE`` anywhere in the file would still pass if the variable carrying it
+    were never handed to this leg. Returns None when the argument is not a bare name --
+    which is itself a finding, not a pass.
+    """
+    tree = ast.parse(VERIFY.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "_run" or len(node.args) < 3:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and first.value == label:
+            env = node.args[2]
+            return env.id if isinstance(env, ast.Name) else None
+    return None
+
+
+def _env_overrides(var: str) -> dict[str, str]:
+    """Constant ``<var>["KEY"] = "VALUE"`` assignments in verify.py, as a mapping.
+
+    Non-constant values (``env["PYTHONPATH"]`` is built from a conditional) drop rather
+    than being guessed at; nothing here needs them.
+    """
+    out: dict[str, str] = {}
+    for node in ast.walk(ast.parse(VERIFY.read_text(encoding="utf-8"))):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)):
+            continue
+        if target.value.id != var:
+            continue
+        key, value = target.slice, node.value
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Constant):
+            out[str(key.value)] = str(value.value)
+    return out
+
+
 def _configured_gate_tools() -> set[str]:
     data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
     return {name for name in data.get("tool", {}) if name in GATE_TOOLS}
@@ -129,6 +172,79 @@ def test_static_legs_run_before_the_suite():
         assert labels.index(fast) < labels.index("suite"), (
             f"{fast!r} leg runs after the suite; put the fast static checks first"
         )
+
+
+def test_the_optimized_pass_is_still_a_leg():
+    """The leg that catches a gate written as a bare ``assert``.
+
+    ``assert`` is stripped under -O, so a refusal written as one silently disappears --
+    the risk verify.py's own docstring names ("gates must still raise"). Every OTHER leg
+    in this file was pinned for reachability and this one was not: nothing failed if a
+    refactor deleted the call, and the label would have gone with it, so not even the
+    summary would have looked different.
+
+    That gap is this repo's recurring shape landing in the one file whose job is closing
+    it -- after ``[tool.mypy]`` configured and invoked by nothing, and after lint running
+    ``src tests`` while exempting the file that defines the gate.
+    """
+    legs = _verify_legs()
+    assert "suite under -O" in legs, (
+        "verify.py has no 'suite under -O' leg -- a gate written as a bare assert can go "
+        "inert with nothing failing"
+    )
+    assert "-O" in legs["suite under -O"], (
+        "the 'suite under -O' leg does not pass -O to the interpreter; the label claims an "
+        "optimized run the argv does not perform"
+    )
+    assert "pytest" in legs["suite under -O"], "the -O leg must still run the suite"
+
+
+def test_the_optimized_leg_carries_optimization_into_child_processes():
+    """``-O`` and ``PYTHONOPTIMIZE=1`` are not redundant, and the difference was measured.
+
+    ``-O`` sets ``sys.flags.optimize`` for the pytest process only. A child interpreter
+    the suite launches inherits the ENVIRONMENT, not the flag, and comes up at
+    ``optimize=0``; ``PYTHONOPTIMIZE=1`` is what carries the setting across that process
+    boundary. Measured both ways rather than assumed. This suite does launch child
+    interpreters -- ``_run`` is exercised against ``sys.executable`` further down this
+    file -- so the env var is the half that covers them.
+
+    Drop it and the leg keeps its label, keeps its ``-O``, still costs a full suite, and
+    quietly stops covering anything that runs in a subprocess. A leg reporting more scope
+    than it has is the defect this repo is built around, so the binding is read from the
+    call rather than grepped for anywhere in the file.
+    """
+    var = _leg_env_var("suite under -O")
+    assert var is not None, (
+        "the 'suite under -O' leg is not handed a named env mapping, so what it sets "
+        "cannot be checked"
+    )
+    assert _env_overrides(var).get("PYTHONOPTIMIZE") == "1", (
+        f"the -O leg is handed {var!r}, which never has PYTHONOPTIMIZE set to '1' -- "
+        f"optimization stops at the pytest process and never reaches what it spawns"
+    )
+    assert var != _leg_env_var("suite"), (
+        "the -O leg and the plain suite share one env mapping -- either the -O run is not "
+        "optimized or the plain run is, and neither is what the two labels claim"
+    )
+
+
+def test_the_optimized_pass_runs_after_the_plain_suite():
+    """Order is diagnostic, not cosmetic.
+
+    A tree whose plain suite is already red says nothing about the -O pass -- the reason
+    ci.yml gives for running the audit last. Reversed, the first red a developer reads is
+    the harder one. Membership is asserted before ``index`` for the reason recorded in
+    ``_verify_legs``: a missing leg here once surfaced as a ValueError, which reads as a
+    broken test rather than as the finding it is.
+    """
+    labels = list(_verify_legs())
+    for leg in ("suite", "suite under -O"):
+        assert leg in labels, f"verify.py has no {leg!r} leg"
+    assert labels.index("suite") < labels.index("suite under -O"), (
+        "the -O pass runs before the plain suite; the plain failure is the one to read "
+        "first"
+    )
 
 
 def _load_verify():

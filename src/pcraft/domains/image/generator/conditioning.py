@@ -23,7 +23,14 @@ _SPRITE_ROOT = Path(__file__).resolve().parents[1] / "subdomains" / "sprite"
 _IP_ADAPTER = "ip_adapter"
 _REFERENCE = "reference"
 _SKIP_METHODS = frozenset({"none"})
-_UNIMPLEMENTED_METHODS: frozenset[str] = frozenset()
+# F-916e73b6: this used to be a DENY-list (_UNIMPLEMENTED_METHODS) and it was EMPTY, so
+# refuse_unimplemented_identity() was a structurally dead refusal called on both shipped generate
+# paths. core/contract/schema.py declares `method: str` with the legal values living only in a
+# trailing comment, so an unrecognised name ('ip-adapter', 'ipadapter', 'pulid', 'faceid') passes
+# contract validation, is resolved and existence-checked by bind_refs, then dropped by every
+# method-specific accessor below -- while the receipt still stamps the resolved plate path. An
+# ALLOW-list cannot go stale that way: a method nobody wired is refused by name.
+_SUPPORTED_METHODS = frozenset({_IP_ADAPTER, _REFERENCE, "lora", "instantid", *_SKIP_METHODS})
 # hands/weapon ate the bone-spike bracer on the keeper Fill. fist is the measured box.
 _FIST = (0.62, 0.48, 0.88, 0.65)
 
@@ -63,8 +70,23 @@ def instantid_refs(conditioning: dict) -> list[dict[str, Any]]:
     return [r for r in identity_refs(conditioning) if r["method"] == "instantid"]
 
 
-def unimplemented_identity_methods(conditioning: dict) -> list[str]:
-    return sorted({r["method"] for r in identity_refs(conditioning) if r["method"] in _UNIMPLEMENTED_METHODS})
+def declared_methods(conditioning: dict) -> list[str]:
+    """Every method named on a raw identity_ref that carries a plate.
+
+    Reads the RAW refs, not ``identity_refs()``: the supported-method check has to see a method the
+    skip/filter layers would otherwise drop, or the drop is exactly the silence being refused.
+    """
+    out: list[str] = []
+    for raw in conditioning.get("identity_refs") or []:
+        if not isinstance(raw, dict) or not raw.get("plate"):
+            continue
+        out.append(str(raw.get("method") or _IP_ADAPTER))
+    return out
+
+
+def unsupported_identity_methods(conditioning: dict) -> list[str]:
+    """Methods named on a plate-carrying ref that no encoder in this repo implements."""
+    return sorted({m for m in declared_methods(conditioning) if m not in _SUPPORTED_METHODS})
 
 
 def inpaint_from(conditioning: dict) -> str | None:
@@ -164,7 +186,12 @@ def assert_refs_readable(conditioning: dict, *, generator_id: str = "") -> dict:
 
 
 def refuse_unimplemented_identity(generator_id: str, conditioning: dict) -> None:
-    methods = unimplemented_identity_methods(conditioning)
+    """Refuse any identity method outside ``_SUPPORTED_METHODS``, naming the offending value.
+
+    F-916e73b6: silently dropping the lock while the receipt stamps the resolved plate is the one
+    outcome this function exists to prevent. It is called on both shipped generate paths.
+    """
+    methods = unsupported_identity_methods(conditioning)
     if not methods:
         return
     raise PromptCraftError(
@@ -189,15 +216,16 @@ def refuse_reference_identity(generator_id: str, conditioning: dict) -> None:
     )
 
 
-def refuse_unmeasured_family(generator_id: str, family: str, conditioning: dict) -> None:
-    """Flux refuses SDXL-shaped pose / IP-Adapter. Fill inpaint and method=reference are Flux's."""
-    if pose_paths(conditioning):
-        raise PromptCraftError(
-            "GATE_CONDITIONING_UNSUPPORTED",
-            f"{generator_id} (family={family}) cannot apply pose_refs as ControlNet. "
-            "That is the SDXL encoder.",
-            hint="Two-hand pose on Flux is the Cloud recipe (method=reference / pcraft recipe).",
-        )
+def refuse_unmeasured_identity_family(generator_id: str, family: str, conditioning: dict) -> None:
+    """The identity half of ``refuse_unmeasured_family``: ip_adapter / lora / instantid.
+
+    F-43da2300 (ordering half): flux_generator used to test ``reference_refs`` BEFORE calling
+    ``refuse_unmeasured_family``, so a conditioning carrying both a reference ref and an
+    ip_adapter/lora/instantid ref wrote the Cloud recipe and raised GATE_CLOUD_SUBMIT without ever
+    refusing the wrong-family lock. Split out so the recipe path can refuse those locks first
+    WITHOUT also refusing the pose map -- which on the reference path is the recipe's own
+    ImageStitch input, not an SDXL ControlNet request.
+    """
     if ip_adapter_refs(conditioning):
         raise PromptCraftError(
             "GATE_CONDITIONING_UNSUPPORTED",
@@ -219,6 +247,18 @@ def refuse_unmeasured_family(generator_id: str, family: str, conditioning: dict)
             "That is the SDXL encoder.",
             hint="InstantID is the SDXL face lock. Flux identity is method=reference.",
         )
+
+
+def refuse_unmeasured_family(generator_id: str, family: str, conditioning: dict) -> None:
+    """Flux refuses SDXL-shaped pose / IP-Adapter. Fill inpaint and method=reference are Flux's."""
+    if pose_paths(conditioning):
+        raise PromptCraftError(
+            "GATE_CONDITIONING_UNSUPPORTED",
+            f"{generator_id} (family={family}) cannot apply pose_refs as ControlNet. "
+            "That is the SDXL encoder.",
+            hint="Two-hand pose on Flux is the Cloud recipe (method=reference / pcraft recipe).",
+        )
+    refuse_unmeasured_identity_family(generator_id, family, conditioning)
 
 
 def open_image(path: str | Path):

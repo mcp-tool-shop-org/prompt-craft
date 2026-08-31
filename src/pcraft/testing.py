@@ -1,6 +1,6 @@
 """Deterministic reference implementations for the GPU-free demo and the core test suite.
 
-These are NOT the real generator/verifier — they are the mocks that prove the plugin boundary holds:
+These are NOT the real generator/verifier -- they are the mocks that prove the plugin boundary holds:
 the entire synth->generate->gate->retry->bind loop runs with no torch, no diffusion, no network.
 ``StubGenerator`` writes a real (tiny, solid-colour) PNG so "look at the output" yields a viewable
 file; ``ScriptedVerifier`` returns programmable scores so PASS/FAIL/retry scenarios are deterministic."""
@@ -18,7 +18,7 @@ from .core.loop.generator_iface import GenerationResult
 
 
 def write_solid_png(path: str | Path, rgb: tuple[int, int, int] = (58, 58, 58), size: int = 64) -> Path:
-    """Write a minimal valid solid-colour PNG (pure stdlib — no Pillow)."""
+    """Write a minimal valid solid-colour PNG (pure stdlib -- no Pillow)."""
     w = h = size
     row = bytes([0]) + bytes(rgb) * w  # filter byte 0 + RGB pixels
     raw = row * h

@@ -1,4 +1,4 @@
-"""The Contract: a typed spec of atomic *depictable* claims — NOT a prose prompt.
+"""The Contract: a typed spec of atomic *depictable* claims -- NOT a prose prompt.
 
 This replaces the opaque ``{name, prompt, weapon_class}`` triple that prompt-craft supersedes,
 and it is a typed pydantic transcription of style-dataset-lab's identity-gates spec
@@ -49,11 +49,28 @@ class Spatial(BaseModel):
     ref: str  # region name, or a path to an openpose/controlnet image for kind=pose
 
 
+_NON_EMPTY_ID_RATIONALE = """Why every id carries min_length=1 (F-bd78997e).
+
+``Atom.id``, ``MustNot.id`` and ``Contract.id`` accepted the empty string, and
+``Atom(id='', claim='x', check_type=CheckType.vqa)`` constructed without complaint. That is
+the one input class that separates ``compile_questions.py``'s dependency guard
+``if q.depends_on and q.depends_on in index`` from the mutant that drops the first arm: with
+an empty id in the DAG index, ``'' in index`` becomes True, and an atom whose ``depends_on``
+is the empty string acquires a parent edge the original never gave it. The divergence is a
+benign visit reordering rather than a crash, so the mutant was classified equivalent -- but
+the classification rested on ids never being empty, which nothing enforced.
+
+An empty id is not a contract anyone means to write. Refusing it at construction closes the
+input class, so the equivalence argument holds on a schema guarantee instead of an
+assumption -- the same shape as rejecting duplicate ids here rather than letting the DAG's
+own dedup be the enforcement mechanism."""
+
+
 class Atom(BaseModel):
-    """One atomic depictable claim. The same atom list is used twice — to synthesize and to gate."""
+    """One atomic depictable claim. The same atom list is used twice -- to synthesize and to gate."""
 
     model_config = ConfigDict(extra="forbid")
-    id: str
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
     claim: str  # a single visible claim, phrased as a checkable statement
     check_type: CheckType
     severity: Severity = Severity.required
@@ -63,7 +80,7 @@ class Atom(BaseModel):
 
 
 class MustNot(BaseModel):
-    """An anti-constraint, GATE-ENFORCED on the pixels (inverted probe) — NOT a negative prompt.
+    """An anti-constraint, GATE-ENFORCED on the pixels (inverted probe) -- NOT a negative prompt.
 
     Negative prompts / concept-erasure leave residual features and fall to paraphrase; satisfaction
     requires the gate to confirm *absence* on the actual pixels.
@@ -76,16 +93,16 @@ class MustNot(BaseModel):
 
     A negation whose verifier is calibrated for absence earns ``required`` and blocks a bind. One
     whose verifier is not yet measured on absence is ``optional``: it still runs, still scores, and
-    still rides the transcript — it simply does not assert more certainty than its evidence
+    still rides the transcript -- it simply does not assert more certainty than its evidence
     supports. This is the same principle as ``Zone.UNAVAILABLE`` and the could-not-run exit code:
     the system's claims track what it actually established.
 
     The default stays ``required``, so a contract written before this field means what it always
-    meant. Promotion is the intended direction — measure the verifier on absence, then raise the
+    meant. Promotion is the intended direction -- measure the verifier on absence, then raise the
     severity with the measurement in hand."""
 
     model_config = ConfigDict(extra="forbid")
-    id: str
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
     claim: str
     check_type: CheckType = CheckType.vqa
     severity: Severity = Severity.required
@@ -113,7 +130,7 @@ def _reject_duplicate_ids(
 
     ``QuestionDAG.topological()`` (``compile_questions.py``) keys its dependency walk purely
     by ``atom_id``: its ``index`` dict comprehension keeps the LAST atom with a given id, but
-    its ``done`` set keeps the FIRST — so a duplicate id silently vanishes from the compiled
+    its ``done`` set keeps the FIRST -- so a duplicate id silently vanishes from the compiled
     gate order with no error, and which declaration survives is an accident of list order.
     Rejecting the duplicate here, at contract-construction time, is the fail-closed default;
     the DAG's own dedup must never be the enforcement mechanism.
@@ -148,7 +165,7 @@ def _reject_duplicates_in(
                 f"{contract_id!r} declares {list_name} id {atom.id!r} more than once",
                 hint=(
                     "Each id must be unique across must_have and must_not inside one "
-                    "contract. A duplicate is not deterministically evaluated — "
+                    "contract. A duplicate is not deterministically evaluated -- "
                     "QuestionDAG.topological() silently keeps only one declaration "
                     "and drops the rest."
                 ),
@@ -169,11 +186,11 @@ SUPPORTED_CONTRACT_SCHEMAS = frozenset({CONTRACT_SCHEMA_ID})
 
 
 class Contract(BaseModel):
-    """A single faction or character contract (unresolved — ``extends`` not yet applied)."""
+    """A single faction or character contract (unresolved -- ``extends`` not yet applied)."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     schema_id: str = Field(default=CONTRACT_SCHEMA_ID, alias="$schema")
-    id: str
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
     level: str  # "faction" | "character"
     extends: str | None = None  # a faction id, for level == "character"
     must_have: list[Atom] = Field(default_factory=list)
@@ -205,7 +222,7 @@ class ResolvedContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     level: str
-    lineage: list[str]  # [faction_id, character_id] — the inheritance chain, for provenance
+    lineage: list[str]  # [faction_id, character_id] -- the inheritance chain, for provenance
     must_have: list[Atom]
     must_not: list[MustNot]
     identity_refs: list[IdentityRef]

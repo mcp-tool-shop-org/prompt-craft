@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * pcraft — the Node launcher for the `prompt-crafter` Python toolkit.
+ * pcraft -- the Node launcher for the `prompt-crafter` Python toolkit.
  *
  * WHY A LAUNCHER AND NOT A PORT. The measured pieces here are Python: the contract
  * schema, the fail-closed loader, the gate's tiering and its four-way exit contract.
  * Re-implementing any of them in Node would create a second copy of a threshold, and a
- * threshold with two copies is a threshold that drifts — precisely the failure this
+ * threshold with two copies is a threshold that drifts -- precisely the failure this
  * project exists to catch. So this package installs a command and forwards it, verbatim,
  * to the Python that holds the truth.
  *
@@ -47,7 +47,7 @@ function argsFor(exe) {
  * Deliberately two questions, not one: an interpreter that exists but lacks the package
  * is a DIFFERENT problem from no interpreter at all, and telling them apart is the whole
  * value of this check. Reporting "python not found" to someone who has three Pythons and
- * no package sends them to fix the wrong thing — the same conflation the gate itself
+ * no package sends them to fix the wrong thing -- the same conflation the gate itself
  * refuses to make between "failed" and "could not run".
  */
 function locate() {
@@ -93,7 +93,7 @@ if (argv[0] === "--node-selftest") {
     process.stderr.write("selftest: the Windows launcher lost its -3\n");
     process.exit(1);
   }
-  process.stdout.write(`pcraft launcher ok — candidates: ${list.join(", ")}\n`);
+  process.stdout.write(`pcraft launcher ok -- candidates: ${list.join(", ")}\n`);
   process.exit(0);
 }
 

@@ -200,8 +200,9 @@ Director**. No publish, no tag, no `gh release create` this session.
 ## Fences
 
 - `identity_subgate.py`: **no delete, no promote, no wire.** Thresholds 0.55 / 0.05 stay.
-- Version stays **0.3.0** unless the Director says bump. Pre-1.0 is a standing ruling:
-  a generate that ran is not a stability claim.
+- Version stays **1.0.0** unless the Director says bump. The pre-1.0 standing ruling is
+  RETIRED — its flip criteria were met and v1.0.0 shipped 2026-08-18 (see the RULING
+  block below, kept unedited per the receipt rule; `STABILITY.md` is the promise).
 - **Do not run Phase 10 / full treatment / publish / tag.** Not asked.
 - `verify.py` 1.1 + 1.3 are **landed**. Do not implement `--audit` (1.2) until the
   Director says go; its semantics are already ruled and recorded above.
