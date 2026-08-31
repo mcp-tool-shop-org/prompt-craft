@@ -6,10 +6,10 @@ the prior Advisor seat was Grok. `grok.md` and `AGENTS.md` were brought current 
 day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
-**HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
-**Version:** **1.0.0** (TAGGED 2026-08-18; `STABILITY.md` is the promise. MEASURED 2026-08-31: the publish was never approved -- both registries stop at 0.4.0; the stale release run was cancelled on the Director's green. The healed tree ships as v1.0.1.)
-**Suite last counted:** **516** (2026-08-31, post health-wave fold; re-count before quoting)
-**Released:** registries at **0.4.0** (v1.0.0 tagged, publish never approved -- measured against PyPI/npm 2026-08-31, run 32210324323 cancelled). The pre-1.0 ruling is RETIRED (flip criteria met -- see the RULING block in `HANDOFF.md`); v1.0.1 is the release that carries it out.
+**HEAD at write:** `5549eab` on `origin/main` (updated 2026-08-31), tag `v1.0.1`, tree clean. **CI green.** Nothing open in the repo.
+**Version:** **1.0.1** — TAGGED and **PUBLISHED 2026-08-31** on the Director's chat approval of the `release` environment gate (run 33437273635). `STABILITY.md` is the promise; the five new verbs (`new`/`resolve`/`calibrate`/`regrade`/multi-image `gate`) are deliberately uncovered pending a ruling.
+**Suite last counted:** **1162** (2026-08-31, post Phase 9 remediation; 1156/7-skipped in a bare `[dev]` venv; re-count before quoting)
+**Released:** **both registries MEASURED at 1.0.1** (PyPI JSON API; npm dist-tags.latest, signed provenance sigstore logIndex 2667977023) — the first 1.x on either. History: v1.0.0 was tagged 2026-08-18 but its publish was never approved (run 32210324323 cancelled 2026-08-31 after 302h; registries sat at 0.4.0 until today).
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.
 This file is the standing state and the fences. Measure HEAD and the suite yourself.
@@ -44,7 +44,12 @@ The Executor still:
 | CI 3.11 dependency-audit red | **Closed** (`ef5f72e`) — ambient setuptools upgraded, not ignored; both legs green on run `32198885560` |
 | Phase 10 — full treatment / publish | **Run 2026-08-18** on the Director's go. README + handbook updated, translations regenerated BEFORE the tag, v0.4.0 published to both registries by OIDC |
 
-The swarm is **not closed**. Closing it is Phase 10 and is not authorised.
+~~The swarm is **not closed**. Closing it is Phase 10 and is not authorised.~~
+**2026-08-31: the 2026-08-31 dogfood swarm (swarm-1788165870-6880) ran Phase 10 to
+completion on the Director's green — v1.0.1 published, run CLOSED.** Close-out:
+`E:/AI/testing-os/swarms/swarm-1788165870-6880/RUN-CLOSEOUT.md`. `HANDOFF.md`'s top
+section carries the current state and backlog; the phase table above is the 0.4.0-era
+record.
 
 ## What is true (re-measure before quoting)
 
@@ -54,7 +59,7 @@ fire a live generate from a test.
 
 | thing | state |
 |---|---|
-| GPU-free suite | **359** |
+| GPU-free suite | **1162** (2026-08-31; was 359 at this table's writing) |
 | Lint gate | **Declared**, not inherited. 15 families selected; every `ignore` names its reason. `ruff>=0.6,<0.17`, `mypy>=1.11,<3` |
 | CI | **green on both legs** (`ef5f72e`, run `32198885560`). Both land on setuptools 84.0.0; the visible skip table survives |
 | SDXL pose / IP-Adapter / LoRA / InstantID / inpaint | wired, fake-torch tested |

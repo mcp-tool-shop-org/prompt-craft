@@ -2,30 +2,85 @@
 
 You should have read **`grok.md`** (the harness loads it via `AGENTS.md`: run rules,
 lint-gate rules, the CI-equivalent verify method) and **`ADVISOR.md`** (standing state
-and fences) before this file. All three are current as of 2026-08-18. This one carries
-the job. Then measure HEAD and the suite yourself — do not reconstruct from chat.
+and fences) before this file. This top section is current as of **2026-08-31**; then
+measure HEAD and the suite yourself — do not reconstruct from chat.
 
-**Seats (2026-08-18, Director's live word):** Advisor is **Claude**. Executor is a
-separate seat. Advisor-owns-README is **on**. You own code, tests, and CHANGELOG
+**Seats (unchanged, Director's live word 2026-08-18):** Advisor is **Claude**. Executor
+is a separate seat. Advisor-owns-README is **on**. You own code, tests, and CHANGELOG
 Unreleased. Advisor owns README* + all seven translations, handbook, landing, PyPI/npm
 copy, and the CHANGELOG body beyond Unreleased.
 
-## Where you are (measured 2026-08-18, re-measure anyway)
+## Where you are (measured 2026-08-31, re-measure anyway)
 
-Repo: `E:\AI\prompt-craft` — HEAD **`45c7dae`** on `origin/main`, tree clean.
-Version **0.4.0 — SHIPPED 2026-08-18** to PyPI (`prompt-crafter`) and npm
-(`@mcptoolshop/prompt-crafter`), tag `v0.4.0`, both registries confirmed. Suite **359**.
-**CI green on both legs.**
+Repo: `E:\AI\prompt-craft` — HEAD **`5549eab`** on `origin/main`, tree clean, tag
+**`v1.0.1`** on it. **v1.0.1 IS PUBLISHED on both registries and was MEASURED, not
+assumed**: PyPI JSON API answers `1.0.1` (https://pypi.org/project/prompt-crafter/1.0.1/)
+and npm `dist-tags.latest` answers `1.0.1` with signed provenance (sigstore logIndex
+2667977023). The Director approved the `release` environment gate in chat 2026-08-31;
+run 33437273635 concluded success. This is the **first 1.x on either registry** —
+v1.0.0 was tagged 2026-08-18 but its publish was never approved. Suite **1162** in the
+blessed venv (1156 / 7 skipped in a bare `[dev]` CI-equivalent venv). CI green.
+shipcheck: 21/21 checked pass, all hard gates.
 
-**Nothing is open in this repo.** Every item raised across 2026-08-18 is closed and
-verified on a real run. If the Director does not name a job: measure HEAD, re-count, stop.
+The dogfood run that got here is **swarm-1788165870-6880** (dogfood-lab/testing-os
+control plane): four health waves (107 findings), a Director-approved feature board
+(132 fixed / 18 deferred / 5 rejected, tranches S1–S4 + S5–S7), a fifteen-step Phase 9
+integration exam, its same-session remediation, and the full release sequence. The run
+record, receipts, adjudications (#122, #125, both CORROBORATE), and the exam pair
+(`phase9-report.md` / `phase9-remediation.md`) live in
+`E:/AI/testing-os/swarms/swarm-1788165870-6880/`; `RUN-CLOSEOUT.md` there is the
+authoritative close-out. The swarm is **closed**.
+
+**Nothing is open in this repo.** If the Director does not name a job: measure HEAD,
+re-count, stop. When the Director does name one, the standing backlog is:
+
+1. **STABILITY.md ruling for the five new verbs** (`new`, `resolve`, `calibrate`,
+   `regrade`, multi-image `gate`) — deliberately uncovered at 1.0.1 ("not named = not
+   covered"); the ruling is owed next minor.
+2. **Identity sub-gate evidence** — the fence holds (no delete, no promote, no wire;
+   0.55/0.05 stay) until a Director ruling WITH holdout data. The v1.0.1 calibration
+   workflow (`pcraft calibrate` / `regrade`, ~50–100 labelled sprites per check type)
+   exists precisely to produce that evidence.
+3. **The `[verify]` extra decision** — model-tier deps (`t2v-metrics`, `ai-eyes-mcp`)
+   are bring-your-own by decision, censused by `pcraft doctor`; blessing an extra needs
+   a GPU integration test of a real t2v-metrics version, and
+   `tests/test_packaging.py::test_the_model_tier_modules_are_deliberately_in_no_extra`
+   goes red to force the bookkeeping when it happens.
+4. **Receipt-integrity design** — replay covers contract/DAG/threshold drift but not
+   `decision`/`prompt`/`seed` (Phase 9 F3); and an escalated-without-scores run writes
+   no receipt for `resolve` to consume (Phase 9 F6). Both are design questions, not
+   patches.
+5. **The 18 deferred board items** in the control-plane DB (handbook doc items
+   consolidated under F-96c0f93a / F-a10f4e85; plugin exemplar; img2img; mutation
+   receipts; shell completion; output-helper consolidation; a
+   `scaffold_from_reference_sheet` verb).
 
 ```
 cd E:\AI\prompt-craft
-$env:PYTHONPATH = "src"
 .\.venv\Scripts\python.exe -m pytest -q     # quick count, NO shared --basetemp
 .\.venv\Scripts\python.exe verify.py        # blessed gate (fresh mkdtemp per run)
 ```
+
+Method notes that earned their place this run: verify in a bare `[dev]` CI-equivalent
+venv before push (the blessed venv has extras and has lied; typer floor is 0.27 there);
+the blessed lint scope is `ruff check src tests verify.py` + `mypy src verify.py` —
+`ruff check .` flags out-of-gate `scripts/` and misreads the floor; after any pyproject
+version bump, `pip install -e ".[dev]"` in EVERY editable venv or dist-info serves the
+old number; translations run BEFORE the tag, same commit as the README change; and
+RELEASING.md owns the release sequence (two free dry-run rungs — rung two is proven by
+REJECTING at the environment prompt).
+
+---
+
+# Everything below is the 2026-08-18 session record
+
+Kept unedited per the receipt rule (rulings and receipts are appended, never rewritten).
+**Superseded wherever it conflicts with the section above** — in particular: "Version
+stays 1.0.0 unless the Director says bump", "Do not run Phase 10 / full treatment /
+publish / tag", suite counts, and HEAD references are all of that era. The fences that
+still hold are restated above.
+
+---
 
 Two items closed back to back, both verified on real runs:
 
