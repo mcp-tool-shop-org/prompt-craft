@@ -44,8 +44,113 @@ entry to either map without adding its row here goes red.
 
 from __future__ import annotations
 
+import re
+import textwrap
 import traceback
+from collections.abc import Iterable, Sequence
 from typing import Final
+
+# --------------------------------------------------------------------------------------
+# The rendering convention (F-00cc16d9 / F-6ddb888b / F-6acc1597 / F-9bd8360e).
+#
+# ONE convention, four human-facing surfaces: the gate transcript (``pcraft.gate_report``),
+# the contrastive checkpoint (``core.gate.checkpoint``), the exit-contract refusals
+# (``core.gate.exit_contract``) and the rendered error below. Each of the four had grown its
+# own width behaviour -- which is to say none of them had one. MEASURED at 80 columns: 30 of
+# 30 transcript rows overflowed (min 121), the five checkpoint entries measured 188-230, and
+# 38 of 43 rendered hints overflowed. Every one of those overflows resumes at COLUMN 0, which
+# is the column each artifact reserves for its own structure, so a wrapped tail renders at
+# the same visual weight as a section header and only its wording tells them apart.
+#
+# The rules:
+#   * a FIXED width, never a terminal-detected one, so every rendering is deterministic and
+#     the string assertions and cp437/ASCII sweeps stay meaningful;
+#   * the headline -- a verdict row, an ``error[...]`` line -- is one line, and it is the
+#     only thing that owns column 0;
+#   * everything secondary (the WHY, the band, what the instrument saw, the claim, the
+#     advice) hangs on its own labelled line, indented under its content column;
+#   * a wrapped continuation hangs at that same content column, so nothing below a headline
+#     ever reaches the margin again.
+#
+# This lives here because ``pcraft.errors`` is the bottom of the import graph -- it imports
+# nothing from the package -- so all four surfaces share one convention without a cycle.
+# ASCII only, per the F-a6acaab1 cp437 doctrine: indentation and blank lines carry the
+# hierarchy; never box glyphs, never colour.
+# --------------------------------------------------------------------------------------
+
+LINE_WIDTH: Final[int] = 80
+"""The one width every human-facing surface renders to. Fixed, not detected."""
+
+_SENTENCE_BREAK: Final[re.Pattern[str]] = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+def wrap_block(text: str, *, first: str = "", hang: str = "", width: int = LINE_WIDTH) -> list[str]:
+    """Wrap ``text``, prefixing the first line with ``first`` and every other with ``hang``.
+
+    ``break_long_words`` and ``break_on_hyphens`` are both off: a hint that names
+    ``pip install 'prompt-crafter[image]'`` or an atom id with a hyphen must survive as one
+    searchable token, which is the whole point of printing it.
+    """
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        initial_indent=first,
+        subsequent_indent=hang,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped or [f"{first}{text}".rstrip()]
+
+
+def wrap_field(
+    label: str, text: str, *, indent: int, label_width: int, width: int = LINE_WIDTH
+) -> list[str]:
+    """One labelled block: ``<indent><label><text>``, continuations under the text column."""
+    return wrap_block(
+        text,
+        first=" " * indent + label.ljust(label_width),
+        hang=" " * (indent + label_width),
+        width=width,
+    )
+
+
+def wrap_sentences(
+    label: str, text: str, *, indent: int, label_width: int, width: int = LINE_WIDTH
+) -> list[str]:
+    """``wrap_field``, but each sentence starts a fresh line so advice reads as steps.
+
+    37 of 43 shipped hints are multi-sentence and 15 carry three or more; run together at one
+    indent they read as a paragraph of prose rather than as a sequence of things to do.
+    """
+    out: list[str] = []
+    hang = " " * (indent + label_width)
+    for sentence in _SENTENCE_BREAK.split(text.strip()):
+        if not sentence:
+            continue
+        first = (" " * indent + label.ljust(label_width)) if not out else hang
+        out.extend(wrap_block(sentence, first=first, hang=hang, width=width))
+    return out or wrap_field(label, text, indent=indent, label_width=label_width, width=width)
+
+
+def tier_list(tiers: Sequence[int]) -> str:
+    """``[0, 1]`` -> ``'T0 T1'`` -- the notation the verdict rows already use.
+
+    The product shipped FOUR spellings of the tier census and two of them printed raw Python
+    container repr into a human artifact, three lines from rows that were already writing
+    ``T0``/``T1``. This is the one form (F-6acc1597).
+    """
+    return " ".join(f"T{t}" for t in tiers) or "none"
+
+
+def id_list(ids: Iterable[str]) -> str:
+    """``['tabard', 'palette']`` -> ``'tabard, palette'`` -- one list rendering, everywhere.
+
+    ``exit_contract`` rendered the same data type two ways in one file: a quoted list repr on
+    the GATE_UNAVAILABLE branch (174 measured characters, on the could-not-run path a plain
+    ``pip install prompt-craft`` user hits first) and ``', '.join`` twenty lines below it.
+    """
+    return ", ".join(ids) or "none"
+
 
 # prefix -> CLI exit code (Tier-2). 0 success, 1 user error, 2 runtime error, 3 partial.
 _EXIT_BY_PREFIX: Final[dict[str, int]] = {
@@ -106,10 +211,10 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "CONTRACT_RELAXATION": "A character contract may not drop or relax a faction-required atom, "
     "and may not rewrite inherited content (claim, check_type, spatial, enum, depends_on). "
     "Raise the severity, or add a new id -- never substitute an existing id's content.",
-    "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom. Exit 4.",
+    "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom.",
     "GATE_UNAVAILABLE": "Install the [image] extra (pip install 'prompt-crafter[image]', or "
-    "pip install -e '.[image]' from a checkout) so a verifier can score. Exit 4, not 2 -- this is "
-    "not a failed atom.",
+    "pip install -e '.[image]' from a checkout) so a verifier can score. This is not a failed "
+    "atom; it is a gate that could not run.",
     # CORRECTED IN PLACE (F-56203d3d). This read "A required contract atom failed. Identity still
     # gates nothing. Exit 2." on the code every content failure lands on: sentence one restates
     # the code, sentence two is project jargon (the identity_subgate fence) answering a question
@@ -123,12 +228,13 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "lists each atom, its score and the band that graded it. If most required atoms are SKIPPED "
     "the gate is half-installed -- install the [image] extra (pip install 'prompt-crafter[image]', "
     "or pip install -e '.[image]' from a checkout) and re-run before treating this as a content "
-    "failure. Exit 2.",
-    "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
+    "failure.",
+    "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. "
+    "This is the human band, not a pass.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
     "IO_RECORD_SCHEMA_UNSUPPORTED": "This receipt was written by a NEWER prompt-craft than the "
     "one reading it. Upgrade prompt-craft to read it. Do NOT re-bind: the file is well formed, "
-    "not corrupt, and re-binding would destroy a good receipt. Exit 1 (your input), not 2.",
+    "not corrupt, and re-binding would destroy a good receipt.",
     "CONFIG_THRESHOLDS_INVALID": "Each band needs high >= low and both in [0, 1]. Recalibrate or fix the table.",
     # F-09f30018: the version-disagreement refusal in orchestrate.run() used to reuse
     # CONFIG_THRESHOLDS_INVALID, which load_thresholds already raises for a structurally
@@ -141,7 +247,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "config.thresholds_version unset to assert nothing.",
     "CONTRACT_CYCLIC_DEPENDS_ON": "Two or more atoms depend_on each other (or an atom depends_on "
     "itself), so no parent-first order exists and the gate cannot evaluate parents before "
-    "children. Break the cycle in the contract's depends_on edges. Exit 1 (your input), not 2.",
+    "children. Break the cycle in the contract's depends_on edges.",
     "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
     "INPUT_IMAGE_NAME": "Pass --image-name as local.png=cloud-hash.png (repeatable).",
     "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",
@@ -185,7 +291,7 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "than editing the CLI.",
     "CONTRACT_SCHEMA_UNSUPPORTED": "This contract declares a $schema this build does not read. "
     "Upgrade prompt-craft, or set $schema to prompt-craft/contract.v1. The file is well formed, "
-    "not corrupt. Exit 1 (your input), not 2.",
+    "not corrupt.",
     "CONTRACT_MISSING_BASE": "The contract extends a base id that is not in the store. Add the "
     "base contract to --contracts-dir, or fix the extends id.",
     "INPUT_DUPLICATE_CONTRACT_ID": "Two files in the contract store declare the same id. Ids are "
@@ -242,10 +348,33 @@ class PromptCraftError(Exception):
         return exit_code_for(self.code)
 
     def to_safe_text(self) -> str:
-        """No stack trace. For end users / LLM / MCP output."""
+        """No stack trace. For end users / LLM / MCP output.
+
+        CORRECTED IN PLACE (F-9bd8360e). The hint was emitted as one unbroken line regardless
+        of length, so the code / message / hint hierarchy this module's docstring promises
+        survived exactly one visual line. MEASURED over all 43 DEFAULT_HINTS as they actually
+        render (the ``  hint: `` prefix included): 38 exceeded 80 columns and 31 exceeded 120,
+        with GATE_FAIL -- the code every content failure lands on -- at 379 characters. At 80
+        columns that hint occupied 5 visual lines of which 4 began at COLUMN 0, the same column
+        as ``error[GATE_FAIL]:``, so the two-space indent that distinguishes advice from the
+        error was visible only on the first line.
+
+        ``exit_code`` gets its own field. Seven hints ended with a prose ``Exit N.`` sentence,
+        which buried a structured fact this class already owns at the tail of the longest
+        wrapped run AND let it drift from ``exit_code_for()``, which is the number the CLI
+        actually returns. The prose copies are deleted; this line cannot disagree with itself.
+
+        The MESSAGE is deliberately left unwrapped. Messages are composed by the domains that
+        raise them and some carry their own structure -- the contract loader's aggregate
+        separates field errors with a literal ``" | "`` that its own tests segment on, and
+        wrapping would break that delimiter across a newline. Under this module's convention
+        the headline owns its line and only the secondary blocks hang, which is the same rule
+        the verdict rows and the checkpoint follow.
+        """
         lines = [f"error[{self.code}]: {self.message}"]
         if self.hint:
-            lines.append(f"  hint: {self.hint}")
+            lines.extend(wrap_sentences("hint:", self.hint, indent=2, label_width=6))
+        lines.append(f"  exit: {self.exit_code}")
         if self.retryable:
             lines.append("  (retryable)")
         return "\n".join(lines)

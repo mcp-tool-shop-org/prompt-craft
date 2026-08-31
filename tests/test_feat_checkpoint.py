@@ -107,7 +107,11 @@ def test_the_checkpoint_names_a_short_tier_census():
     ck = build_checkpoint(transcript)
     text = ck.text.lower()
     assert "1 of 2" in text or "tiers" in text, "the artifact must be able to state a non-Zone cause"
-    assert "[0, 1]" in ck.text and "[1]" in ck.text
+    # ⚑ REWRITTEN IN PLACE (F-6acc1597). This asserted the Python list repr -- '[0, 1]' and
+    # '[1]' -- which was one of the four spellings of the tier census this product shipped, and
+    # the two that printed raw container repr into a human artifact. The census now renders in
+    # the SAME notation as the verdict rows a reader sees three lines away in the transcript.
+    assert "required T0 T1" in ck.text and "executed T1" in ck.text
     assert ck.lines, "a checkpoint with no lines at all is not a checkpoint"
     ck.text.encode("cp437")  # the CLI prints this verbatim on a legacy console
 
@@ -172,10 +176,19 @@ def test_a_normal_uncertain_run_still_reads_the_way_it_did():
 # --------------------------------------------------------------------------- F-a6078c7f
 # build_checkpoint already had the content as STRUCTURE (one ContrastiveLine per flagged atom)
 # and then flattened all of it with ' '.join into ``text`` -- which becomes
-# OrchestrationResult.reason, which cli._print_result prints as ``decision: ESCALATED ({reason})``.
-# MEASURED: 974 characters, zero newlines, one unbroken parenthesis on the operator's screen,
-# while the formatted transcript printed twenty lines below it was fully structured. The human
-# decision point was the one artifact that was not.
+# OrchestrationResult.reason. MEASURED: 974 characters, zero newlines, one unbroken parenthesis
+# on the operator's screen, while the formatted transcript printed twenty lines below it was
+# fully structured. The human decision point was the one artifact that was not.
+#
+# ⚑ COMMENT UPDATED (wave 10, coordinator note). This block described the render that WRAPPED
+# the checkpoint at the time: ``cli._print_result`` printed ``decision: ESCALATED ({reason})``,
+# so a multi-line reason landed inside a parenthesis opened on line 1 -- which is why the
+# "unbroken parenthesis" above is phrased the way it is. The cli-ux domain has since split
+# that composition: the decision line now stands alone, and the checkpoint block prints
+# indented beneath it. The defect this section pins is unchanged and lives entirely in
+# build_checkpoint -- what changed is that the artifact is no longer being rendered into a
+# parenthesis, so its structure survives to the screen. See F-6ddb888b below, which fixes the
+# width of the per-atom lines this fix left at 188-230 characters.
 
 _ALL_REQUIRED = ("tabard", "sigil", "palette", "skin", "weapon", "face")
 
@@ -191,19 +204,33 @@ def test_the_checkpoint_is_structured_text_not_one_unbroken_line(tmp_path):
     assert result.reason == text, "the CLI prints this verbatim; they must stay the same object"
     assert "\n" in text, "the UNCERTAINTY_GATED_HUMANS artifact shipped as one 974-character line"
     body = text.splitlines()
-    assert len(body) == 1 + len(result.checkpoint.lines), (
-        "one header line plus one line per flagged atom -- the structure build_checkpoint "
-        "already had before it was flattened"
+    # ⚑ REWRITTEN IN PLACE (F-6ddb888b). This asserted `1 + len(lines)` -- one header line plus
+    # one line per flagged atom -- which is the shape whose per-atom lines then measured 188-230
+    # characters each, i.e. 3 visual lines apiece at 80 columns. The structure is now one line
+    # per FIELD, so the count assertion becomes: every flagged atom is represented, and nothing
+    # is flattened back into a run-on.
+    assert len(body) > 1 + len(result.checkpoint.lines), (
+        "each flagged atom renders its claim/thought/chose as separate lines -- the structure "
+        "ContrastiveLine already carried as separate typed fields"
     )
+    for line in result.checkpoint.lines:
+        assert any(line.atom_id in row for row in body), f"{line.atom_id} is not in the artifact"
 
 
 def test_the_summary_is_distinguishable_from_the_detail(tmp_path):
     """The header pair and the per-atom lines used to be joined identically, so nothing
-    separated the summary from the detail."""
+    separated the summary from the detail.
+
+    ⚑ REWRITTEN IN PLACE (F-6ddb888b). The pair itself was ONE line joined by a space, so the
+    contrastive pair the standard is named for did not contrast visually either; it is now two
+    lines, and the per-atom entries are set off by indent and a blank line rather than by a
+    '  - ' bullet that governed only the first third of a 210-character run.
+    """
     result = _escalating_run(tmp_path)
-    head, *rows = result.checkpoint.text.splitlines()
-    assert head == f"{result.checkpoint.thought} {result.checkpoint.chose}"
-    assert rows and all(r.startswith("  - ") for r in rows), (
+    thought, chose, *rows = result.checkpoint.text.splitlines()
+    assert thought == result.checkpoint.thought
+    assert chose == result.checkpoint.chose
+    assert rows and all(r.startswith("  ") or not r.strip() for r in rows), (
         "a per-atom line has to be marked as one"
     )
 
@@ -287,3 +314,126 @@ def test_no_table_renders_exactly_what_it_rendered_before():
     without = build_checkpoint(_uncertain_transcript(0.79))
     assert "0.79" in without.text
     assert "0.80" not in without.text and "0.40" not in without.text
+
+
+# --------------------------------------------------------------------------------------------
+# F-6ddb888b -- F-a6078c7f broke the 974-character single line into one line per flagged atom,
+# and each of THOSE lines is 188-230 characters, so the structure it restored is destroyed again
+# at the first real width. MEASURED on the shipped example with the five required atoms scripted
+# to 0.60 and the real threshold table passed: the header pair is 80 chars and the five per-atom
+# entries measure 209, 230, 188, 214 and 198 -- every one of them 3 visual lines at 80 columns
+# and 2 at 120, wrapping to column 0. So the '  - ' bullet governed only the first third of each
+# entry, and across five atoms the operator saw 16 visual lines carrying 5 bullets.
+#
+# ContrastiveCheckpoint ALREADY holds the content as structure -- ContrastiveLine carries claim,
+# thought and chose as separate typed fields -- and the generator flattened all three back into
+# one sentence. Three consequences per STANDARDS #5: the contrastive PAIR was joined by a
+# mid-sentence '; ' at identical visual weight, the atom_id was repeated three times per entry
+# and the score twice, and `text` becomes OrchestrationResult.reason, so the wrapped entries
+# landed inside a parenthesis opened on line 1.
+# --------------------------------------------------------------------------------------------
+
+_CHECKPOINT_WIDTH = 80
+_ENTRY_INDENT = 2
+_FIELD_INDENT = 4
+
+
+def test_no_checkpoint_line_overflows_a_standard_terminal(tmp_path):
+    result = _escalating_run(tmp_path)
+    for line in result.checkpoint.text.splitlines():
+        assert len(line) <= _CHECKPOINT_WIDTH, (
+            f"a {len(line)}-column line wraps to column 0 inside a parenthesis the CLI opened "
+            f"on line 1: {line!r}"
+        )
+
+
+def test_the_contrastive_pair_contrasts_vertically(tmp_path):
+    """The thing the standard is named for was joined by a mid-sentence '; ' at identical
+    visual weight, so finding the decision meant parsing a semicolon 100 characters in."""
+    result = _escalating_run(tmp_path)
+    ck = result.checkpoint
+    head = ck.text.splitlines()[:2]
+    assert head == [ck.thought, ck.chose], (
+        "the summary pair is two lines, so what-you-thought and what-I-chose are the same "
+        f"kind of thing at the same indent: {head!r}"
+    )
+
+
+def test_each_flagged_atom_renders_its_fields_as_labelled_lines(tmp_path):
+    result = _escalating_run(tmp_path)
+    lines = result.checkpoint.text.splitlines()
+    heads = [ln for ln in lines if ln.startswith("  ") and not ln.startswith("   ")]
+    assert len(heads) == len(result.checkpoint.lines), (
+        "one head line per flagged atom -- the structure build_checkpoint already had"
+    )
+    labels = [
+        ln.strip().split()[0]
+        for ln in lines
+        if ln.startswith(" " * _FIELD_INDENT) and ln[_FIELD_INDENT:_FIELD_INDENT + 1].strip()
+    ]
+    assert set(labels) <= {"claim:", "thought:", "chose:"}, f"one label vocabulary, saw {labels}"
+    for want in ("claim:", "thought:", "chose:"):
+        assert labels.count(want) == len(result.checkpoint.lines), (
+            f"every flagged atom renders its {want} on its own line"
+        )
+
+
+def test_the_labels_form_a_column_so_the_labels_do_the_contrasting(tmp_path):
+    """The labels are padded to one width, so every VALUE starts in the same column and the
+    eye can run down claim / thought / chose without re-finding the text each time. That is
+    what replaced a mid-sentence '; ' carrying the contrast at identical visual weight."""
+    result = _escalating_run(tmp_path)
+    field_lines = [
+        ln for ln in result.checkpoint.text.splitlines()
+        if ln.startswith(" " * _FIELD_INDENT)
+        and ln[_FIELD_INDENT:_FIELD_INDENT + 1].strip()
+        and ln.strip().split()[0].endswith(":")
+    ]
+    assert field_lines
+    value_columns = {len(ln) - len(ln[_FIELD_INDENT:].lstrip()) for ln in field_lines}
+    assert value_columns == {_FIELD_INDENT}, "every label starts at the one field indent"
+    starts = {
+        len(ln) - len(ln.split(":", 1)[1].lstrip()) for ln in field_lines
+    }
+    assert len(starts) == 1, f"the values must line up in one column, saw {starts}"
+
+
+def test_a_blank_line_separates_one_atom_entry_from_the_next(tmp_path):
+    """The cheapest ASCII separator there is, and the one this artifact had none of."""
+    result = _escalating_run(tmp_path)
+    lines = result.checkpoint.text.splitlines()
+    blanks = [i for i, ln in enumerate(lines) if not ln.strip()]
+    assert len(blanks) == len(result.checkpoint.lines), (
+        "one blank line ahead of each atom entry, including the first (which separates the "
+        "entries from the summary pair)"
+    )
+
+
+def test_the_generated_sentences_stop_repeating_the_id_and_the_score(tmp_path):
+    """'tabard UNCERTAIN 0.60: you probably thought tabard was close enough; I left tabard in
+    the human band (0.60; ...)' -- the id three times, the score twice, competing with the
+    margin numbers F-b1b29cef added for exactly this decision."""
+    result = _escalating_run(tmp_path)
+    for line in result.checkpoint.lines:
+        if line.atom_id in ("tier_census", "contract"):
+            continue
+        assert line.atom_id not in line.thought, (
+            f"the id already heads the entry: {line.thought!r}"
+        )
+        assert line.atom_id not in line.chose, f"the id already heads the entry: {line.chose!r}"
+        if line.score is not None:
+            assert f"{line.score:.2f}" not in line.chose, (
+                f"the margin already heads the entry: {line.chose!r}"
+            )
+
+
+def test_the_head_line_still_carries_the_decision_inputs(tmp_path):
+    """id, zone, score and band on ONE scannable line -- the accept-or-repair inputs."""
+    result = _escalating_run(tmp_path)
+    heads = [
+        ln for ln in result.checkpoint.text.splitlines()
+        if ln.startswith("  ") and not ln.startswith("   ")
+    ]
+    first = heads[0]
+    assert result.checkpoint.lines[0].atom_id in first
+    assert result.checkpoint.lines[0].zone in first

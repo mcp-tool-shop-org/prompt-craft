@@ -17,7 +17,10 @@ import contextlib
 import importlib.util
 import json
 import os
+import re
+import shutil
 import sys
+import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -239,6 +242,117 @@ def _say(text: str, *, as_json: bool = False) -> None:
     typer.echo(_encodable(text, sys.stderr if as_json else sys.stdout), err=as_json)
 
 
+# ---------------------------------------------------------------- layout (human channel)
+#
+# STABILITY.md puts human-readable output wording and layout under "Not covered" and sends
+# machine callers to ``--json``; everything below moves characters on the human channel only
+# and leaves every document byte-identical.
+#
+# The shape these three helpers converge on is the one the npm launcher already uses for its
+# own multi-line output (``npm/bin/pcraft.mjs``): a headline at column 0, then the body
+# indented under it, with blank lines separating blocks and anything copy-pasteable alone on
+# its own row. Pure ASCII -- the structure is carried by spacing, not by glyphs or colour --
+# so it survives every codepage ``_encodable`` has to write through.
+
+
+def _wrap(text: str, width: int, initial: str, subsequent: str) -> list[str]:
+    """One logical line as however many physical rows the terminal allows.
+
+    ``break_long_words`` and ``break_on_hyphens`` are both off: the values in this output are
+    atom ids, band keys and hyphenated colour words (``grey-ash``, ``no_rival_colours``), and
+    a wrap that splits one of them mid-token produces a string the reader cannot search for.
+    A token wider than the terminal overruns rather than being cut in half, which is the less
+    damaging of the two failures.
+    """
+    return textwrap.wrap(
+        text,
+        width=max(width, len(subsequent) + 20),
+        initial_indent=initial,
+        subsequent_indent=subsequent,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [initial.rstrip()]
+
+
+def _term_width(default: int = 80) -> int:
+    """Columns to wrap human blocks to. ``COLUMNS`` wins, then the tty, then 80.
+
+    ``shutil.get_terminal_size`` reads ``COLUMNS`` first, which is what the help pages already
+    honour, so a wrapped block and the help page it sits beside agree about the geometry.
+    Capped at 100: past that, prose lines get long enough that the eye loses the line it is
+    on, and every other line this CLI prints was already written to fit inside 80.
+    """
+    return min(shutil.get_terminal_size(fallback=(default, 24)).columns, 100)
+
+
+# ``version_coherence`` ends its warning with the one command that fixes it, parenthesised.
+# That is the actionable half, and a parenthetical at the tail of a 219-character string is
+# where it is least likely to be seen. Pulled out here and given its own row rather than
+# reworded at the source: the same string is the ``version_warning`` field of the ``--json``
+# DoctorReport, and rewriting it would change a document. Pinned from the other side by
+# ``test_the_warning_the_shipped_check_produces_is_the_one_that_was_measured``.
+_REMEDY = re.compile(r"[\s;,]*\((?:reinstall|fix|run):\s*(?P<cmd>[^()]+)\)\s*\Z")
+
+
+def _version_mismatch_lines(warning: str, width: int) -> list[str]:
+    """``doctor``'s loudest line, wrapped so it stays a CHILD of the version above it.
+
+    The warning was emitted as one string whose entire structure was a two-space indent, so
+    at 80 columns it soft-wrapped onto three rows of which two began at column 0 -- the same
+    visual level as the sibling top-level rows (``python 3.14.5  (ok; need >= 3.11)``). The
+    remedy, being last, landed at column 0 on row three, where it read as an unrelated status
+    rather than as the fix for the warning three rows above (F-3c91e814).
+
+    Four-space continuation keeps every row subordinate to ``pcraft <version>``; ``fix:`` on
+    its own row is scannable and copy-pasteable. A warning that does not end in a remedy
+    parenthetical still gets the wrap -- half the fix beats none.
+    """
+    remedy = _REMEDY.search(warning)
+    body = warning[: remedy.start()] if remedy else warning
+    body = body.rstrip(" ;,.")
+    lines = _wrap(f"VERSION MISMATCH: {body}.", width, "  ", "    ")
+    if remedy is not None:
+        lines.append(f"    fix: {remedy.group('cmd').strip()}")
+    return lines
+
+
+def _reason_lines(reason: str, width: int) -> list[str]:
+    """A multi-line decision reason as an indented block under the ``decision:`` headline.
+
+    Since wave-8 an escalation's ``reason`` IS the ``build_checkpoint`` artifact -- a headline
+    plus one ``  - `` bullet per unconfirmed atom -- and it was being interpolated into
+    ``decision: {D}  ({reason})``. MEASURED: one ``_say`` call of 911 characters whose opening
+    parenthesis sat at column 21 and whose closing one landed glued to a question mark four
+    lines later; ``attempts:`` appeared only after it, and the bullets (204/225/157/199 chars)
+    soft-wrapped with zero continuation indent, so the tail of one ran straight into the next
+    bullet's marker. The one block written to be read by a person was the only one with no
+    visual frame at all (F-1e1af911).
+
+    Bullets stay contiguous -- the six-space continuation, not a blank line, is what separates
+    one from the next -- and the blank after the headline is what separates summary from
+    detail. The bullet text is re-wrapped, never re-parsed: its content is
+    ``core.gate.checkpoint``'s to compose, and this is the layer that decides where it breaks.
+    """
+    # Composed-seam ruling (wave-10 fold): checkpoint.py now composes AND wraps its own
+    # body under the errors.py convention (fixed width, hanging label columns), so this
+    # layer must not strip or re-wrap it -- doing so flattened the claim/thought/chose
+    # columns back to the block margin and orphaned wrapped continuations at column 2.
+    # One wrap authority per line: the head (a single sentence, unformatted) is wrapped
+    # HERE; every body row is pre-formatted THERE and only gets the block's two-space
+    # frame, internal indentation preserved. Checkpoint content is <=78 wide, so framed
+    # rows stay <=80.
+    head, _, rest = reason.partition("\n")
+    lines = _wrap(head, width, "  ", "  ")
+    body = rest.splitlines()
+    while body and not body[-1].strip():
+        body.pop()
+    if any(row.strip() for row in body):
+        lines.append("")
+    for row in body:
+        lines.append(f"  {row}" if row.strip() else "")
+    return lines
+
+
 def _emit_model(model: BaseModel, **extra: Any) -> None:
     """The ``--json`` document, escaped to pure ASCII.
 
@@ -381,11 +495,12 @@ def gate(
     """Run the contract gate on an image you already have. SKIPPED atoms are not a pass.
 
     Exit codes:
-    0 every required atom passed.
-    1 the contract is unusable (no required atom, or a bad --contracts-dir).
-    2 a required atom failed.
-    3 a required atom was scored but the roll-up is UNCERTAIN.
-    4 could not run: missing or unreadable image, or no verifier could score.
+      0  every required atom passed.
+      1  the contract is unusable (no required atom, or a bad --contracts-dir).
+      2  a required atom failed.
+      3  a required atom was scored but the roll-up is UNCERTAIN.
+      4  could not run: missing or unreadable image, or no verifier could score.
+
     4 is never folded into 2 -- could-not-check is not checked-clean, and a CI
     branch that merges them reads "the gate ran and failed" for a gate that
     never ran.
@@ -437,11 +552,12 @@ def bind(
     """Run the full synth->generate->gate->retry->bind loop and report the decision.
 
     Exit codes:
-    0 bound.
-    1 the contract is unusable.
-    2 a required atom failed.
-    3 a required atom was scored but the roll-up is UNCERTAIN.
-    4 the loop could not run and nothing was scored.
+      0  bound.
+      1  the contract is unusable.
+      2  a required atom failed.
+      3  a required atom was scored but the roll-up is UNCERTAIN.
+      4  the loop could not run and nothing was scored.
+
     2 means the gate ran and refused; 4 means there is no verdict to read.
     The last line names the receipt it wrote, inside --records-dir; run
     `pcraft replay` on exactly that path to re-check it.
@@ -530,8 +646,12 @@ def validate(
         )
         _say(f"ok  {resolved.id}", as_json=as_json)
         _say(f"lineage: {' -> '.join(resolved.lineage)}", as_json=as_json)
-        _say(f"required: {report.required}", as_json=as_json)
-        _say(f"must_not: {report.must_not}", as_json=as_json)
+        # Joined, not repr'd (F-2d223d8e): the line above already renders its list FOR a
+        # reader, and these two dumped brackets and quotes one row below it. Both values reach
+        # a machine caller as real arrays in the `--json` ValidateReport, so the repr on the
+        # human channel bought nothing and cost 18 characters of quoting on the wider row.
+        _say(f"required: {', '.join(report.required)}", as_json=as_json)
+        _say(f"must_not: {', '.join(report.must_not)}", as_json=as_json)
         _say(f"questions: {len(dag.questions)}", as_json=as_json)
         if as_json:
             _emit_model(report)
@@ -555,8 +675,10 @@ def demo(
     try:
         _s, resolved, _t, _c = load_sprite_example()
         _say(f"contract: {resolved.id}  lineage: {' -> '.join(resolved.lineage)}", as_json=as_json)
-        _say(f"required atoms: {[a.id for a in resolved.required_atoms()]}", as_json=as_json)
-        _say(f"must_not: {[m.id for m in resolved.must_not]}", as_json=as_json)
+        # The first two lines a new user sees from the command the README points at, so they
+        # are the last two that should read like a repl transcript (F-2d223d8e).
+        _say(f"required atoms: {', '.join(a.id for a in resolved.required_atoms())}", as_json=as_json)
+        _say(f"must_not: {', '.join(m.id for m in resolved.must_not)}", as_json=as_json)
         _say("", as_json=as_json)
         result = run_mock_loop(records_dir=records_dir)
         _print_result(result, records_dir=records_dir, as_json=as_json)
@@ -581,10 +703,11 @@ def replay(
     """Replay a receipt: reconstruct its question DAG from the contract and assert no drift.
 
     Exit codes:
-    0 the receipt reproduces.
-    1 it was written by a NEWER prompt-craft than this one -- upgrade, do not
-    re-bind.
-    2 it drifted, is unreadable, or is not a receipt.
+      0  the receipt reproduces.
+      1  it was written by a NEWER prompt-craft than this one -- upgrade, do
+         not re-bind.
+      2  it drifted, is unreadable, or is not a receipt.
+
     Nothing is generated and nothing is scored here, so exit 4 (could-not-run)
     cannot occur. RECORD is the path `pcraft bind` printed.
     """
@@ -640,7 +763,12 @@ def doctor(
             # reports, and a user who does not know the dist-info is stale has no way to
             # tell that from here -- the whole reason this check moved out of the
             # maintainer-only `verify.py --installed` leg.
-            _say(f"  VERSION MISMATCH: {report.version_warning}", as_json=as_json)
+            #
+            # Loud in bytes is not loud in layout (F-3c91e814): as one 219-character string it
+            # soft-wrapped onto three rows of which two started at column 0, so the only row
+            # that still read as a child of `pcraft <version>` was the first one.
+            for line in _version_mismatch_lines(report.version_warning, _term_width()):
+                _say(line, as_json=as_json)
         py_mark = "ok" if report.python_ok else "FAIL"
         _say(f"python {report.python}  ({py_mark}; need >= 3.11)", as_json=as_json)
         _say(f"  interpreter: {report.executable}", as_json=as_json)
@@ -656,7 +784,11 @@ def doctor(
         for extra in report.extras:
             mark = "present" if extra.present else "missing"
             missing = [name for name, ok in extra.modules.items() if not ok]
-            detail = f"  missing {missing}" if missing else ""
+            # `mark` is already the word "missing", so the old `f"  missing {missing}"` printed
+            # it twice and then repr'd the module list after it: `[image] missing  missing
+            # ['torch', ...]`. Naming the modules as a parenthetical says what to install
+            # instead of restating the status (F-2d223d8e).
+            detail = f"  (need {', '.join(missing)})" if missing else ""
             _say(f"[{extra.name}] {mark}{detail}", as_json=as_json)
         if report.store_ok:
             _say(
@@ -1059,7 +1191,19 @@ def _print_result(result, *, records_dir: str | Path = "records", as_json: bool 
         _say("mock: scores are scripted constants; the image pixels were not read.", as_json=as_json)
     elif mock is False:
         _say("live: scores came from the [image] verifiers reading this image.", as_json=as_json)
-    _say(f"decision: {result.decision.upper()}  ({result.reason})", as_json=as_json)
+    # F-1e1af911. A one-line reason keeps the compact form -- `decision: BOUND  (all required
+    # atoms passed)` is 44 characters and correctly grouped, and was never the defect. A reason
+    # that arrived with newlines in it is the checkpoint, and it gets the decision line to
+    # itself and a block of its own below, so `attempts:` is not stranded behind a parenthesis
+    # the reader cannot see the end of.
+    reason = result.reason or ""
+    if "\n" in reason.strip():
+        _say(f"decision: {result.decision.upper()}", as_json=as_json)
+        for line in _reason_lines(reason, _term_width()):
+            _say(line, as_json=as_json)
+        _say("", as_json=as_json)
+    else:
+        _say(f"decision: {result.decision.upper()}  ({reason})", as_json=as_json)
     _say(f"attempts: {len(result.attempts)}", as_json=as_json)
     for a in result.attempts:
         extra = f" repair={a.repair.value}" if a.repair else ""
@@ -1071,10 +1215,17 @@ def _print_result(result, *, records_dir: str | Path = "records", as_json: bool 
             format_transcript(result.record.gate_transcript, dag=result.record.question_dag),
             as_json=as_json,
         )
-        _say(
-            f"receipt: {receipt}  hash={result.record.contract_hash[:19]}...",
-            as_json=as_json,
-        )
+        # F-d4e6686f. `bind --help` promises "The last line names the receipt it wrote ...
+        # run `pcraft replay` on exactly that path", and the last line was path + two spaces
+        # + hash -- which `replay` refuses. That is the recovery loop F-5b783e17 closed,
+        # reopened at the layout level. The path now ends the output alone, so a line-select
+        # or `tail -1` yields exactly what `replay` accepts at any terminal width; the hash
+        # keeps its place in the record by moving UP to its own labelled row. The blank line
+        # above detaches the block from the ten-row atom table it was visually continuing.
+        _say("", as_json=as_json)
+        _say("receipt:", as_json=as_json)
+        _say(f"  hash: {result.record.contract_hash[:19]}...", as_json=as_json)
+        _say(f"  {receipt}", as_json=as_json)
     if as_json:
         # Additive, and omitted when there is no receipt. The document already carried
         # `record.record_id` and `record.image_path` but never said where the receipt itself

@@ -309,7 +309,15 @@ def test_the_rendered_verdict_line_names_what_the_instrument_saw(sprite_example)
 
 def test_a_verifier_with_no_detail_renders_exactly_what_it_did_before(sprite_example):
     """Absent field == old shape, on the model and on the rendered line. A verifier that
-    publishes neither method is the normal case, not an error."""
+    publishes neither method is the normal case, not an error.
+
+    ⚑ REWRITTEN IN PLACE (F-00cc16d9). This asserted ``row.endswith(v.reason)`` -- i.e. it
+    pinned the reason ONTO the verdict row, which is what made the plainest possible row 121
+    characters and put every row over both standard terminal widths. The reason (and the
+    ``detail`` beside it) now hang on their own labelled continuation lines under the atom, so
+    the property this test is really about -- an absent detail adds NOTHING -- is asserted as
+    the absence of a ``saw:`` line rather than as the row's last characters.
+    """
     from pcraft.gate_report import format_transcript
 
     _s, resolved, thresholds, _c = sprite_example
@@ -321,9 +329,12 @@ def test_a_verifier_with_no_detail_renders_exactly_what_it_did_before(sprite_exa
     assert all(v.detail is None for v in t.verdicts)
 
     rendered = format_transcript(t)
+    assert "saw:" not in rendered, "an absent detail appends nothing at all"
     for v in t.verdicts:
         row = next(line for line in rendered.splitlines() if f" {v.atom_id:18} " in line)
-        assert row.endswith(v.reason), "an absent detail appends nothing at all to the line"
+        assert row.rstrip().endswith(f"{v.polarity.value}/{v.severity.value}"), (
+            "the row ends at its last fixed column; everything secondary hangs below it"
+        )
 
 
 def test_a_detail_method_that_raises_cannot_change_a_verdict(sprite_example):

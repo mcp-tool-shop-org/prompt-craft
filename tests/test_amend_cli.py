@@ -1154,13 +1154,19 @@ def test_cli_replay_still_accepts_the_table_the_receipt_was_actually_decided_und
 # with IO_RECORD_READ at exit 2.
 
 
-_RECEIPT_LINE = re.compile(r"^receipt: (.+?)\s+hash=", re.MULTILINE)
-
-
 def _printed_receipt_path(text: str) -> Path:
-    m = _RECEIPT_LINE.search(text)
-    assert m, f"no `receipt: ... hash=` line in output: {text!r}"
-    return Path(m.group(1))
+    """The path the run told the operator to hand to ``replay``.
+
+    Reads the LAST non-empty line, which is precisely the promise `bind --help` makes
+    ("The last line names the receipt it wrote"). Until wave-10 this parsed
+    ``^receipt: (.+?)\\s+hash=`` instead, because the path shared its line with the
+    contract hash -- so the helper had to know a layout in order to recover a promise
+    that the layout was breaking (F-d4e6686f). Reading the last line means the helper
+    asserts the promise rather than working around it.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert lines, f"no output at all: {text!r}"
+    return Path(lines[-1].strip())
 
 
 def test_bind_prints_the_receipt_path_it_actually_wrote(tmp_path):
@@ -1418,3 +1424,412 @@ def test_the_mock_path_stays_quiet(tmp_path):
     result = runner.invoke(app, ["bind", "--mock", "--records-dir", str(tmp_path)])
     text = (result.stdout or "") + (result.stderr or "")
     assert "[attempt" not in text, text
+
+
+# =========================================================================== wave-10
+# Stage-D polish (cli-ux amend). Terminal-visual layout only: every fix below moves
+# characters on the HUMAN channel, which STABILITY.md puts under "Not covered ... Log
+# and human-readable output wording. Parse --json, not the banner." Each test here was
+# watched RED against the tree at 6838d85 before the matching fix landed.
+
+
+def _stdout_at(argv, columns="100"):
+    """Render a command at a PINNED width so a layout assertion measures layout.
+
+    Terminal width is an input to every wrap in this section; leaving it to whatever
+    console runs the suite would make these tests report the runner's geometry rather
+    than the product's behaviour.
+    """
+    return runner.invoke(app, argv, env={"COLUMNS": columns}).stdout or ""
+
+
+# --------------------------------------------------------------------------- F-f880d5a4
+# The exit-code tables in the gate/bind/replay long-help docstrings put every code and
+# every following sentence at the same rendered margin, so prose that happens to open
+# with a numeral was indistinguishable from a code entry. MEASURED at COLUMNS=100 on the
+# shipped tree: `gate --help` rendered two consecutive lines beginning "4 " (one the
+# definition of exit 4, one the sentence "4 is never folded into 2 ..."), and
+# `bind --help` rendered the sequence 0,1,2,3,4,2 -- a five-code contract that appears to
+# redefine 2 on its own help page. `replay --help` wrapped code 1's text onto a second
+# source line, leaving "re-bind." as an unnumbered orphan entry between codes 1 and 2.
+# This is the table STABILITY.md declares covered and the only structured content on any
+# of the twelve help pages.
+
+# An entry is indented under the heading AND separates its digit from its description by
+# a real column of whitespace. Prose reflowed by the renderer can do neither.
+_EXIT_ENTRY = re.compile(r"^ +(\d) {2,}\S")
+# What the eye actually does: read the first token of every line in the block.
+_LEADING_DIGIT = re.compile(r"^(\d)[ .)]")
+
+
+def _exit_code_block(cmd: str) -> list[str]:
+    text = _stdout_at([cmd, "--help"])
+    start = text.find("Exit codes:")
+    assert start >= 0, f"{cmd} --help has no `Exit codes:` block: {text!r}"
+    body = text[start:].splitlines()[1:]
+    out = []
+    for line in body:
+        # The help page continues past the docstring into Typer's options table.
+        if line.strip().startswith(("Options", "--", "─", "╭", "│")):
+            break
+        out.append(line.rstrip())
+    return out
+
+
+@pytest.mark.parametrize(
+    ("cmd", "codes"),
+    [
+        ("gate", ["0", "1", "2", "3", "4"]),
+        ("bind", ["0", "1", "2", "3", "4"]),
+        ("replay", ["0", "1", "2"]),
+    ],
+)
+def test_the_exit_code_table_renders_as_a_table_not_a_paragraph(cmd, codes):
+    """MEASURED red: zero lines matched _EXIT_ENTRY on all three pages, because every
+    code sat at the docstring's common indent with a single space after the digit -- the
+    same shape the surrounding prose has."""
+    block = _exit_code_block(cmd)
+    entries = [m.group(1) for line in block if (m := _EXIT_ENTRY.match(line))]
+    assert entries == codes, (
+        f"`pcraft {cmd} --help` does not render its exit codes as entries. Parsed "
+        f"{entries}, expected {codes}. Block was:\n" + "\n".join(block)
+    )
+
+
+@pytest.mark.parametrize("cmd", ["gate", "bind", "replay"])
+def test_prose_starting_with_a_numeral_cannot_be_read_as_a_code_entry(cmd):
+    """MEASURED red: gate read 0,1,2,3,4,4 and bind read 0,1,2,3,4,2 -- a contract that
+    contradicts itself in the one place a scripted caller is sent to read it.
+
+    The trailing commentary on two of these pages legitimately opens with a numeral ("4 is
+    never folded into 2 ...", "2 means the gate ran and refused ..."), so the fix is not to
+    forbid that -- it is to make the two readable apart. A margin does that: entries render
+    indented under the heading, commentary renders shallower and behind a blank line. This
+    asserts the margin, because stripping it is exactly what made the two look alike.
+    """
+    block = _exit_code_block(cmd)
+    entries = [line for line in block if _EXIT_ENTRY.match(line)]
+    entry_indent = len(entries[0]) - len(entries[0].lstrip())
+    codes = [_EXIT_ENTRY.match(line).group(1) for line in entries]
+    assert len(codes) == len(set(codes)), (
+        f"`pcraft {cmd} --help` defines a code twice: {','.join(codes)}"
+    )
+    prose = [
+        line
+        for line in block
+        if line.strip() and line not in entries and _LEADING_DIGIT.match(line.strip())
+    ]
+    for line in prose:
+        assert len(line) - len(line.lstrip()) < entry_indent, (
+            f"`pcraft {cmd} --help` renders a sentence at the exit-entry margin, so it reads "
+            f"as a redefinition of code {line.strip()[0]}: {line!r}"
+        )
+
+
+@pytest.mark.parametrize("cmd", ["gate", "bind", "replay"])
+def test_the_commentary_under_an_exit_table_is_separated_from_it(cmd):
+    """A blank line is what makes the trailing paragraph read as commentary rather than
+    as more entries; it is also what stops the renderer from reflowing prose into the
+    table. MEASURED red: no blank line anywhere inside the block on any of the three."""
+    block = _exit_code_block(cmd)
+    entries = [i for i, line in enumerate(block) if _EXIT_ENTRY.match(line)]
+    assert entries, "no entries parsed at all"
+    tail = block[entries[-1] + 1:]
+    if any(line.strip() for line in tail):
+        assert not tail[0].strip(), (
+            f"`pcraft {cmd} --help` runs commentary straight on from the last exit code "
+            f"with no separating blank line: {tail[:3]!r}"
+        )
+
+
+def test_every_exit_entry_wraps_under_its_own_description_column():
+    """`replay`'s code 1 is the only entry whose text needs two rows. MEASURED red: the
+    continuation `re-bind.` rendered at the entry margin, so it read as an unnumbered
+    entry sitting between code 1 and code 2."""
+    block = _exit_code_block("replay")
+    entries = [i for i, line in enumerate(block) if _EXIT_ENTRY.match(line)]
+    assert entries, "no entries parsed at all"
+    first, last = entries[0], entries[-1]
+    entry_indent = len(block[first]) - len(block[first].lstrip())
+    for i in range(first, last):
+        line = block[i]
+        if i in entries or not line.strip():
+            continue
+        assert len(line) - len(line.lstrip()) > entry_indent, (
+            "a continuation line inside `pcraft replay --help`'s exit table sits at the "
+            f"entry margin and reads as an entry of its own: {line!r}"
+        )
+
+
+# --------------------------------------------------------------------------- F-1e1af911
+# `decision: {DECISION}  ({reason})` was written when `reason` was one line. Since wave-8
+# an escalation's reason IS the multi-line build_checkpoint artifact, so the opening
+# parenthesis at column 21 of the decision line closed four lines and ~790 characters
+# later, glued to a question mark. MEASURED through the owned render path: the single
+# _say call emitted 911 characters, `attempts:` appeared only AFTER the parenthetical,
+# and the bullets (204/225/157/199 chars) soft-wrapped with zero continuation indent, so
+# the tail of one ran straight into the next bullet's `  - ` marker. The one block in the
+# output written to be read by a person was the only one with no visual frame.
+
+_ESCALATING_SCORES = {
+    "tabard": 0.05,
+    "palette": 0.30,
+    "face": 0.60,
+    "sigil": 0.95,
+    "skin": 0.95,
+    "weapon": 0.95,
+}
+
+
+def _escalated_render(tmp_path, columns=100):
+    """Drive the owned render path directly: the checkpoint is what is under test, and
+    reaching it through the CLI would also drag in the ten-row transcript."""
+    import contextlib as _ctx
+    import io as _io
+
+    from pcraft.cli import _print_result
+
+    result = run_mock_loop(records_dir=str(tmp_path), verifier_scores=_ESCALATING_SCORES)
+    assert "\n" in result.reason, "this fixture only means anything on a multi-line reason"
+    buf = _io.StringIO()
+    previous = os.environ.get("COLUMNS")
+    os.environ["COLUMNS"] = str(columns)
+    try:
+        with _ctx.redirect_stdout(buf):
+            _print_result(result, records_dir=str(tmp_path))
+    finally:
+        if previous is None:
+            os.environ.pop("COLUMNS", None)
+        else:
+            os.environ["COLUMNS"] = previous
+    return result, buf.getvalue()
+
+
+def _reason_block(out):
+    lines = out.splitlines()
+    i = next(i for i, ln in enumerate(lines) if ln.startswith("decision:"))
+    j = next(j for j, ln in enumerate(lines) if ln.startswith("attempts:"))
+    return [ln for ln in lines[i + 1:j] if ln.strip()]
+
+
+def test_the_decision_line_is_one_readable_line(tmp_path):
+    """MEASURED red: 122 characters and one unbalanced `(` left open for four lines."""
+    _r, out = _escalated_render(tmp_path)
+    line = next(ln for ln in out.splitlines() if ln.startswith("decision:"))
+    assert len(line) <= 100, f"the decision line is {len(line)} chars: {line!r}"
+    assert line.count("(") == line.count(")"), (
+        f"the decision line opens a parenthesis it never closes: {line!r}"
+    )
+
+
+def test_the_checkpoint_renders_as_an_indented_block_under_the_decision(tmp_path):
+    """The UNCERTAINTY_GATED_HUMANS artifact gets the same headline/indented-body shape
+    the npm launcher uses for its own multi-line output. MEASURED red: the whole
+    checkpoint was inside the decision line's parenthetical, so there was no block."""
+    result, out = _escalated_render(tmp_path)
+    block = _reason_block(out)
+    assert block, "the reason did not render below the decision at all"
+    stray = [ln for ln in block if not ln.startswith("  ")]
+    assert not stray, f"a reason line escaped the block indent: {stray!r}"
+    # Composed-seam ruling (wave-10 fold): checkpoint.py owns the body's shape and no
+    # longer emits "- " bullets -- per-atom entries are an id/zone/score head row plus
+    # labelled claim:/thought:/chose: lines under the errors.py wrapping convention. The
+    # CLI frames that block; it does not re-compose it. Assert the canonical shape.
+    assert any(re.match(r"^\s+claim:\s+\S", ln) for ln in block), (
+        "the per-atom entries vanished (no labelled claim lines in the block)"
+    )
+    # MEASURED red on this assertion: the contrastive headline was the FIRST thing inside
+    # the decision line's parenthetical, so none of it appeared in the block below.
+    headline = result.reason.partition("\n")[0]
+    assert headline.split()[0] in " ".join(block[:3]), (
+        f"the contrastive headline did not move into the block: {block[:3]!r}"
+    )
+    assert headline not in next(ln for ln in out.splitlines() if ln.startswith("decision:"))
+
+
+def test_no_reason_line_overruns_the_terminal(tmp_path):
+    """MEASURED red at COLUMNS=100: bullets of 204/225/157/199 characters, each
+    soft-wrapping to two or three rows with no continuation indent."""
+    _r, out = _escalated_render(tmp_path)
+    long = [ln for ln in _reason_block(out) if len(ln) > 100]
+    assert not long, f"lines wider than the terminal: {[(len(ln), ln) for ln in long]}"
+
+
+def test_a_wrapped_bullet_continues_under_its_own_text(tmp_path):
+    """Without a continuation indent the tail of one entry is visually the head of the
+    next. Composed-seam ruling (wave-10 fold): the body is checkpoint.py's pre-wrapped
+    text under the errors.py convention -- a wrapped ``claim:`` value continues under
+    its own TEXT column (label width deep), never back at the block margin -- and the
+    CLI's framing must PRESERVE that hang, which is exactly what the first form of this
+    test caught it destroying."""
+    _r, out = _escalated_render(tmp_path)
+    block = _reason_block(out)
+    label_rows = [
+        (k, m.end())
+        for k, ln in enumerate(block)
+        if (m := re.match(r"^\s+(claim|thought|chose):\s+", ln))
+    ]
+    assert label_rows, "no labelled entry lines to check"
+    continuations = []
+    for k, text_col in label_rows:
+        j = k + 1
+        while j < len(block) and block[j].strip() and not re.match(
+            r"^\s+(claim|thought|chose):\s|^\s+\S+\s+(PASS|FAIL|UNCERTAIN|NA|SKIPPED)\b",
+            block[j],
+        ):
+            continuations.append((block[j], text_col))
+            j += 1
+    if not continuations:
+        pytest.skip("every labelled value fitted on one row; nothing to prove")
+    for line, text_col in continuations:
+        indent = len(line) - len(line.lstrip())
+        assert indent >= text_col - 1, (
+            f"a wrapped value resumed at the margin instead of under its text: {line!r}"
+        )
+
+
+def test_a_single_line_reason_keeps_its_compact_form(tmp_path):
+    """The BOUND line was never the defect -- 44 characters, correctly grouped. The fix
+    restructures the multi-line case and leaves this one alone."""
+    out = _stdout_at(["bind", "--records-dir", str(tmp_path)])
+    line = next(ln for ln in out.splitlines() if ln.startswith("decision:"))
+    assert line == "decision: BOUND  (all required atoms passed)", line
+
+
+# --------------------------------------------------------------------------- F-d4e6686f
+# The receipt line is the one artifact the operator carries to the next command, and it
+# was the longest line in the product's output, had no blank line above it, and was not
+# actually a path: `receipt: {path}  hash={hash}...` on one physical line directly under
+# the last row of the ten-row atom table. `bind --help` promises "The last line names the
+# receipt it wrote ... run `pcraft replay` on exactly that path", but `tail -1` yielded
+# path + two spaces + hash, which `replay` refuses -- the same recovery loop F-5b783e17
+# closed, reopened at the layout level.
+
+
+def test_the_last_line_is_the_receipt_path_and_nothing_else(tmp_path):
+    """MEASURED red: the last line was path + `  hash=sha256:...` on one row."""
+    out = _stdout_at(["bind", "--records-dir", str(tmp_path / "recs")])
+    last = [ln for ln in out.splitlines() if ln.strip()][-1]
+    assert "hash" not in last, f"the hash still shares the last line: {last!r}"
+    assert Path(last.strip()).is_file(), (
+        f"the last line is not a readable receipt path: {last!r}"
+    )
+
+
+def test_the_receipt_gets_its_own_block(tmp_path):
+    """It is the most important line on screen and it was jammed against a ten-row table
+    of 121-125 character rows that it visually continued. The function already
+    blank-lines the block ABOVE the transcript and gave the receipt nothing."""
+    out = _stdout_at(["demo", "--records-dir", str(tmp_path)])
+    lines = out.splitlines()
+    i = next(i for i, ln in enumerate(lines) if ln.rstrip() == "receipt:")
+    assert not lines[i - 1].strip(), (
+        f"no blank line above the receipt block: {lines[i - 2:i + 1]!r}"
+    )
+    assert lines[i + 1].strip().startswith("hash:"), (
+        f"the hash did not get its own labelled line: {lines[i + 1]!r}"
+    )
+
+
+def test_tail_minus_one_is_exactly_what_replay_accepts(tmp_path):
+    """The promise in `bind --help`, asserted end to end rather than described."""
+    out = _stdout_at(["bind", "--records-dir", str(tmp_path / "deep" / "er")])
+    printed = [ln for ln in out.splitlines() if ln.strip()][-1].strip()
+    result = runner.invoke(app, ["replay", printed])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, f"replay refused the line bind printed last: {text!r}"
+
+
+# --------------------------------------------------------------------------- F-2d223d8e
+# Five human-facing lines interpolated a Python list straight into an f-string, so
+# brackets, quotes and `', '` separators reached the terminal as though the operator were
+# reading a repl -- and inside a single block whose line above already joined FOR humans
+# (`lineage: faction:ashen-pact -> char:ashen-reaver`). `doctor` compounded it with a
+# duplicated word: `mark` is already "missing" and `detail` opened with "  missing ", so
+# the row read `[image] missing  missing ['torch', ...]`. All five values are already
+# carried as real arrays in --json, so the repr on the human channel buys nothing.
+
+
+@pytest.mark.parametrize(
+    ("command", "label"),
+    [
+        ("validate", "required:"),
+        ("validate", "must_not:"),
+        ("demo", "required atoms:"),
+        ("demo", "must_not:"),
+    ],
+)
+def test_a_human_line_never_shows_python_list_syntax(command, label, tmp_path):
+    argv = [command] + (["--records-dir", str(tmp_path)] if command == "demo" else [])
+    line = next(ln for ln in _stdout_at(argv).splitlines() if ln.startswith(label))
+    assert "[" not in line and "'" not in line, f"repr leaked to the terminal: {line!r}"
+    assert ", " in line, f"the values were not joined for a reader: {line!r}"
+
+
+def test_doctor_does_not_say_missing_twice():
+    """MEASURED red: `[image] missing  missing ['torch', 'diffusers', ...]`."""
+    rows = [ln for ln in _stdout_at(["doctor"]).splitlines() if ln.startswith("[")]
+    assert rows, "doctor reported no extras at all"
+    for line in rows:
+        assert "missing  missing" not in line, line
+        assert "[" not in line[line.index("]"):], f"repr leaked: {line!r}"
+        assert "'" not in line, f"repr leaked: {line!r}"
+
+
+# --------------------------------------------------------------------------- F-3c91e814
+# The version-mismatch warning is the line `doctor` exists to surface and the only one in
+# its report that loses its own hierarchy when rendered: a single 219-character string
+# whose entire structure was a leading two-space indent. MEASURED at COLUMNS=80 the line
+# occupied three visual rows, and rows two and three began at column 0 -- the same level
+# as the sibling top-level rows -- so the actionable half, `(reinstall: pip install -e .
+# --no-deps)`, ended up at column 0 reading as an unrelated top-level status. Every other
+# line doctor prints fits inside 80.
+
+_WARNING = (
+    "installed prompt-crafter metadata says 0.2.1, but this source tree declares 1.0.0; "
+    "the dist-info is stale, so the version above is not the code you are running "
+    "(reinstall: pip install -e . --no-deps)"
+)
+
+
+def test_the_version_warning_wraps_and_stays_a_child_of_the_line_above():
+    from pcraft.cli import _version_mismatch_lines
+
+    lines = _version_mismatch_lines(_WARNING, 80)
+    assert len(lines) > 1, "a 219-character warning still rendered as one line"
+    assert lines[0].startswith("  VERSION MISMATCH: "), lines[0]
+    assert all(len(ln) <= 80 for ln in lines), [(len(ln), ln) for ln in lines]
+    assert all(ln.startswith("    ") for ln in lines[1:]), (
+        f"a continuation row fell back to column 0 and reads as a sibling: {lines[1:]!r}"
+    )
+
+
+def test_the_remedy_gets_its_own_copy_pasteable_line():
+    from pcraft.cli import _version_mismatch_lines
+
+    lines = _version_mismatch_lines(_WARNING, 80)
+    fix = [ln for ln in lines if ln.strip().startswith("fix:")]
+    assert len(fix) == 1, f"no single `fix:` line: {lines!r}"
+    assert fix[0].strip() == "fix: pip install -e . --no-deps", fix[0]
+    assert "reinstall:" not in "\n".join(lines), "the parenthetical survived"
+
+
+def test_an_unparseable_warning_still_wraps_rather_than_overrunning():
+    """Graceful degradation: if `version_coherence` ever stops ending in a remedy
+    parenthetical, the layout fix must still do the half it can."""
+    from pcraft.cli import _version_mismatch_lines
+
+    lines = _version_mismatch_lines("x " * 90, 80)
+    assert len(lines) > 1 and all(len(ln) <= 80 for ln in lines)
+
+
+def test_the_warning_the_shipped_check_produces_is_the_one_that_was_measured():
+    """Couples the layout helper to the string it splits. If `version_coherence` stops
+    ending in `(reinstall: ...)`, this fails here rather than silently degrading in
+    doctor's report."""
+    import pcraft
+
+    warning = pcraft.version_coherence()
+    if warning is None:
+        pytest.skip("installed metadata agrees with the tree; nothing to split")
+    assert warning.endswith("(reinstall: pip install -e . --no-deps)"), warning

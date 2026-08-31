@@ -11,9 +11,25 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
-Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 97 findings fixed across
-four amend rounds (Stage A bug/security x2, Stage B proactive, Stage C humanization),
-suite 394 -> 830.
+Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 107 findings fixed
+across five amend rounds (Stage A bug/security x2, Stage B proactive, Stage C
+humanization, Stage D visual), suite 394 -> 883.
+
+Stage D round (terminal-visual polish — the rendered surfaces ARE this product's UI):
+
+- One wrapping convention now governs all three rendered surfaces (transcript, checkpoint,
+  error text), defined beside the error shape: headline owns column 0, secondary content
+  hangs under its own text column, 80 columns. Verdict rows went from 121-178 chars (the
+  WHY always in the wrapped tail) to 80 with the reason on its own line; 38 of 43 hints
+  exceeded 80 and now none do; the census reads one way at all four sites.
+- The wall-of-green regression closed its second half: problem rows render with their
+  header and claims on a PASS run too (optional-atom failures were buried in flat order
+  under `gate overall: PASS`).
+- The escalation checkpoint renders as labelled claim/thought/chose columns; the CLI
+  frames that block without re-composing it (one wrap authority per line — the fold
+  caught the two layers fighting and ruled it), the decision line stands alone, the
+  receipt path is the last line of its block as `bind --help` promises, and the
+  exit-code help tables can no longer read prose digits as code entries.
 
 Stage C round (behavioral humanization — the bridge between "not broken" and "good to
 use"; the cross-family panel rated the whole board MEDIUM/LOW, and all of it was fixed):

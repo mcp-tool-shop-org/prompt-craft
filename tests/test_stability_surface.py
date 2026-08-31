@@ -429,3 +429,123 @@ def test_the_receipt_path_hint_is_backed_by_a_field_that_carries_it():
     assert "record_path" in OrchestrationResult.model_fields, (
         "the hint claims the path is printed; the result object has to be able to supply it"
     )
+
+
+# --------------------------------------------------------------------------------------------
+# F-9bd8360e -- to_safe_text emitted the hint as one unbroken line regardless of length, so the
+# code/message/hint hierarchy the module docstring promises survived exactly one visual line.
+# MEASURED over all 43 DEFAULT_HINTS as they actually render (the '  hint: ' prefix included):
+# 38 of 43 exceeded 80 columns, 31 of 43 exceeded 120. The worst are the codes an operator hits
+# most: GATE_FAIL rendered as a 379-character line, RUNTIME_GENERATE_EXHAUSTED 326,
+# RUNTIME_GENERATE_FAILED 287, STATE_REPLAY_DRIFT 282. At 80 columns GATE_FAIL's hint occupied 5
+# visual lines of which 4 began at COLUMN 0 -- the same column as 'error[GATE_FAIL]:' -- so the
+# two-space indent that distinguishes hint from message was visible only on the first line and
+# the advice read as a second error paragraph.
+#
+# Seven hints additionally ended with a prose 'Exit N.' sentence, so a structured fact this class
+# already owns as `exit_code` was buried at the tail of the longest wrapped run instead of being
+# its own field on its own line -- and could drift from exit_code_for(), which is the value the
+# CLI actually returns.
+#
+# Fixed width, not terminal-detected, so these assertions and the cp437 ASCII sweep above stay
+# deterministic.
+# --------------------------------------------------------------------------------------------
+
+_HINT_WIDTH = 80
+
+
+def test_no_rendered_error_line_overflows_a_standard_terminal():
+    from pcraft.errors import DEFAULT_HINTS, PromptCraftError
+
+    offenders = []
+    for code in sorted(DEFAULT_HINTS):
+        rendered = PromptCraftError(code, "a message of ordinary length").to_safe_text()
+        offenders += [
+            (code, len(ln)) for ln in rendered.splitlines()[1:] if len(ln) > _HINT_WIDTH
+        ]
+    assert not offenders, f"hint lines still overflow: {offenders}"
+
+
+def test_the_hint_block_never_reaches_the_error_column():
+    """The two-space indent is the ONLY thing distinguishing advice from the error itself, and
+    it survived exactly one visual line."""
+    from pcraft.errors import DEFAULT_HINTS, PromptCraftError
+
+    for code in sorted(DEFAULT_HINTS):
+        rendered = PromptCraftError(code, "a message of ordinary length").to_safe_text()
+        for line in rendered.splitlines()[1:]:
+            assert line.startswith("  "), (
+                f"{code}: {line!r} renders in the 'error[...]' column, so the advice reads as "
+                "a second error paragraph"
+            )
+
+
+def test_a_wrapped_hint_hangs_under_its_own_label():
+    from pcraft.errors import PromptCraftError
+
+    lines = PromptCraftError("GATE_FAIL", "required atom 'palette' failed").to_safe_text().splitlines()
+    hint_lines = [ln for ln in lines if ln.startswith("  hint:") or ln.startswith(" " * 8)]
+    assert len(hint_lines) > 1, "GATE_FAIL's hint is 379 characters; it has to wrap"
+    assert hint_lines[0].startswith("  hint: ")
+    for line in hint_lines[1:]:
+        assert line.startswith(" " * 8), (
+            f"a continuation hangs under the label column, not at the margin: {line!r}"
+        )
+        assert not line.startswith(" " * 9), f"one indent, not a ragged one: {line!r}"
+
+
+def test_a_multi_sentence_hint_starts_each_sentence_on_a_fresh_line():
+    """37 of 43 hints are multi-sentence and 15 carry three or more; read as steps, not prose."""
+    from pcraft.errors import PromptCraftError
+
+    lines = PromptCraftError("GATE_FAIL", "required atom 'palette' failed").to_safe_text().splitlines()
+    starts = [ln.strip() for ln in lines if ln.startswith(" " * 8) or ln.startswith("  hint:")]
+    assert any(s.startswith("If most required atoms are SKIPPED") for s in starts), (
+        f"the second sentence must begin a line of its own: {starts}"
+    )
+
+
+def test_the_exit_code_is_its_own_field_not_a_sentence():
+    """exit_code_for() computes this; a prose copy in seven hints can only drift from it."""
+    from pcraft.errors import DEFAULT_HINTS, PromptCraftError, exit_code_for
+
+    for code in sorted(DEFAULT_HINTS):
+        err = PromptCraftError(code, "a message of ordinary length")
+        assert f"  exit: {exit_code_for(code)}" in err.to_safe_text().splitlines(), code
+
+
+def test_no_hint_restates_the_exit_code_in_prose():
+    """GATE_FAIL, GATE_UNAVAILABLE, IO_GATE_INPUT, PARTIAL_UNCONFIRMED,
+    CONTRACT_CYCLIC_DEPENDS_ON, CONTRACT_SCHEMA_UNSUPPORTED and IO_RECORD_SCHEMA_UNSUPPORTED
+    each ended with one. The field above owns the fact now."""
+    from pcraft.errors import DEFAULT_HINTS
+
+    offenders = sorted(code for code, hint in DEFAULT_HINTS.items() if "Exit " in hint)
+    assert not offenders, f"the exit code is a field, not prose: {offenders}"
+
+
+def test_the_inline_tier_census_hint_does_not_restate_its_exit_code_either():
+    """Not a DEFAULT_HINTS entry, so the sweep above cannot see it -- the same class of miss
+    that let F-a6acaab1's em dash survive the wave-2 pass."""
+    from pcraft.core.contract.compile_questions import Polarity
+    from pcraft.core.contract.schema import Severity
+    from pcraft.core.gate.exit_contract import error_from_transcript
+    from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
+    from pcraft.core.gate.thresholds import Zone
+
+    t = GateTranscript(
+        contract_id="char:ashen-reaver",
+        overall=Zone.PASS,
+        verdicts=[
+            AtomVerdict(
+                atom_id="tabard", polarity=Polarity.affirm, severity=Severity.required,
+                score=0.95, zone=Zone.PASS, tier_used=1, tiers_consulted=[1],
+                verifier_id="v", reason="score 0.9500 -> PASS",
+            )
+        ],
+        tier_census=TierCensus(required=[0, 1], executed=[1]),
+    )
+    err = error_from_transcript(t)
+    assert err is not None and err.code == "PARTIAL_TIER_CENSUS"
+    assert "Exit " not in err.hint, err.hint
+    assert "  exit: 3" in err.to_safe_text().splitlines()

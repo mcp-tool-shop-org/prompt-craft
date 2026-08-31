@@ -182,7 +182,18 @@ def test_escalation_still_credits_the_atoms_required_tier_in_the_census(sprite_e
 # (TierCensus's own docstring), but error_from_transcript never looked at the census, so a gate
 # that under-ran its own instruments could still exit 0 if every atom that DID score happened to
 # pass (this is what made `pcraft demo` print "tiers executed: 1 of 2" / "decision: BOUND", exit
-# 0). The first two tests below build a GateTranscript BY HAND rather than via evaluate(): after
+# 0).
+#
+# ⚑ COMMENT UPDATED (wave 10, coordinator note). Both quoted lines have since been re-rendered
+# and neither change touches this section's subject. The census line now names what is MISSING
+# rather than reprinting two Python lists beside a count that already implies them --
+# "tiers executed: 1 of 2  (required T0 T1; missing T0)" (F-6acc1597). And the decision line no
+# longer carries the escalation reason in a trailing parenthesis: the cli-ux domain split that
+# composition, so the decision line stands alone and a multi-line checkpoint block prints
+# indented beneath it. The symptom described above -- a green BOUND over a half-run gate -- is
+# what these tests pin, and it is independent of how either line is spelled.
+#
+# The first two tests below build a GateTranscript BY HAND rather than via evaluate(): after
 # the F-175c3b3e and F-d9b28ca6 fixes above, evaluate() can no longer actually produce a PASS
 # with an incomplete census (any required atom that truly SKIPs now forces the zone to
 # UNCERTAIN on its own) -- so this is a deliberate defence-in-depth net, pinned directly against
@@ -700,6 +711,17 @@ def _failing_transcript(resolved, thresholds):
     return dag, t
 
 
+def _unwrapped(text: str) -> str:
+    """Collapse the render convention's hanging indents so a claim matches as one string.
+
+    Added with F-00cc16d9: a claim longer than the width now wraps onto a continuation line
+    under its label, so a raw substring match would assert the absence of WRAPPING rather than
+    the absence of the claim. What these tests are about is whether the question was rendered
+    at all.
+    """
+    return " ".join(text.split())
+
+
 def test_format_transcript_can_render_the_claim_behind_a_problem_atom(sprite_example):
     from pcraft.gate_report import format_transcript
 
@@ -708,10 +730,10 @@ def test_format_transcript_can_render_the_claim_behind_a_problem_atom(sprite_exa
     claim = dag.by_id("palette").text
     assert claim, "the example's palette atom has a claim; the fixture is the thing under test"
 
-    without = format_transcript(t)
+    without = _unwrapped(format_transcript(t))
     assert claim not in without, "today's rendering is the red case, not a pre-existing pass"
 
-    with_dag = format_transcript(t, dag=dag)
+    with_dag = _unwrapped(format_transcript(t, dag=dag))
     assert claim in with_dag, "an atom id is not a claim"
 
 
@@ -722,7 +744,7 @@ def test_the_claim_is_rendered_only_for_the_atoms_that_need_reading(sprite_examp
 
     _s, resolved, thresholds, _c = sprite_example
     dag, t = _failing_transcript(resolved, thresholds)
-    text = format_transcript(t, dag=dag)
+    text = _unwrapped(format_transcript(t, dag=dag))
     assert dag.by_id("palette").text in text
     assert dag.by_id("no_shield").text not in text, "no_shield passed; it needs no claim"
 
@@ -734,3 +756,181 @@ def test_format_transcript_without_a_dag_is_byte_for_byte_what_it_was(sprite_exa
     _s, resolved, thresholds, _c = sprite_example
     _dag, t = _failing_transcript(resolved, thresholds)
     assert format_transcript(t) == format_transcript(t, dag=None)
+
+
+# --------------------------------------------------------------------------------------------
+# F-00cc16d9 -- every scored verdict row overflowed BOTH standard terminal widths, and the
+# overflow landed in the one column the artifact reserves for structure. MEASURED through the
+# real harness.evaluate on the shipped char:ashen-reaver example: 30 of 30 rows across the
+# all-pass, one-FAIL and multi-UNCERTAIN shapes exceeded 80 columns; 30 of 30 exceeded 120
+# (min 121, max 130 with no detail published; 178 with one). A hard wrap resumes at COLUMN 0 --
+# exactly where 'gate overall:', 'thresholds:', 'tiers executed:', 'unconfirmed / failed:' and
+# 'other atoms:' live -- so the tail of every row rendered at the same visual weight as the
+# section headers, and only its wording distinguished the two.
+#
+# These assert STRUCTURAL properties (fixed columns, indent depth, the WHY on its own line)
+# rather than byte-exact screens: the wording of a reason belongs to the harness.
+# --------------------------------------------------------------------------------------------
+
+_TRANSCRIPT_WIDTH = 80
+_CONTINUATION_INDENT = 14  # the column the atom id starts in
+
+
+def _shapes(resolved, thresholds):
+    """The three shipped run shapes, through the real evaluate()."""
+    from pcraft.testing import passing_verifiers
+
+    dag = compile_questions(resolved)
+    for name, scores in (
+        ("all pass", {}),
+        ("one FAIL", {"palette": 0.333}),
+        ("multi UNCERTAIN", {"palette": 0.60, "skin": 0.60}),
+    ):
+        yield name, dag, harness.evaluate(
+            dag, "x.png", passing_verifiers(scores=scores), thresholds,
+            generator_family="stable-diffusion",
+        )
+
+
+def test_no_verdict_row_overflows_a_standard_terminal(sprite_example):
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    for name, dag, t in _shapes(resolved, thresholds):
+        for line in format_transcript(t, dag=dag).splitlines():
+            assert len(line) <= _TRANSCRIPT_WIDTH, (
+                f"{name}: a {len(line)}-column line wraps at column 0, where every section "
+                f"header of this artifact lives: {line!r}"
+            )
+
+
+def test_a_wrapped_continuation_never_reaches_column_zero(sprite_example):
+    """The defect was not length alone -- it was that the overflow resumed in the structure
+    column. Everything that is not a section header now starts indented."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    headers = ("gate overall:", "thresholds:", "tiers executed:", "unconfirmed / failed:",
+               "other atoms:")
+    for name, dag, t in _shapes(resolved, thresholds):
+        for line in format_transcript(t, dag=dag).splitlines():
+            if line.startswith(headers):
+                continue
+            assert line.startswith(" "), f"{name}: {line!r} renders in the header column"
+
+
+def test_the_why_and_the_claim_hang_at_one_shared_indent(sprite_example):
+    """band/detail/claim were a mix of inline-on-row and a column-24 claim that aligned with
+    nothing. They are now labelled continuation lines at ONE indent under the atom id."""
+    from pcraft.gate_report import format_transcript
+    from pcraft.testing import passing_verifiers
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(scores={"palette": 0.333}), thresholds,
+        generator_family="stable-diffusion",
+    )
+    lines = format_transcript(t, dag=dag).splitlines()
+    continuations = [ln for ln in lines if ln.startswith(" " * _CONTINUATION_INDENT)]
+    assert continuations, "a problem atom must carry its WHY somewhere"
+    labels = {ln.strip().split()[0] for ln in continuations if ln.strip().split()[0].endswith(":")}
+    assert labels <= {"why:", "saw:", "claim:"}, f"one label vocabulary, saw {labels}"
+    assert any(ln.strip().startswith("why:") for ln in continuations), (
+        "the reason -- which carries the band that graded the score -- gets its own line"
+    )
+    assert any(ln.strip().startswith("claim:") for ln in continuations)
+
+
+def test_the_verdict_row_keeps_its_fixed_columns_aligned(sprite_example):
+    """The row's own alignment work was never the defect; it must survive the narrowing."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    _n, dag, t = next(iter(_shapes(resolved, thresholds)))
+    rows = [ln for ln in format_transcript(t, dag=dag).splitlines() if ln.startswith("  [")]
+    assert len(rows) == len(t.verdicts)
+    closers = {ln.index("]") for ln in rows}
+    assert len(closers) == 1, f"the zone field must be one fixed width, saw {closers}"
+    assert closers.pop() + 2 == _CONTINUATION_INDENT, (
+        "continuation lines indent under the atom id column, so the two have to agree"
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# F-0c1a929a -- 'unconfirmed / failed:' was gated on `problem and t.overall is not Zone.PASS`,
+# so on an overall-PASS run the whole grouping and every claim line disappeared, including for
+# atoms whose own row read [FAIL]. tests/test_amend_cli.py:218 closed the UNAVAILABLE half of
+# this condition and left the `overall is not Zone.PASS` half standing; both halves are pinned
+# now. Reachable by default, not constructed: the shipped faction and character contracts
+# declare all five must_not atoms `optional` on purpose, which is exactly the configuration
+# that produces PASS-with-FAIL-rows. MEASURED on the shipped example -- overall=PASS with
+# no_modern_gear, no_human_face and no_shield at [FAIL] in positions 8, 9 and 10, printed in
+# flat DAG order with no header, no reordering and no claim lines at all, because the `else`
+# branch never calls _claim.
+# --------------------------------------------------------------------------------------------
+
+
+def _pass_overall_with_failing_atoms(resolved, thresholds):
+    dag = compile_questions(resolved)
+
+    def scorer(q):
+        return 0.005 if q.atom_id == "no_rival_colours" else 0.95
+
+    t = harness.evaluate(
+        dag, "x.png",
+        {0: ScriptedVerifier(scorer, family="siglip2", tier=0),
+         1: ScriptedVerifier(scorer, family="clip-flant5", tier=1)},
+        thresholds, generator_family="stable-diffusion",
+    )
+    return dag, t
+
+
+def test_a_pass_run_still_groups_and_explains_its_failed_atoms(sprite_example):
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag, t = _pass_overall_with_failing_atoms(resolved, thresholds)
+    assert t.overall is Zone.PASS, "the fixture is the shape under test"
+    failed = [v.atom_id for v in t.verdicts if v.zone is Zone.FAIL]
+    assert failed, "the shipped optional must_not atoms invert to FAIL here"
+
+    lines = format_transcript(t, dag=dag).splitlines()
+    assert "unconfirmed / failed:" in lines, (
+        "an overall PASS is exactly the run a reader stops reading after line 1, and it was "
+        "the run that hid its failures deepest"
+    )
+    header_idx = lines.index("unconfirmed / failed:")
+    first_fail = next(i for i, ln in enumerate(lines) if failed[0] in ln)
+    assert first_fail > header_idx, "a [FAIL] row must print under the grouping, not among passes"
+    assert "other atoms:" in lines, "the passing atoms are still reported, just not first"
+
+
+def test_a_pass_run_prints_the_claim_behind_a_failed_atom(sprite_example):
+    """The `else` branch never called _claim, so the dag= argument the CLI takes the trouble to
+    compile and pass bought nothing at all on this path."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag, t = _pass_overall_with_failing_atoms(resolved, thresholds)
+    claim = dag.by_id("no_modern_gear").text
+    assert claim, "the fixture's atom carries a claim"
+    assert claim in _unwrapped(format_transcript(t, dag=dag)), "an atom id is not a claim"
+
+
+def test_an_all_passing_run_grows_no_grouping_header(sprite_example):
+    """The other direction: `problem` being empty is the correct test, and a genuinely clean
+    run must stay the flat list it already was."""
+    from pcraft.gate_report import format_transcript
+    from pcraft.testing import passing_verifiers
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(), thresholds, generator_family="stable-diffusion",
+    )
+    assert t.overall is Zone.PASS
+    assert all(v.zone is Zone.PASS for v in t.verdicts)
+    text = format_transcript(t, dag=dag)
+    assert "unconfirmed / failed:" not in text
+    assert "other atoms:" not in text

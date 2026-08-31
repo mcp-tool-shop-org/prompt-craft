@@ -20,7 +20,7 @@ census will always also surface as a non-PASS Zone.
 
 from __future__ import annotations
 
-from ...errors import PromptCraftError
+from ...errors import PromptCraftError, id_list, tier_list
 from .harness import GateTranscript
 from .thresholds import Zone
 
@@ -41,10 +41,16 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
         )
     if transcript.could_not_run():
         skipped = [v.atom_id for v in transcript.verdicts if v.zone is Zone.SKIPPED]
+        # CORRECTED IN PLACE (F-6acc1597). This interpolated the LIST -- 174 measured
+        # characters of quoted Python repr, ``(skipped: ['tabard', 'palette', 'skin', ...])``
+        # -- while the GATE_FAIL branch twenty lines below rendered the identical data type
+        # through ``', '.join``. Same file, same type, two renderings, and the quoted form was
+        # the one on the could-not-run path a plain ``pip install prompt-craft`` user hits
+        # first. One list rendering, everywhere.
         return PromptCraftError(
             "GATE_UNAVAILABLE",
             "the gate produced no score on any required atom"
-            + (f" (skipped: {skipped})" if skipped else ""),
+            + (f" (skipped: {id_list(skipped)})" if skipped else ""),
             hint="Install the [image] extra, or this run could not execute. "
             "It is not a pass.",
         )
@@ -92,16 +98,27 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
         # atom that skips a tier now forces Zone.UNCERTAIN on its own (F-175c3b3e), and an
         # escalated atom now credits every tier it consulted (F-d9b28ca6). This is the net
         # underneath those two facts, not a rename of either.
+        # CORRECTED IN PLACE (F-6acc1597). ``(required=[0, 1], executed=[1])`` was the fourth
+        # spelling of one census -- k=v plus list repr, against the transcript header's
+        # ``executed [0, 1]; required [0, 1]``, the checkpoint's ``required tiers [0, 1],
+        # executed [1]``, and the verdict rows' ``T0``/``T1``. A single escalated ``pcraft
+        # bind`` prints all four in one terminal scroll. Stating what is MISSING also beats
+        # reprinting ``executed`` beside a count that already implies it.
+        missing = [tier for tier in census.required if tier not in census.executed]
         return PromptCraftError(
             "PARTIAL_TIER_CENSUS",
             f"only {census.n} of {census.m} required tiers executed "
-            f"(required={census.required}, executed={census.executed}), "
+            f"(required {tier_list(census.required)}; missing {tier_list(missing)}), "
             "though every scored atom passed",
             # F-a6acaab1: this inline hint carried a U+2014 EM DASH and was missed by the
             # wave-2 sweep because it is not a DEFAULT_HINTS entry. Same class as the
             # checkpoint crash, not yet on a reachable path -- to_safe_text() raises on
             # .encode('cp437') either way.
+            #
+            # F-9bd8360e: it also restated its own exit code in prose ("Exit 3 (PARTIAL_), not
+            # 0"), which to_safe_text now emits as its own ``exit:`` field from exit_code_for()
+            # -- and which the sweep over DEFAULT_HINTS could not have caught here either.
             hint="A PASS whose gate under-ran its own instruments is not a pass. "
-            "Exit 3 (PARTIAL_), not 0 -- the tier census is independent of the zone.",
+            "The tier census is independent of the zone.",
         )
     return None
