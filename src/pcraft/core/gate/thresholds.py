@@ -75,6 +75,26 @@ class Band(BaseModel):
             raise ValueError(f"band high ({self.high}) must be >= low ({self.low})")
         return self
 
+    def describe(self, polarity: Polarity = Polarity.affirm) -> str:
+        """The two numbers that graded a score, read in the direction the atom is asked (F-b1b29cef).
+
+        Every score the operator reads is printed in ONE column whose meaning changes per row.
+        The shipped sprite table is palette 0.85/0.50, vqa 0.80/0.40, siglip2 0.10/0.01 -- three
+        scales, the outermost pair fifty times apart -- so ``[FAIL] palette 0.050`` can sit eight
+        lines above ``[PASS] no_rival_colours 0.005``: ten times smaller and it passes. The band
+        NAME was already on the line (F-00cfd3f8 put it there for attribution); the numbers are
+        what make the name readable as calibration.
+
+        Polarity is not decoration here. ``zone()`` INVERTS for a ``negate`` (must_not) probe --
+        a HIGH "is it present?" score is a FAIL, because the forbidden thing is present -- so
+        rendering the affirm reading on a negate row would be a confident WRONG statement about
+        calibration, which is the class of defect the band key was added to remove rather than
+        one to reintroduce a line lower.
+        """
+        if polarity is Polarity.affirm:
+            return f"PASS >={self.high:.2f}, FAIL <={self.low:.2f}"
+        return f"FAIL >={self.high:.2f}, PASS <={self.low:.2f}"
+
 
 class ThresholdTable(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -179,6 +199,11 @@ def _read_v1(data: dict, p: Path) -> ThresholdTable:
 _READERS = {THRESHOLDS_SCHEMA_ID: _read_v1}
 
 
+_MAX_REPORTED_ERRORS = 4
+"""How many field-level locations the default (non-debug) message names before it stops.
+A diagnosis, not a dump: ``--debug`` still carries every one of them, via ``cause``."""
+
+
 def _describe(err: ValidationError) -> str:
     """Say what pydantic actually objected to.
 
@@ -187,9 +212,38 @@ def _describe(err: ValidationError) -> str:
     genuinely inverted band all reported the same sentence, and two of the three named an
     invariant that held. The message is derived from the error locations instead; the code is
     unchanged, because STABILITY.md says to parse the code and not the prose.
+
+    CORRECTED IN PLACE (coordinator addition, F-eaa870d6 family). The aggregate was joined with
+    ``"; "`` -- a delimiter that also occurs INSIDE a pydantic ``msg``, since a ``msg`` is free
+    text produced by a validator this file does not own (``model_validator`` raises whatever
+    sentence its author wrote). So a reader could not tell one entry ending in a semicolon from
+    the boundary between two entries, and neither could a script splitting on it. This is the
+    third instance of the same delimiter collision in the package; ``core.contract.loader`` is
+    the sibling being fixed in the same wave, and the shape converged on is: an explicit
+    ``[n]`` index per entry plus ``" | "`` between them, so the separator is a two-token sequence
+    that carries a bracket, and every entry announces its own start.
+
+    The convergence is by FORMAT, not by import: the sibling's shared helper lives under
+    ``core.contract``, and reaching across from ``core.gate`` into a sibling subpackage for a
+    string formatter would buy one function at the cost of a dependency edge between two
+    subpackages that have no other reason to know about each other. If that helper is ever
+    promoted to a shared location this function should call it.
+
+    Only ``loc`` and ``msg`` are used. The offending ``input`` value is deliberately left out: it
+    is arbitrary text from a file we did not write, and this string is printed to a console whose
+    codepage we do not control -- the same rule ``loader._describe`` states.
     """
-    parts: list[str] = []
-    for entry in err.errors()[:4]:
-        loc = ".".join(str(x) for x in entry.get("loc", ())) or "<table>"
-        parts.append(f"{loc}: {entry.get('msg', 'is invalid')}")
-    return "is not a valid table -- " + "; ".join(parts) if parts else "is not a valid table"
+    entries = err.errors()
+    shown = entries[:_MAX_REPORTED_ERRORS]
+    parts = [
+        f"[{i}] {'.'.join(str(x) for x in entry.get('loc', ())) or '<table>'}: "
+        f"{entry.get('msg', 'is invalid')}"
+        for i, entry in enumerate(shown, 1)
+    ]
+    if not parts:
+        return "is not a valid table"
+    summary = " | ".join(parts)
+    remaining = len(entries) - len(shown)
+    if remaining > 0:
+        summary += f" | (+{remaining} more, see --debug)"
+    return f"is not a valid table -- {len(entries)} error(s): {summary}"

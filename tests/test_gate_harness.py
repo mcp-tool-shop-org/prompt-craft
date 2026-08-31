@@ -185,3 +185,200 @@ def test_an_instrument_that_names_no_band_keeps_the_check_type_band(sprite_examp
     assert v.verifier_id == "scripted.siglip2.v0"
     assert v.band_key == "palette"
     assert v.zone is Zone.PASS
+
+
+# --------------------------------------------------------------------------- F-b1b29cef
+# Every score the operator reads was printed in one column whose meaning changes per row, and the
+# number that would make it readable -- the band that graded it -- was never printed anywhere.
+# The shipped sprite table is palette 0.85/0.50, vqa 0.80/0.40, siglip2 0.10/0.01: three scales,
+# the outermost pair fifty times apart, all rendered as bare floats in the same column. MEASURED,
+# real ``pcraft gate``: ``[FAIL] palette 0.333`` above ``[PASS] no_rival_colours 0.005``. Ten
+# times smaller and it passes; the only disambiguator on the line was the band's NAME, which
+# F-00cfd3f8 added for attribution, not for calibration. ``reason`` is where the band name already
+# is, so it is where the numbers go -- which puts them on every renderer that prints a verdict
+# line without any renderer having to be taught about the table.
+
+
+def test_a_verdict_reason_names_the_numbers_its_band_graded_by(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(scores={"palette": 0.333}), thresholds,
+        generator_family="stable-diffusion",
+    )
+    palette = {v.atom_id: v for v in t.verdicts}["palette"]
+    assert palette.zone is Zone.FAIL
+    assert "band palette" in palette.reason, "the attribution F-00cfd3f8 added is not removed"
+    assert "0.85" in palette.reason and "0.50" in palette.reason, (
+        "a bare 0.333 in a shared column cannot be read without the band it was graded against"
+    )
+
+
+def test_two_atoms_on_different_scales_are_now_distinguishable(sprite_example):
+    """The measured pair: a 0.050 FAIL sitting eight lines above a 0.005 PASS."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(scores={"tabard": 0.05}), thresholds,
+        generator_family="stable-diffusion",
+    )
+    by_id = {v.atom_id: v for v in t.verdicts}
+    assert by_id["tabard"].zone is Zone.FAIL and by_id["no_rival_colours"].zone is Zone.PASS
+    assert "0.80" in by_id["tabard"].reason and "0.40" in by_id["tabard"].reason
+    assert "0.10" in by_id["no_rival_colours"].reason
+
+
+def test_a_negate_atoms_band_is_not_reported_with_the_affirm_reading(sprite_example):
+    """For a must_not probe the band inverts: a HIGH 'is it present?' score is the FAIL. Printing
+    the affirm reading on a negate row would be a confident wrong statement about calibration."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(), thresholds, generator_family="stable-diffusion",
+    )
+    negate = {v.atom_id: v for v in t.verdicts}["no_rival_colours"]
+    assert "PASS >=" not in negate.reason, "0.10 is where a must_not probe FAILS, not passes"
+    assert "FAIL >=0.10" in negate.reason and "PASS <=0.01" in negate.reason
+
+
+def test_an_atom_that_never_scored_states_no_band(sprite_example):
+    """band_key is empty when nothing scored; inventing a band there would be the same silent
+    re-scale F-00cfd3f8 removed, wearing its fix as a disguise."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    v = ScriptedVerifier(lambda _q: None)
+    t = harness.evaluate(dag, "x.png", {v.tier: v}, thresholds, generator_family="stable-diffusion")
+    for verdict in t.verdicts:
+        assert verdict.score is None
+        assert "PASS >=" not in verdict.reason and "PASS <=" not in verdict.reason
+
+
+# --------------------------------------------------------------------------- coordinator addition
+# (completing image-domain's landed half.) Tier0Router.score_detail() (a per-colour hit breakdown)
+# and DSGVerifier.localization_detail() produce facts that had no route to a reader: AtomVerdict is
+# extra="forbid" and evaluate() composes ``reason`` itself, so a verifier's channel to the
+# transcript was one float wide. The seam is duck-typed on purpose -- the implementations live in
+# another package, and the doubles below are what pin the contract from this side.
+
+
+class _DetailedVerifier:
+    """A Tier-0 verifier that also explains itself, the way Tier0Router now does."""
+
+    family = "siglip2"
+    tier = 0
+    verifier_id = "palette.hist.v1"
+    version = "v1"
+
+    def __init__(self, score_value=0.333, detail="missing colour bone-white"):
+        self._score = score_value
+        self._detail = detail
+        self.detail_calls = 0
+
+    def score(self, image_path, question):
+        return self._score
+
+    def score_detail(self, image_path, question):
+        self.detail_calls += 1
+        return self._detail
+
+
+def _evaluate_with(verifier, resolved, thresholds):
+    dag = compile_questions(resolved)
+    return harness.evaluate(
+        dag, "x.png", {verifier.tier: verifier}, thresholds, generator_family="stable-diffusion"
+    )
+
+
+def test_a_verifier_that_can_explain_itself_reaches_the_transcript(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    v = _DetailedVerifier()
+    t = _evaluate_with(v, resolved, thresholds)
+    palette = {x.atom_id: x for x in t.verdicts}["palette"]
+    assert palette.zone is Zone.FAIL
+    assert palette.detail == "missing colour bone-white"
+    assert v.detail_calls, "the seam has to actually ask"
+
+
+def test_the_rendered_verdict_line_names_what_the_instrument_saw(sprite_example):
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    t = _evaluate_with(_DetailedVerifier(), resolved, thresholds)
+    assert "missing colour bone-white" in format_transcript(t)
+
+
+def test_a_verifier_with_no_detail_renders_exactly_what_it_did_before(sprite_example):
+    """Absent field == old shape, on the model and on the rendered line. A verifier that
+    publishes neither method is the normal case, not an error."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    plain = ScriptedVerifier(
+        {"palette": 0.333}, family="siglip2", tier=0, verifier_id="palette.hist.v1"
+    )
+    assert not hasattr(plain, "score_detail") and not hasattr(plain, "localization_detail")
+    t = _evaluate_with(plain, resolved, thresholds)
+    assert all(v.detail is None for v in t.verdicts)
+
+    rendered = format_transcript(t)
+    for v in t.verdicts:
+        row = next(line for line in rendered.splitlines() if f" {v.atom_id:18} " in line)
+        assert row.endswith(v.reason), "an absent detail appends nothing at all to the line"
+
+
+def test_a_detail_method_that_raises_cannot_change_a_verdict(sprite_example):
+    """Commentary on a score that already exists must never turn a scored atom into a SKIPPED one
+    -- the same discipline _safe_score applies to scoring itself."""
+    _s, resolved, thresholds, _c = sprite_example
+
+    class _Exploding(_DetailedVerifier):
+        def score_detail(self, image_path, question):
+            raise RuntimeError("the breakdown blew up")
+
+    t = _evaluate_with(_Exploding(), resolved, thresholds)
+    palette = {x.atom_id: x for x in t.verdicts}["palette"]
+    assert palette.zone is Zone.FAIL, "the score stands"
+    assert palette.score == 0.333
+    assert palette.detail is None
+
+
+def test_a_detail_method_that_takes_no_arguments_is_still_asked(sprite_example):
+    """The implementations live in another package; one wrong guess about the signature would
+    silently drop the field rather than fail loudly, so both plausible shapes are accepted."""
+    _s, resolved, thresholds, _c = sprite_example
+
+    class _NoArgs(_DetailedVerifier):
+        def score_detail(self):
+            return "hit 2 of 3 declared colours"
+
+    t = _evaluate_with(_NoArgs(), resolved, thresholds)
+    assert {x.atom_id: x for x in t.verdicts}["palette"].detail == "hit 2 of 3 declared colours"
+
+
+def test_a_mapping_detail_is_rendered_rather_than_stored_raw(sprite_example):
+    """The field is a string because it exists to be read on a verdict line."""
+    _s, resolved, thresholds, _c = sprite_example
+
+    class _Mapping(_DetailedVerifier):
+        def score_detail(self, image_path, question):
+            return {"ash-grey": "hit", "bone-white": "missing"}
+
+    detail = {x.atom_id: x for x in _evaluate_with(_Mapping(), resolved, thresholds).verdicts}[
+        "palette"
+    ].detail
+    assert isinstance(detail, str)
+    assert "bone-white=missing" in detail and "ash-grey=hit" in detail
+
+
+def test_the_localization_detail_name_is_accepted_too(sprite_example):
+    """DSGVerifier publishes localization_detail, not score_detail."""
+    _s, resolved, thresholds, _c = sprite_example
+
+    class _Localizer(_DetailedVerifier):
+        score_detail = None  # not callable -> skipped, the next name is tried
+
+        def localization_detail(self, image_path, question):
+            return "looked at the torso region"
+
+    t = _evaluate_with(_Localizer(), resolved, thresholds)
+    assert {x.atom_id: x for x in t.verdicts}["palette"].detail == "looked at the torso region"

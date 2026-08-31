@@ -46,6 +46,25 @@ class AtomVerdict(BaseModel):
     (siglip2 high 0.10 / low 0.01 vs palette high 0.85 / low 0.50), so a confident SigLIP2 match
     read as a confident palette FAIL. Which band graded the number is now an answer on the
     transcript rather than something a reader has to re-derive from the check_type."""
+    detail: str | None = None
+    """What the instrument saw, in its own terms, when it can say (coordinator addition).
+
+    A score is one number and the band says which side of the line it fell on; neither says WHY.
+    The image domain's Tier-0 router knows which colours of the declared palette it did and did
+    not hit, and the Tier-2 localizer knows where it looked -- and none of that could reach a
+    reader, because this model is ``extra="forbid"`` and ``evaluate`` composes ``reason`` itself,
+    so a verifier had no channel to the transcript wider than a float.
+
+    Optional and absent-by-default, which is the whole compatibility story: a verifier that
+    exposes nothing leaves this ``None``, and every existing transcript, receipt and rendered
+    line stays byte-for-byte what it was. ``AtomVerdict`` is not a name STABILITY.md covers (that
+    row promises ``GateTranscript`` and the ``Verifier`` protocol), and an optional defaulted
+    field is additive under ``extra="forbid"`` in both directions regardless -- the same rule
+    ``AssetRecord``'s F-f99c78f8 fields established.
+
+    A string, not a structure: this field exists to be READ. A verifier that answers with a
+    mapping is rendered into one at the seam (``_detail_for``) rather than pushing an untyped
+    dict onto a model whose every other field is typed."""
     reason: str
 
 
@@ -87,6 +106,15 @@ class GateTranscript(BaseModel):
 
     def uncertain_required(self) -> list[AtomVerdict]:
         return [v for v in self.verdicts if v.zone in (Zone.UNCERTAIN, Zone.SKIPPED, Zone.NA) and _counts(v)]
+
+    def required_atoms(self) -> list[AtomVerdict]:
+        """Every atom the gate is allowed to block on -- the denominator of "n of m scored".
+
+        F-56203d3d: ``scored_required`` was the only way to ask how many required atoms produced
+        a number, and nothing published the total to compare it against, so ``exit_contract``
+        could not say "1 of 6 required atoms scored" without re-deriving ``_counts`` for itself.
+        One definition of "required", one place."""
+        return [v for v in self.verdicts if _counts(v)]
 
     def scored_required(self) -> list[AtomVerdict]:
         """Required / must_not atoms that produced a numeric score."""
@@ -246,7 +274,7 @@ def evaluate(
             verdicts[q.atom_id] = _skipped(q, skip_reason or f"{verifier.verifier_id} unavailable")
             continue
 
-        used_id, used_tier = verifier.verifier_id, tier
+        used_id, used_tier, used_verifier = verifier.verifier_id, tier, verifier
         band_key = _band_key(q.check_type, used_id, thresholds)
         zone = thresholds.zone(band_key, score, q.polarity)
         tiers_consulted = [tier]
@@ -255,7 +283,7 @@ def evaluate(
         if tier == 1 and zone in (Zone.UNCERTAIN, Zone.FAIL) and 2 in verifiers:
             score2, _skip2 = _safe_score(verifiers[2], image_path, q)
             if score2 is not None:
-                used_id, used_tier = verifiers[2].verifier_id, 2
+                used_id, used_tier, used_verifier = verifiers[2].verifier_id, 2, verifiers[2]
                 band_key = _band_key(q.check_type, used_id, thresholds)
                 score, zone = score2, thresholds.zone(band_key, score2, q.polarity)
                 # ⚑ CORRECTED IN PLACE (F-d9b28ca6). used_tier used to be overwritten with no
@@ -266,11 +294,23 @@ def evaluate(
                 # score for this atom, escalated or not.
                 tiers_consulted.append(2)
 
+        # F-b1b29cef: the band's NUMBERS travel with its name. ``band_key`` alone told a reader
+        # WHICH instrument's calibration graded the score (F-00cfd3f8, for attribution) but not
+        # what that calibration IS -- and the shipped table's outermost pair is fifty times apart
+        # (palette 0.85/0.50 vs siglip2 0.10/0.01), so a bare float in a shared column cannot be
+        # read. MEASURED, real ``pcraft gate``: ``[FAIL] palette 0.333`` printed above
+        # ``[PASS] no_rival_colours 0.005``. Stating it HERE rather than in a renderer is what
+        # puts it on every surface that prints a verdict line -- the CLI transcript, the receipt
+        # that stores this reason, and any consumer of the transcript model -- from one place,
+        # and ``Band.describe`` reads the band in the direction this atom is actually asked.
+        band = thresholds.band_for(band_key)
         verdicts[q.atom_id] = AtomVerdict(
             atom_id=q.atom_id, polarity=q.polarity, severity=q.severity,
             score=round(score, 4), zone=zone, tier_used=used_tier, tiers_consulted=tiers_consulted,
             verifier_id=used_id, band_key=band_key,
-            reason=f"score {score:.4f} -> {zone.value} (band {band_key})",
+            detail=_detail_for(used_verifier, image_path, q),
+            reason=f"score {score:.4f} -> {zone.value} "
+            f"(band {band_key}: {band.describe(q.polarity)})",
         )
 
     ordered = [verdicts[q.atom_id] for q in dag.questions]
@@ -305,6 +345,63 @@ def _safe_score(verifier: Verifier, image_path: str, question: Question) -> tupl
     if math.isnan(score) or math.isinf(score) or score < 0.0 or score > 1.0:
         return None, f"{verifier.verifier_id} rejected score {raw!r} (need finite [0, 1])"
     return score, None
+
+
+_DETAIL_METHODS = ("score_detail", "localization_detail")
+"""Optional members a verifier MAY expose to explain the score it just returned.
+
+Not added to the ``Verifier`` protocol, which STABILITY.md covers: making these required would
+break every verifier that does not have them, and making them protocol-optional is exactly what
+duck-typing already expresses. A verifier that has neither is the normal case."""
+
+
+def _detail_for(verifier, image_path: str, question: Question) -> str | None:
+    """Ask the deciding instrument what it saw. Never let the answer break a gate.
+
+    Coordinator addition, completing the image domain's half: ``Tier0Router.score_detail`` (a
+    per-colour hit breakdown) and ``DSGVerifier.localization_detail`` produce facts that had no
+    route to the transcript, because ``AtomVerdict`` is ``extra="forbid"`` and this function's
+    caller composes ``reason`` itself.
+
+    Three properties, each earned by a sibling in this file. It is OPTIONAL -- the method is
+    looked up by name and its absence is the normal case, not an error. It is SAFE -- a detail
+    method that raises must not turn a scored atom into a SKIPPED one or a crash, because this is
+    commentary on a score that has already been computed, so the whole call is guarded the way
+    ``_safe_score`` guards scoring. And it is TOLERANT of the two plausible signatures (mirroring
+    ``score(image_path, question)``, or taking nothing because it describes the call just made),
+    because the implementations live in another package and one wrong guess here would silently
+    drop the field rather than fail loudly.
+
+    A mapping is rendered to ``k=v`` pairs rather than stored raw: the field is a string because
+    it exists to be read on a verdict line.
+    """
+    for name in _DETAIL_METHODS:
+        method = getattr(verifier, name, None)
+        if not callable(method):
+            continue
+        try:
+            try:
+                value = method(image_path, question)
+            except TypeError:
+                value = method()
+        except Exception:  # noqa: BLE001 - commentary on an existing score; never a verdict
+            return None
+        rendered = _render_detail(value)
+        if rendered:
+            return rendered
+    return None
+
+
+def _render_detail(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={value[k]}" for k in sorted(value, key=str)) or None
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return ", ".join(str(x) for x in value) or None
+    return str(value) or None
 
 
 def _band_key(check_type: CheckType, verifier_id: str | None, thresholds: ThresholdTable) -> str:

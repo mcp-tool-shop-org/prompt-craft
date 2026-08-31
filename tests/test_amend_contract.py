@@ -1133,6 +1133,82 @@ def test_the_schema_refusal_still_names_the_file_and_keeps_the_cause(tmp_path):
     assert "2 validation errors for Contract" in exc.value.to_debug_text()
 
 
+# ---------------------------------------------------------------------------
+# F-eaa870d6 -- the aggregate needs a delimiter its own entries cannot contain
+#
+# F-40a4956f joined the per-field entries with "; " and prefixed the count with "; " too.
+# Two of this schema's own field validators (_reject_blank_id, _reject_blank_claim) raise
+# ValueError text that ALSO contains "; " -- "id must not be blank; '   ' is empty once
+# stripped" -- which pydantic folds into the per-field msg. The same two characters then
+# played three roles in one string with nothing to tell them apart.
+#
+# The ordinary authoring mistake that produces it: copy-paste a template atom and forget
+# to fill in both the id and the claim, which is exactly those two validators.
+# ---------------------------------------------------------------------------
+
+
+def _five_error_payload() -> dict:
+    """The finding's measured case. Five independently-invalid fields, two of which raise
+    messages that carry an internal "; " of their own (blank claim, blank id)."""
+    return {
+        "$schema": "prompt-craft/contract.v1",
+        "id": "faction:five",
+        "level": "faction",
+        "must_have": [
+            {"id": "tabard", "claim": "a tabard", "check_type": "not_a_real_check_type"},
+            {"id": "sigil", "claim": "   ", "check_type": "vqa"},
+            {"id": "   ", "claim": "a palette", "check_type": "vqa"},
+            {"id": "skin", "claim": "grey-green skin", "check_type": "vqa", "colour": "grey"},
+            {"id": "face", "check_type": "vqa"},
+        ],
+    }
+
+
+def _reported_entries(safe_text: str) -> list[str]:
+    """Segment the aggregate the way a reader does: one chunk per reported field error."""
+    return [chunk for chunk in safe_text.split(" | ") if chunk.strip().startswith("[")]
+
+
+def test_the_aggregate_is_still_segmentable_when_an_entry_contains_a_semicolon(tmp_path):
+    """The collision, end to end through the authoring door. Before the fix this returned
+    one run-on line in which must_have.1.claim's own clause and must_have.2.id's entry were
+    separated by the same two characters, so a reader could not tell where either began
+    without already knowing the "field.path:" pattern to look for."""
+    _write_contract(tmp_path, "five.contract.json", _five_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    safe = exc.value.to_safe_text()
+    assert "5 error(s)" in safe  # the count still leads
+    assert "is empty once stripped" in safe  # and an entry really does carry a ";"
+
+    entries = _reported_entries(safe)
+    assert len(entries) == 3, f"expected one chunk per reported field, got: {entries}"
+    assert entries[0].startswith("[1] must_have.0.check_type: ")
+    assert entries[1].startswith("[2] must_have.1.claim: ")
+    assert entries[2].startswith("[3] must_have.2.id: ")
+
+
+def test_the_semicolon_carrying_entry_keeps_its_whole_message_in_one_chunk(tmp_path):
+    """The other half of the same property: the internal "; " stays legible as part of the
+    entry that owns it, rather than reading as the start of a second field."""
+    _write_contract(tmp_path, "five.contract.json", _five_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    claim_entry = _reported_entries(exc.value.to_safe_text())[1]
+    assert "claim must not be blank" in claim_entry
+    assert "is empty once stripped" in claim_entry  # same chunk, not the next one
+
+
+def test_the_cap_and_its_pointer_to_debug_survive_the_delimiter_change(tmp_path):
+    """Five errors, three reported: the cap is what keeps a console line from becoming a
+    report, and --debug is still where the other two live."""
+    _write_contract(tmp_path, "five.contract.json", _five_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert "(+2 more, see --debug)" in exc.value.to_safe_text()
+    assert "5 validation errors for Contract" in exc.value.to_debug_text()
+
+
 def test_the_enriched_schema_refusal_renders_on_a_cp437_console(tmp_path):
     _write_contract(tmp_path, "two.contract.json", _two_error_payload())
     with pytest.raises(PromptCraftError) as exc:

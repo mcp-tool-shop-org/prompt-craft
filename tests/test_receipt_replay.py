@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from pcraft.cli import app
+from pcraft.core.contract.hash import contract_hash
 from pcraft.core.receipt.asset_record import load, persist, replay
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example, run_mock_loop
@@ -158,3 +159,114 @@ def test_compiled_synth_id_is_not_a_second_copy_of_the_backend(tmp_path):
     assert rec.synth_backend == "template"
     assert rec.compiled_synth_id != rec.synth_backend
     assert rec.compiled_synth_id, "the id of the compiled artifact, not a duplicate label"
+
+
+# --------------------------------------------------------------------------- F-154dd9b2
+# STATE_REPLAY_DRIFT is four different refusals, and all four raise sites passed no inline hint,
+# so every one resolved the same DEFAULT_HINTS entry -- whose LEAD remedy ("re-run replay with
+# --thresholds pointed at the table the receipt names") is IMPOSSIBLE for the value-drift arm
+# (both tables call themselves the same version, so it names the very file that just failed) and
+# IRRELEVANT for the two contract arms (--thresholds cannot affect them at all). The code stays
+# one code -- STABILITY.md says parse the code, not the prose -- and each site states its own
+# recovery, the way preflight.py already gives its three IO_GATE_INPUT sites three different ones.
+
+
+def _bound(tmp_path):
+    res = run_mock_loop(records_dir=str(tmp_path))
+    store, _r, table, _c = load_sprite_example()
+    return res.record, store.resolve(res.record.contract_id), table
+
+
+def _retuned(table, **bands):
+    """A table that keeps the version string and moves the numbers -- the undeclared retune."""
+    copy = table.model_copy(deep=True)
+    for key, (high, low) in bands.items():
+        copy.bands[key].high, copy.bands[key].low = high, low
+    return copy
+
+
+def test_value_drift_does_not_tell_the_operator_to_point_at_the_file_that_just_failed(tmp_path):
+    """The arm whose whole premise is that BOTH tables call themselves 'sprite.cal.v1'."""
+    record, resolved, table = _bound(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        replay(record, resolved, thresholds_version=None, thresholds=_retuned(table, vqa=(0.20, 0.05)))
+    err = exc.value
+    assert err.code == "STATE_REPLAY_DRIFT"
+    assert "--thresholds" not in err.hint or "cannot" in err.hint, (
+        "following the generic hint re-runs the identical command for the identical refusal"
+    )
+    assert "re-bind" in err.hint.lower(), "keep the retune, bump the version, re-bind"
+    assert "restore" in err.hint.lower(), "or restore the bands this receipt was decided under"
+    assert record.thresholds_fingerprint in err.hint or record.thresholds_fingerprint in err.message
+
+
+def test_contract_hash_drift_names_both_hashes_and_the_contract(tmp_path):
+    """The most reachable arm of the four -- contracts are edited constantly and calibration
+    tables almost never are -- and the whole message was 'contract hash drift for <id>: the
+    contract changed since this asset was bound': neither hash, no revision, not even the
+    contract id, while the two threshold arms beside it print both sides."""
+    record, resolved, _table = _bound(tmp_path)
+    resolved.must_have[0].claim = "TAMPERED -- the contract changed since bind"
+    with pytest.raises(PromptCraftError) as exc:
+        replay(record, resolved, thresholds_version=None)
+    err = exc.value
+    assert err.code == "STATE_REPLAY_DRIFT"
+    assert record.contract_id in err.message, "name the contract, not only the record"
+    assert record.contract_hash in err.message, "the receipt's side of the comparison"
+    assert contract_hash(resolved) in err.message, "and this run's side"
+    assert "--thresholds" in err.hint, "say the flag does not apply, rather than leading with it"
+    assert "does not affect" in err.hint or "cannot affect" in err.hint
+
+
+def test_dag_drift_says_the_contract_did_not_change(tmp_path):
+    """Reached only when the contract hash MATCHED and compile_questions still produced a
+    different DAG -- so the only realistic cause is a prompt-craft VERSION change, which the
+    generic hint never mentions."""
+    record, resolved, _table = _bound(tmp_path)
+    tampered = record.model_copy(deep=True)
+    tampered.question_dag.questions[0].text = "a question this build does not compile"
+    with pytest.raises(PromptCraftError) as exc:
+        replay(tampered, resolved, thresholds_version=None)
+    err = exc.value
+    assert err.code == "STATE_REPLAY_DRIFT"
+    assert "version" in err.hint.lower(), "a DAG that differs under a matching hash is a build change"
+    assert "--thresholds" not in err.hint
+
+
+def test_version_drift_keeps_the_remedy_that_actually_applies(tmp_path):
+    """The one arm the generic hint WAS written for keeps it: two different version strings, so
+    pointing --thresholds at the table the receipt names is a real move."""
+    record, resolved, _table = _bound(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        replay(record, resolved, thresholds_version="sprite.cal.v2")
+    err = exc.value
+    assert err.code == "STATE_REPLAY_DRIFT"
+    assert "--thresholds" in err.hint
+    assert record.thresholds_version in err.message and "sprite.cal.v2" in err.message
+
+
+def test_all_four_arms_still_answer_with_one_parseable_code_and_four_hints(tmp_path):
+    """STABILITY.md's contract: the CODE is the machine surface and does not fork. The prose is
+    what the operator reads, and four refusals with four recoveries may not share one sentence."""
+    record, resolved, table = _bound(tmp_path)
+    tampered_contract = resolved.model_copy(deep=True)
+    tampered_contract.must_have[0].claim = "TAMPERED"
+    tampered_dag = record.model_copy(deep=True)
+    tampered_dag.question_dag.questions[0].text = "not what this build compiles"
+
+    cases = [
+        lambda: replay(record, resolved, thresholds_version="sprite.cal.v2"),
+        lambda: replay(record, resolved, thresholds_version=None,
+                       thresholds=_retuned(table, vqa=(0.20, 0.05))),
+        lambda: replay(record, tampered_contract, thresholds_version=None),
+        lambda: replay(tampered_dag, resolved, thresholds_version=None),
+    ]
+    hints = []
+    for case in cases:
+        with pytest.raises(PromptCraftError) as exc:
+            case()
+        assert exc.value.code == "STATE_REPLAY_DRIFT"
+        assert exc.value.hint, "a refusal with no advice is half a refusal"
+        exc.value.to_safe_text().encode("ascii")
+        hints.append(exc.value.hint)
+    assert len(set(hints)) == 4, f"one hint serving four refusals: {sorted(set(hints))}"

@@ -250,6 +250,25 @@ class SDXLGenerator:
             }
             applied: dict = {
                 "kind": kind, "pose": [], "ip_adapter": [], "lora": [], "instantid": [], "inpaint": None,
+                # F-60b76831: every other key here records a bucket that FIRED, so a method=none
+                # ref -- a documented skip (cond._SKIP_METHODS) -- appeared in no sub-list at all,
+                # and an operator had to diff conditioning["identity_refs"] against three separate
+                # applied[...] lists by hand to notice a plate was gone, then still could not tell
+                # an intentional skip from a bug. Both siblings in this generator family already
+                # answer this and this is the shape they answer it in: flux_generator stamps
+                # applied["negative_prompt"] = {requested, applied: False, reason} for the negative
+                # it drops, and kontext_fill.RecipeReport carries identity_unchosen naming the
+                # plates that lost the stitch. Always present, like its empty-list siblings above:
+                # a missing key is the silence being removed, not a compact way to say "none".
+                "identity_skipped": [
+                    {
+                        "plate": ref.get("plate"),
+                        "method": ref["method"],
+                        "applied": False,
+                        "reason": "method=none is a documented skip, not an unwired encoder",
+                    }
+                    for ref in cond.skipped_identity_refs(conditioning)
+                ],
             }
 
             control_images = []

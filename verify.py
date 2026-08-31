@@ -212,6 +212,47 @@ def _audit(py: str, env: dict[str, str], ran: list[str]) -> tuple[list, list]:
     return unfixable, unauditable
 
 
+# What a failing leg MEANS, and what to do about it. One shared template used to serve
+# all five, which is true of every leg and diagnostic for none of them -- and the legs do
+# not fail in the same KIND of way. For lint, typecheck, suite and build the child's own
+# uncaptured output above the refusal usually IS the fix pointer, so the guidance mostly
+# says which output to read. `suite under -O` is different in kind, and the docstring at
+# the top of this file already says so: its entire purpose is to catch an invariant
+# enforced with a bare `assert`, which -O strips silently. When it fails -- especially
+# right after the plain `suite` leg passed -- the fix is in src/, not in the test, and
+# reading the shared template sends a contributor to the wrong file.
+_LEG_HINTS: dict[str, str] = {
+    "lint": (
+        "ruff refused. The rule code and file:line are in the output above. Fix the code, "
+        "or reject the rule deliberately in [tool.ruff.lint] with the reason written down "
+        "next to it -- an unexplained blanket noqa is how this gate lost its meaning once "
+        "already."
+    ),
+    "typecheck": (
+        "mypy refused. Read the FIRST error rather than the count: mypy aborting before it "
+        "checks any pcraft file ('errors prevented further checking') is an inert gate, not "
+        "a clean one, and that inert state is what this leg was made reachable to catch."
+    ),
+    "suite": (
+        "a test failed. pytest named the failing node id above; re-run that node alone to "
+        "iterate instead of paying for the whole suite each time."
+    ),
+    "suite under -O": (
+        "a test that passed under the plain 'suite' leg one step earlier but fails here "
+        "usually does NOT mean a test regressed. It means application code enforces an "
+        "invariant with a bare 'assert', which -O strips, so the gate disappears in an "
+        "optimized interpreter -- the fix belongs in src/, replacing that assert with an "
+        "explicit raise. If the plain 'suite' leg is red too, fix that one first: this leg "
+        "says nothing about a tree whose suite is already broken."
+    ),
+    "build": (
+        "the wheel/sdist build failed, so nothing publishable came out of this tree. This "
+        "is packaging rather than code: read the build output above against "
+        "[tool.hatch.build.targets.wheel] in pyproject.toml."
+    ),
+}
+
+
 def _run(label: str, cmd: list[str], env: dict[str, str], ran: list[str]) -> None:
     """Run one leg; on success record its label in the caller's ``ran`` list.
 
@@ -219,11 +260,33 @@ def _run(label: str, cmd: list[str], env: dict[str, str], ran: list[str]) -> Non
     for one commit, and a second in-process ``main()`` would have appended to the first
     run's list and printed a leg twice -- a summary drifting from what actually ran,
     which is precisely the defect the accumulator was introduced to prevent.
+
+    A failure carries this leg's own guidance from ``_LEG_HINTS`` rather than the shared
+    template alone. A label with no hint still refuses with the bare template, so nothing
+    depends on the table being complete.
+
+    The leg's output is wrapped in GitHub Actions log-group markers when running there.
+    ci.yml invokes this entire five-leg sequence as ONE step, so without them a red run is
+    a single flat concatenation of ruff + mypy + pytest + pytest -O + build output and the
+    reader has to scroll to find where it turned red; with them each leg collapses on its
+    own. ``::endgroup::`` is printed from a ``finally`` so the group closes whether the leg
+    passed or failed. Gated on GITHUB_ACTIONS so local runs read exactly as they did.
+    Nothing about what runs, or in what order, changes.
     """
-    print(f"-- {label}: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, cwd=ROOT, env=env, check=False)
+    group = os.environ.get("GITHUB_ACTIONS") == "true"
+    if group:
+        print(f"::group::{label}", flush=True)
+    print(f"-- {label}: {' '.join(cmd)}", flush=True)
+    try:
+        proc = subprocess.run(cmd, cwd=ROOT, env=env, check=False)
+    finally:
+        if group:
+            print("::endgroup::", flush=True)
     if proc.returncode != 0:
-        raise SystemExit(f"VERIFY FAIL: {label} exited {proc.returncode}")
+        hint = _LEG_HINTS.get(label)
+        raise SystemExit(
+            f"VERIFY FAIL: {label} exited {proc.returncode}" + (f" -- {hint}" if hint else "")
+        )
     ran.append(label)
 
 

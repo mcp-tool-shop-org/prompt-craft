@@ -58,9 +58,18 @@ class QuestionDAG(BaseModel):
         noticed. This arm is now defence in depth for a ``QuestionDAG`` assembled directly,
         without a ``ResolvedContract`` behind it (which is exactly how the harness tests
         build their fixtures).
+
+        [!] Both arms now name the PATH (F-65297c98). Same code, same conceptual defect, and
+        they gave the author different amounts of information: the construction-time arm says
+        "has a depends_on cycle: tabard -> sigil -> tabard", this one said "at atom 'tabard'"
+        -- the single node where the DFS revisit landed, with no way to see what it loops
+        through. ``visiting`` is now the DFS stack rather than a set, so the slice from the
+        first repeated id IS the cycle. One structure, not a set plus a parallel list that
+        could drift out of agreement; the membership test is over a list whose length is the
+        depends_on chain depth (each question has at most one parent), not over the DAG.
         """
         order: list[Question] = []
-        visiting: set[str] = set()
+        visiting: list[str] = []  # the DFS stack, in order -- the cycle path, not just its end
         done: set[str] = set()
         index = {q.atom_id: q for q in self.questions}
 
@@ -68,10 +77,11 @@ class QuestionDAG(BaseModel):
             if q.atom_id in done:
                 return
             if q.atom_id in visiting:
+                cycle = visiting[visiting.index(q.atom_id) :]
+                path = " -> ".join([*cycle, q.atom_id])
                 raise PromptCraftError(
                     "CONTRACT_CYCLIC_DEPENDS_ON",
-                    f"question DAG {self.contract_id!r} has a depends_on cycle at atom "
-                    f"{q.atom_id!r}",
+                    f"question DAG {self.contract_id!r} has a depends_on cycle: {path}",
                     hint=(
                         "depends_on is a DAG edge: the parent is evaluated first so a "
                         "failing parent can force NO on its descendants. A cycle has no "
@@ -80,10 +90,10 @@ class QuestionDAG(BaseModel):
                         "its ancestors."
                     ),
                 )
-            visiting.add(q.atom_id)
+            visiting.append(q.atom_id)
             if q.depends_on and q.depends_on in index:
                 visit(index[q.depends_on])
-            visiting.discard(q.atom_id)
+            visiting.pop()  # LIFO with the append above: this pops THIS atom, always
             done.add(q.atom_id)
             order.append(q)
 

@@ -1137,3 +1137,284 @@ def test_cli_replay_still_accepts_the_table_the_receipt_was_actually_decided_und
     text = (result.stdout or "") + (result.stderr or "")
     assert "STATE_REPLAY_DRIFT" not in text, f"the shipped table refused its own receipt: {text!r}"
     assert result.exit_code == 0, text
+
+
+# =========================================================================== wave-8
+# Stage-C polish (health-amend-c). Everything below was watched RED against the tree at
+# 04adc79 before the matching fix landed in cli/__init__.py, sample.py and testing.py.
+
+
+# --------------------------------------------------------------------------- F-5b783e17
+# `_print_result` hardcoded the prefix `records/` in the one line that says WHERE the
+# receipt landed, so every non-default --records-dir was misreported -- and the
+# IO_RECORD_READ hint the user then hits sends them back to that same line ("pcraft bind
+# prints the path it wrote"), closing the recovery loop instead of opening it. MEASURED
+# before the fix: `bind --records-dir out/receipts` wrote out/receipts/char_...json and
+# printed `receipt: records/char_...json`; feeding the printed path to `replay` refused
+# with IO_RECORD_READ at exit 2.
+
+
+_RECEIPT_LINE = re.compile(r"^receipt: (.+?)\s+hash=", re.MULTILINE)
+
+
+def _printed_receipt_path(text: str) -> Path:
+    m = _RECEIPT_LINE.search(text)
+    assert m, f"no `receipt: ... hash=` line in output: {text!r}"
+    return Path(m.group(1))
+
+
+def test_bind_prints_the_receipt_path_it_actually_wrote(tmp_path):
+    records = tmp_path / "out" / "receipts"
+    result = runner.invoke(app, ["bind", "--records-dir", str(records)])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    printed = _printed_receipt_path(result.stdout)
+    assert printed.is_file(), (
+        f"bind printed a receipt path that does not exist: {str(printed)!r}. On disk: "
+        f"{[str(p) for p in records.glob('*.json')]}"
+    )
+
+
+def test_demo_prints_the_receipt_path_it_actually_wrote(tmp_path):
+    records = tmp_path / "out2"
+    result = runner.invoke(app, ["demo", "--records-dir", str(records)])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    printed = _printed_receipt_path(result.stdout)
+    assert printed.is_file(), f"demo printed a receipt path that does not exist: {str(printed)!r}"
+
+
+def test_the_path_bind_prints_is_the_path_replay_accepts(tmp_path):
+    """The handoff the product exists to connect: bind writes the receipt, replay reads it.
+
+    This is the assertion the defect actually broke -- not "a string is wrong" but "the
+    documented next command refuses the path the previous command told you to use".
+    """
+    records = tmp_path / "somewhere" / "else"
+    bind = runner.invoke(app, ["bind", "--records-dir", str(records)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+    printed = _printed_receipt_path(bind.stdout)
+
+    result = runner.invoke(app, ["replay", str(printed)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "IO_RECORD_READ" not in text, f"the path bind printed could not be read back: {text!r}"
+    assert result.exit_code == 0, text
+
+
+def test_bind_json_carries_the_receipt_path_so_callers_need_not_reconstruct_it(tmp_path):
+    """Additive key. The --json document carried record_id and image_path but never said
+    where the receipt itself landed, so a machine caller had to rejoin record_id with the
+    flag it passed -- i.e. reimplement the very line that was wrong."""
+    records = tmp_path / "json-run"
+    result = runner.invoke(app, ["bind", "--records-dir", str(records), "--json"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    doc = json.loads(result.stdout)
+    assert "receipt_path" in doc, f"--json has no receipt_path: {sorted(doc)}"
+    assert Path(doc["receipt_path"]).is_file(), doc["receipt_path"]
+
+
+def test_bind_json_omits_receipt_path_when_no_receipt_was_written(tmp_path):
+    """Omitted, not null: a key whose value is None reads as "there is a path and it is
+    empty". The house rule is to leave the key out when there is nothing to say."""
+    blocker = tmp_path / "im-a-file-not-a-directory"
+    blocker.write_text("x", encoding="utf-8")
+    result = runner.invoke(app, ["bind", "--records-dir", str(blocker), "--json"])
+    stdout = result.stdout or ""
+    if stdout.strip():
+        doc = json.loads(stdout)
+        assert "receipt_path" not in doc, f"receipt_path present with no receipt: {doc!r}"
+
+
+# --------------------------------------------------------------------------- F-b1b8fd21
+# The CLI-C-001 mock disclaimer was printed unconditionally by the shared reporter, so a
+# real GPU run reported its own scores as scripted constants -- the exact inverse of the
+# defect the line was added to fix. The banner now keys on the generator identity the
+# receipt stamps, never on the --mock flag, so it cannot disagree with what ran.
+
+
+def _live_bind(monkeypatch, tmp_path, argv_extra=()):
+    """Drive `bind --no-mock` through the real plugin generator with generate() stubbed.
+
+    Same shape as tests/test_feat_cli.py's live-door test: the GENERATOR IDENTITY stays
+    the real one (that is the whole point -- it is what the receipt stamps), only the
+    pixels are faked, so the suite stays GPU-free.
+    """
+    from pcraft import sample
+    from pcraft.core.loop.generator_iface import GenerationResult
+    from pcraft.domains.image import ImagePlugin
+    from pcraft.domains.image.generator.sdxl_generator import SDXLGenerator
+    from pcraft.testing import passing_verifiers, write_solid_png
+
+    monkeypatch.setattr(sample, "image_extra_present", lambda: True)
+    monkeypatch.setattr(ImagePlugin, "verifiers", lambda self: passing_verifiers())
+    png = write_solid_png(tmp_path / "live.png")
+
+    def fake_generate(self, prompt, negative_prompt, conditioning, seed):
+        return GenerationResult(
+            image_path=str(png),
+            seed=seed,
+            sampler="test",
+            generator_id=self.generator_id,
+            generator_family=self.family,
+            conditioning=conditioning,
+        )
+
+    monkeypatch.setattr(SDXLGenerator, "generate", fake_generate)
+    return runner.invoke(
+        app, ["bind", "--no-mock", "--records-dir", str(tmp_path / "rec"), *argv_extra]
+    )
+
+
+def test_a_live_bind_does_not_report_its_scores_as_scripted(monkeypatch, tmp_path):
+    result = _live_bind(monkeypatch, tmp_path)
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert "scripted constants" not in text, (
+        "a --no-mock run printed the mock disclaimer above its own BOUND verdict; the "
+        f"receipt's narration disowns the measurement it certifies: {text!r}"
+    )
+
+
+def test_a_live_bind_says_positively_that_the_scores_are_real(monkeypatch, tmp_path):
+    """Absence of a disclaimer is easy to misread as a stripped banner. A positive line
+    is checkable; silence is not."""
+    result = _live_bind(monkeypatch, tmp_path)
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "live:" in text, f"the live path marks itself with nothing: {text!r}"
+
+
+def test_a_mock_bind_still_says_the_scores_are_scripted(tmp_path):
+    """The direction the banner was added for, unchanged."""
+    result = runner.invoke(app, ["bind", "--mock", "--records-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert "scripted constants" in result.stdout
+    assert "the image pixels were not read" in result.stdout
+
+
+def test_demo_still_says_the_scores_are_scripted(tmp_path):
+    result = runner.invoke(app, ["demo", "--records-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    assert "scripted constants" in result.stdout
+
+
+# --------------------------------------------------------------------------- F-339753d3
+# --debug was a bare typer.Option(False) on all twelve commands, so the one flag the
+# CLI's own refusals tell users to reach for ("Re-run with --debug for pydantic's full
+# report") was the one flag --help declined to explain. The exit-code contract -- this
+# product's machine-facing API -- appeared nowhere in --help either.
+
+
+def _every_declared_param():
+    group = typer.main.get_command(app)
+    out = [(f"pcraft --{p.name}", p) for p in group.params]
+    for name, sub in sorted(group.commands.items()):
+        out += [(f"{name} --{p.name}", p) for p in sub.params]
+    return out
+
+
+def test_every_rendered_flag_and_argument_carries_a_help_string():
+    """No flag is documented on three commands and blank on two.
+
+    Blanket rather than per-flag on purpose: the defect was an inconsistency, and a test
+    that names today's offenders would go quiet the moment a new one is added.
+    """
+    naked = [where for where, p in _every_declared_param() if not (getattr(p, "help", None) or "")]
+    assert not naked, "flags/arguments rendered with no description: " + ", ".join(naked)
+
+
+def test_debug_is_explained_everywhere_it_is_offered():
+    group = typer.main.get_command(app)
+    offenders = []
+    for name, sub in sorted(group.commands.items()):
+        for p in sub.params:
+            if p.name != "debug":
+                continue
+            help_text = (getattr(p, "help", None) or "").lower()
+            if "traceback" not in help_text:
+                offenders.append(f"{name}: {help_text!r}")
+    assert not offenders, (
+        "the CLI's own error text sends users to --debug; these pages do not say what it "
+        "does: " + "; ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize(
+    ("command", "codes"),
+    # Each command's OWN reachable codes, not one shared list: replay cannot exit 4 (it
+    # scores nothing), and asserting a code a command cannot produce would document a
+    # promise the CLI does not keep.
+    [
+        ("gate", ("0", "2", "3", "4")),
+        ("bind", ("0", "2", "3", "4")),
+        ("replay", ("0", "1", "2")),
+    ],
+    ids=["gate", "bind", "replay"],
+)
+def test_the_commands_a_script_calls_name_their_exit_codes_in_help(command, codes):
+    """`gate` and `bind` are called from CI. A script author who reaches for --help must
+    be able to learn the 2-vs-4 distinction without leaving the CLI for STABILITY.md."""
+    group = typer.main.get_command(app)
+    body = group.commands[command].help or ""
+    assert "exit" in body.lower(), f"{command} --help says nothing about exit status: {body!r}"
+    for code in codes:
+        assert code in body, f"{command} --help never names exit {code}: {body!r}"
+
+
+# --------------------------------------------------------------------------- F-3c6d9f4f
+# The DEP_IMAGE_MISSING hint -- the product's principal "how do I go live" unblock -- named
+# `pip install -e '.[image]'`, which requires a buildable project in the cwd. README.md:50
+# makes `pip install prompt-crafter` (PyPI, no checkout) the primary documented install and
+# the npm launcher installs no checkout either, so for the majority install the hinted
+# command fails inside pip -- a second wall, reached by following the CLI's own advice.
+# npm/bin/pcraft.mjs already uses the registry form (lines 137, 206).
+
+
+def test_the_dep_image_missing_hint_leads_with_the_install_the_readme_documents(monkeypatch, tmp_path):
+    from pcraft import sample
+
+    monkeypatch.setattr(sample, "image_extra_present", lambda: False)
+    result = runner.invoke(app, ["bind", "--no-mock", "--records-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "DEP_IMAGE_MISSING" in text, text
+    hint = text.split("hint:")[-1]
+    assert "pip install 'prompt-crafter[image]'" in hint, (
+        f"the hint does not name the registry install the README leads with: {text!r}"
+    )
+    lead, _, rest = hint.partition("pip install 'prompt-crafter[image]'")
+    assert "-e" not in lead, f"the checkout-only form still leads the hint: {text!r}"
+    assert "-e '.[image]'" in rest, (
+        "the source-checkout form should survive as the parenthetical secondary case, so a "
+        f"developer in a clone is not sent to the registry: {text!r}"
+    )
+
+
+# --------------------------------------------------------------------------- F-710c9599
+# `bind` printed nothing between invocation and final verdict, and the loop it drives can
+# run many generate-and-verify cycles inside that silence -- on live hardware, minutes of
+# it on this product's one spend path, during which an operator cannot tell "attempt 5 of
+# 7" from "hung on a model load". The progress lines go to stderr (the channel this file
+# already owns for non-document output) so stdout stays a parseable --json document.
+
+
+def test_a_live_bind_narrates_each_attempt_while_it_is_still_useful(monkeypatch, tmp_path):
+    result = _live_bind(monkeypatch, tmp_path)
+    err = result.stderr or ""
+    assert "[attempt 1]" in err, (
+        f"a --no-mock run emitted no progress before its verdict; stderr was: {err!r}"
+    )
+    assert "seed=" in err
+
+
+def test_progress_lines_never_contaminate_the_json_document(monkeypatch, tmp_path):
+    result = _live_bind(monkeypatch, tmp_path, argv_extra=["--json"])
+    assert "[attempt" not in (result.stdout or ""), (
+        "progress went to stdout and broke the document contract"
+    )
+    json.loads(result.stdout)  # still parseable
+    assert "[attempt 1]" in (result.stderr or "")
+
+
+def test_the_mock_path_stays_quiet(tmp_path):
+    """Nothing in the mock path takes long enough to need narrating, and unconditional
+    chatter would be a regression for the command the test suite calls most."""
+    result = runner.invoke(app, ["bind", "--mock", "--records-dir", str(tmp_path)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "[attempt" not in text, text

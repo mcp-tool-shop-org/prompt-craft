@@ -678,3 +678,59 @@ def test_the_cycle_guard_states_whether_a_shipped_path_reaches_it():
     assert "constructs a QuestionDAG" in src or "builds a QuestionDAG" in src, (
         "say who can still reach a cyclic DAG once the loader refuses one"
     )
+
+
+# --------------------------------------------------------------------------------------------
+# F-56203d3d (the report half) -- format_transcript printed atom ids ONLY, so `palette` and
+# `no_rival_colours` appeared without their claims, even though build_checkpoint one file over
+# does print them and `pcraft gate` compiles the DAG (cli/__init__.py:376) and drops it before
+# calling format_transcript at :381. The renderer is given the optional argument here; wiring the
+# CLI's two call sites to pass it is a cli/** edit and belongs to that domain.
+# --------------------------------------------------------------------------------------------
+
+
+def _failing_transcript(resolved, thresholds):
+    from pcraft.testing import passing_verifiers
+
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(scores={"palette": 0.333}), thresholds,
+        generator_family="stable-diffusion",
+    )
+    return dag, t
+
+
+def test_format_transcript_can_render_the_claim_behind_a_problem_atom(sprite_example):
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag, t = _failing_transcript(resolved, thresholds)
+    claim = dag.by_id("palette").text
+    assert claim, "the example's palette atom has a claim; the fixture is the thing under test"
+
+    without = format_transcript(t)
+    assert claim not in without, "today's rendering is the red case, not a pre-existing pass"
+
+    with_dag = format_transcript(t, dag=dag)
+    assert claim in with_dag, "an atom id is not a claim"
+
+
+def test_the_claim_is_rendered_only_for_the_atoms_that_need_reading(sprite_example):
+    """A wall of claims under every PASS row is the 'wall of green' this module's docstring
+    refuses. Only the problem atoms carry one."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag, t = _failing_transcript(resolved, thresholds)
+    text = format_transcript(t, dag=dag)
+    assert dag.by_id("palette").text in text
+    assert dag.by_id("no_shield").text not in text, "no_shield passed; it needs no claim"
+
+
+def test_format_transcript_without_a_dag_is_byte_for_byte_what_it_was(sprite_example):
+    """The argument is optional and additive -- both shipped call sites pass one argument."""
+    from pcraft.gate_report import format_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    _dag, t = _failing_transcript(resolved, thresholds)
+    assert format_transcript(t) == format_transcript(t, dag=None)

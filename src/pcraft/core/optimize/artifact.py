@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ...errors import PromptCraftError
+from ..contract.loader import describe_validation_error
 
 _DO_NOT_EDIT = (
     "PINNED COMPILED ARTIFACT - DO NOT HAND-EDIT. "
@@ -50,13 +51,23 @@ def load_pinned(path: str | Path) -> CompiledProgram:
         # raw pydantic ValidationError. IO_*_INVALID is this codebase's existing name for
         # "parsed as JSON, did not match the model" on a machine-written file; see
         # IO_RECORD_INVALID in errors.py, which says it for the receipt.
+        #
+        # [!] AND IT NOW CARRIES THE SAME DIAGNOSIS (F-936b313e). Citing that sibling for the
+        # CODE while not taking its MESSAGE left this refusal naming no field and no location
+        # -- "is JSON but does not match the CompiledProgram schema" -- with a hint that said
+        # to pass --debug to learn which field failed. That is the precise shape
+        # CONTRACT_INVALID had before F-40a4956f, and the audience here is narrower but worse
+        # off: whoever is inspecting a pinned artifact after a truncated write or a hand-edit,
+        # who now sees the count and the locations without a flag. The summary is the loader's
+        # own function, not a copy of it, so the next fix to either reaches both.
         raise PromptCraftError(
             "IO_ARTIFACT_INVALID",
-            f"compiled artifact {p} is JSON but does not match the CompiledProgram schema",
+            f"compiled artifact {p} is JSON but does not match the CompiledProgram schema: "
+            f"{describe_validation_error(err)}",
             hint=(
                 "This file is generated. Do not hand-edit it -- re-run the offline compile "
-                "(core/optimize/compile.py) and pin a fresh artifact. Pass --debug to see "
-                "which field failed."
+                "(core/optimize/compile.py) and pin a fresh artifact. The message names the "
+                "field(s); --debug adds pydantic's full report."
             ),
             cause=err,
         ) from err

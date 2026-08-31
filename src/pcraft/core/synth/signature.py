@@ -161,10 +161,30 @@ class DSPySynthesizer:
         prompt = str(getattr(pred, "prompt", "") or "")
         negative = str(getattr(pred, "negative_prompt", "") or "")
         if not prompt.strip():
+            # [!] ITS OWN CODE (F-97765221). This raised SYNTH_COVERAGE_MISSING, whose only
+            # other producer -- assert_.assert_coverage -- always embeds the uncovered atoms.
+            # STABILITY.md says a code will not have its meaning changed under a minor and
+            # tells callers to "parse the code, not the prose", so the code IS the contract a
+            # caller keys on: one that reads SYNTH_COVERAGE_MISSING and looks for the atom
+            # list every other producer gives it found none when this branch fired. Two
+            # structurally different failures ("the synthesizer covered N atoms short" vs "the
+            # backend returned nothing at all") get two codes, exactly as F-09f30018 split
+            # CONFIG_THRESHOLDS_VERSION_MISMATCH out of CONFIG_THRESHOLDS_INVALID.
+            #
+            # Additive and minor-safe: a NEW code, same SYNTH_ namespace, same exit 2. The
+            # hint is inline rather than in DEFAULT_HINTS so this refusal resolves advice at
+            # the raise site, where the surrounding context (a pinned program, an offline
+            # recompile) is known.
+            required = resolved.required_atoms()
             raise PromptCraftError(
-                "SYNTH_COVERAGE_MISSING",
-                "DSPy returned an empty prompt",
-                hint="The pinned program produced no tokens. Re-run offline compile.",
+                "SYNTH_EMPTY_PROMPT",
+                f"DSPy returned an empty prompt for {resolved.id!r} "
+                f"({len(required)} required atom(s) expected coverage: "
+                f"{[a.id for a in required]})",
+                hint="The pinned program produced no tokens at all -- this is the backend "
+                "returning nothing, not a partial synthesis. Check the LM backend is "
+                "reachable and re-run the offline compile; do not re-pin an artifact that "
+                "generates empty prompts.",
             )
         assert_tokens_trace(prompt, inventory)
         return SynthResult(

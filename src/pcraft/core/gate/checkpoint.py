@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from ..contract.compile_questions import QuestionDAG
+from ..contract.compile_questions import Polarity, QuestionDAG
 from .harness import AtomVerdict, GateTranscript
-from .thresholds import Zone
+from .thresholds import ThresholdTable, Zone
 
 
 class ContrastiveLine(BaseModel):
@@ -36,10 +36,34 @@ def _score_text(score: float | None) -> str:
     return "no score" if score is None else f"{score:.2f}"
 
 
-def _line(verdict: AtomVerdict, dag: QuestionDAG | None) -> ContrastiveLine:
+def _margin(verdict: AtomVerdict, thresholds: ThresholdTable | None) -> str:
+    """``0.79`` alone, or ``0.79; vqa passes at 0.80, fails at 0.40`` (F-b1b29cef).
+
+    The operator standing at this checkpoint is being asked to accept or repair, and the MARGIN
+    is the input to that decision. MEASURED: skin scripted to 0.79 and to 0.41 -- one hundredth
+    from PASS and one hundredth from FAIL under vqa 0.80/0.40 -- produced sentences that differed
+    only in the number, so learning whether an UNCERTAIN was nearly a bind or nearly a failure
+    meant opening sprite.calibration.json.
+
+    ``thresholds`` is optional so a caller without a table renders exactly what it rendered
+    before; ``band_key`` is empty whenever nothing scored, and an atom with no score has no
+    margin to state.
+    """
+    score_txt = _score_text(verdict.score)
+    if thresholds is None or not verdict.band_key or verdict.score is None:
+        return score_txt
+    band = thresholds.band_for(verdict.band_key)
+    if verdict.polarity is Polarity.affirm:
+        return f"{score_txt}; {verdict.band_key} passes at {band.high:.2f}, fails at {band.low:.2f}"
+    return f"{score_txt}; {verdict.band_key} fails at {band.high:.2f}, passes at {band.low:.2f}"
+
+
+def _line(
+    verdict: AtomVerdict, dag: QuestionDAG | None, thresholds: ThresholdTable | None = None
+) -> ContrastiveLine:
     question = dag.by_id(verdict.atom_id) if dag is not None else None
     claim = question.text if question is not None else verdict.atom_id
-    score_txt = _score_text(verdict.score)
+    score_txt = _margin(verdict, thresholds)
     if verdict.zone is Zone.UNCERTAIN:
         thought = f"you probably thought {verdict.atom_id} was close enough"
         chose = f"I left {verdict.atom_id} in the human band ({score_txt})"
@@ -82,9 +106,13 @@ def _census_line(transcript: GateTranscript) -> ContrastiveLine | None:
     )
 
 
-def build_checkpoint(transcript: GateTranscript, dag: QuestionDAG | None = None) -> ContrastiveCheckpoint:
+def build_checkpoint(
+    transcript: GateTranscript,
+    dag: QuestionDAG | None = None,
+    thresholds: ThresholdTable | None = None,
+) -> ContrastiveCheckpoint:
     flagged = [*transcript.failed_required(), *transcript.uncertain_required()]
-    lines = [_line(v, dag) for v in flagged]
+    lines = [_line(v, dag, thresholds) for v in flagged]
     census_line = _census_line(transcript)
     if census_line is not None:
         lines.append(census_line)
@@ -122,7 +150,10 @@ def build_checkpoint(transcript: GateTranscript, dag: QuestionDAG | None = None)
     else:
         thought = "You probably thought nothing needed a human."
         chose = f"I escalated ({transcript.overall.value})."
-    parts = [thought, chose]
+    # The header pair is ONE line -- the summary -- and each flagged atom is its own indented
+    # line below it. Keeping the pair joined by a space is what makes the two kinds of content
+    # visibly different kinds; joining all of it identically was half of the defect below.
+    parts = [f"{thought} {chose}"]
     # CORRECTED IN PLACE (F-a6acaab1). This separator was a literal U+2014 EM DASH. `text` is
     # not decoration: it becomes OrchestrationResult.reason and the CLI prints it verbatim, so
     # on a cp437 console -- classic cmd.exe -- an escalation died with an unhandled
@@ -132,5 +163,27 @@ def build_checkpoint(transcript: GateTranscript, dag: QuestionDAG | None = None)
     # escalation's 3 or 4 -- and the operator never saw the contrastive checkpoint at all. The
     # UNCERTAINTY_GATED_HUMANS artifact was exactly what the crash destroyed. ASCII, because it
     # is the only codepage-independent guarantee and this is advice, not typography.
-    parts.extend(f"{line.thought}; {line.chose} -- {line.claim}." for line in lines)
-    return ContrastiveCheckpoint(thought=thought, chose=chose, lines=lines, text=" ".join(parts))
+    #
+    # CORRECTED IN PLACE (F-a6078c7f). These parts were flattened with ``" ".join`` and shipped
+    # as ONE unbroken line inside a parenthesis: ``text`` becomes OrchestrationResult.reason,
+    # which cli._print_result prints as ``decision: ESCALATED  ({reason})``. MEASURED through
+    # sample.run_mock_loop with the six required atoms at 0.05 and rendered through the real
+    # cli._print_result: 974 characters, ZERO newlines, closing its parenthesis 974 characters
+    # later -- while the formatted transcript printed twenty lines below it was fully structured.
+    # The human decision point was the one artifact that was not, and STANDARDS #5 calls the
+    # checkpoint the artifact, not the string. build_checkpoint already had the content as
+    # STRUCTURE (one ContrastiveLine per flagged atom) and threw it away at the last step.
+    #
+    # Two smaller defects in the same expression went with it: the per-line template appended a
+    # '.' to a claim that is already a question ("worn over the torso?." six times in that run),
+    # and the header pair and the per-atom lines were joined identically, so nothing
+    # distinguished the summary from the detail.
+    #
+    # F-a6acaab1's cp437 guarantee is untouched: a newline and "  - " are ASCII, which is the
+    # only codepage-independent guarantee there is.
+    parts.extend(
+        f"  - {line.atom_id} {line.zone} {_score_text(line.score)}: "
+        f"{line.thought}; {line.chose} -- {line.claim}"
+        for line in lines
+    )
+    return ContrastiveCheckpoint(thought=thought, chose=chose, lines=lines, text="\n".join(parts))

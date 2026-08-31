@@ -108,6 +108,62 @@ def test_cycle_raises():
     assert exc.value.exit_code == 1
 
 
+# ---------------------------------------------------------------------------
+# F-65297c98 -- both producers of CONTRACT_CYCLIC_DEPENDS_ON must name the PATH
+#
+# Same code, same conceptual defect, two different amounts of information. The
+# construction-time arm (schema._reject_cyclic_depends_on -- the real author-facing door)
+# says "has a depends_on cycle: tabard -> sigil -> tabard". This arm said "at atom
+# 'tabard'": the one node where the DFS revisit landed, with no way to see what it loops
+# through. test_cycle_raises only asserted .code and .exit_code, so the gap was unpinned.
+# ---------------------------------------------------------------------------
+
+
+def _self_edge_dag() -> QuestionDAG:
+    """The degenerate cycle: one question that depends_on itself."""
+    return QuestionDAG(
+        contract_id="c",
+        questions=[
+            Question(
+                atom_id="a", text="an a?", check_type=CheckType.vqa,
+                polarity=Polarity.affirm, severity=Severity.required, depends_on="a",
+            )
+        ],
+    )
+
+
+def test_the_dag_cycle_refusal_names_the_path_not_just_the_landing_atom():
+    with pytest.raises(PromptCraftError) as exc:
+        _cyclic_dag().topological()
+    assert "a -> b -> a" in exc.value.message
+
+
+def test_a_self_edge_in_the_dag_prints_as_a_path_too():
+    with pytest.raises(PromptCraftError) as exc:
+        _self_edge_dag().topological()
+    assert "a -> a" in exc.value.message
+
+
+def test_both_producers_of_the_cycle_code_report_the_same_path():
+    """The finding's actual ask, stated as a comparison rather than as a string literal:
+    the same 2-cycle, entered through each of the two doors, must yield the same path.
+    Message wording is not the covered surface -- the code is -- so this pins the SHAPE
+    the two refusals share, which is what a reader compares when either one fires."""
+    with pytest.raises(PromptCraftError) as dag_exc:
+        _cyclic_dag().topological()
+    with pytest.raises(PromptCraftError) as contract_exc:
+        ResolvedContract(
+            id="c", level="character", lineage=["c"], identity_refs=[], must_not=[],
+            must_have=[
+                Atom(id="a", claim="a", check_type=CheckType.vqa, depends_on="b"),
+                Atom(id="b", claim="b", check_type=CheckType.vqa, depends_on="a"),
+            ],
+        )
+    assert dag_exc.value.code == contract_exc.value.code == "CONTRACT_CYCLIC_DEPENDS_ON"
+    marker = "has a depends_on cycle: "
+    assert dag_exc.value.message.split(marker)[-1] == contract_exc.value.message.split(marker)[-1]
+
+
 def test_a_cyclic_resolved_contract_never_gets_as_far_as_the_walk():
     """The real door for this defect. `pcraft validate` compiles the DAG but never walks it,
     so before the load-time refusal a cycle passed validate with "ok" and exit 0, and only

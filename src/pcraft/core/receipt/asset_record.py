@@ -217,12 +217,25 @@ def replay(
     only the version string is exactly the caller the older, weaker check was written for."""
     if thresholds_version is None and thresholds is not None:
         thresholds_version = thresholds.version
+    # --- F-154dd9b2. These four raise sites are ONE code and four different refusals, and all
+    # four used to pass no inline hint, so every one resolved DEFAULT_HINTS['STATE_REPLAY_DRIFT']
+    # -- whose LEAD remedy ("re-run replay with --thresholds pointed at the table the receipt
+    # names") is IMPOSSIBLE for the value-drift arm and IRRELEVANT for the two contract arms,
+    # which --thresholds cannot affect at all. The code stays one code: STABILITY.md says parse
+    # the code, not the prose. The prose stops being written for the arm the operator is least
+    # likely to hit, the way preflight.py already gives its three IO_GATE_INPUT sites three
+    # different hints. DEFAULT_HINTS keeps the generic text as the fallback.
+    #
+    # (a) VERSION drift -- the one arm the generic hint was actually written for, so it keeps it.
     if thresholds_version is not None and thresholds_version != record.thresholds_version:
         raise PromptCraftError(
             "STATE_REPLAY_DRIFT",
             f"threshold drift for {record.record_id}: the receipt was decided under table "
             f"{record.thresholds_version!r}, this run loaded {thresholds_version!r}. The same "
             f"scores can land in a different zone under a different table.",
+            hint=f"Two different tables. Re-run replay with --thresholds pointed at "
+            f"{record.thresholds_version!r}, the table this receipt names, or accept the retune "
+            f"and re-bind the asset under the table you loaded. Do not edit the receipt.",
         )
     if thresholds is not None and record.thresholds_fingerprint:
         # Absent fingerprint == a receipt written before the field existed; it keeps the older,
@@ -230,6 +243,10 @@ def replay(
         # the label says one table, the bands are a different one.
         live = thresholds.fingerprint()
         if live != record.thresholds_fingerprint:
+            # (b) VALUE drift. The refusal's whole premise is that BOTH tables call themselves
+            # the same version, so "point --thresholds at the table the receipt names" names the
+            # very file that just failed, and following it re-runs the identical command for the
+            # identical refusal. The two real recoveries appear nowhere in the generic text.
             raise PromptCraftError(
                 "STATE_REPLAY_DRIFT",
                 f"threshold VALUE drift for {record.record_id}: both this run and the receipt say "
@@ -237,16 +254,38 @@ def replay(
                 f"{record.thresholds_fingerprint}, this run {live}). Retuning bands is not a "
                 f"breaking change; retuning them without moving the version is a decision "
                 f"replayed under a table that is not the one it names.",
+                hint=f"Both tables call themselves {record.thresholds_version!r}, so --thresholds "
+                f"cannot point at a different one. Either restore the band values this receipt "
+                f"was decided under (its fingerprint is {record.thresholds_fingerprint}), or keep "
+                f"the retune, bump the table's version, and re-bind the asset.",
             )
-    if contract_hash(resolved) != record.contract_hash:
+    live_hash = contract_hash(resolved)
+    if live_hash != record.contract_hash:
+        # (c) CONTRACT-HASH drift, the most reachable arm of the four -- contracts are edited
+        # constantly and calibration tables almost never are. The whole message used to be
+        # "contract hash drift for <record_id>: the contract changed since this asset was bound":
+        # neither hash, no revision, not even the contract id, while the two threshold arms above
+        # print both sides. It was then handed a hint whose first move is about --thresholds, a
+        # flag that cannot affect this check at all.
         raise PromptCraftError(
             "STATE_REPLAY_DRIFT",
-            f"contract hash drift for {record.record_id}: the contract changed since this asset was bound",
+            f"contract hash drift for {record.record_id}: contract {record.contract_id!r} no "
+            f"longer hashes to what was bound (receipt {record.contract_hash}, this run "
+            f"{live_hash})",
+            hint="Restore the contract revision that was bound, or accept the edit and re-bind "
+            "the asset under it. --thresholds does not affect this check.",
         )
     rebuilt = compile_questions(resolved)
     if rebuilt.model_dump() != record.question_dag.model_dump():
+        # (d) DAG drift is reached only when the contract hash MATCHED and compile_questions
+        # still produced a different DAG, so the contract is not what changed -- the realistic
+        # cause is a prompt-craft VERSION change, which the generic hint never mentions.
         raise PromptCraftError(
             "STATE_REPLAY_DRIFT",
-            f"question DAG for {record.record_id} does not reproduce from the contract",
+            f"question DAG for {record.record_id} does not reproduce from contract "
+            f"{record.contract_id!r} (the contract hash matched, so the contract did not change)",
+            hint="The contract still hashes correctly, so this build compiles the same contract "
+            "into a different question DAG. That is a prompt-craft version change: re-bind under "
+            "this build, or read the receipt with the build that wrote it.",
         )
     return rebuilt

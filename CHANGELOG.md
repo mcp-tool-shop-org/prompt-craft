@@ -11,8 +11,43 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
-Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 72 findings fixed across
-three amend rounds (Stage A bug/security x2, Stage B proactive x1), suite 394 -> 724.
+Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 97 findings fixed across
+four amend rounds (Stage A bug/security x2, Stage B proactive, Stage C humanization),
+suite 394 -> 830.
+
+Stage C round (behavioral humanization — the bridge between "not broken" and "good to
+use"; the cross-family panel rated the whole board MEDIUM/LOW, and all of it was fixed):
+
+- **`pcraft bind` prints the receipt path it actually wrote** (persist() returns the
+  written path and the result carries it; the hardcoded `records/` line sent operators
+  to a file that did not exist, and the refusal they then hit blamed their reading);
+  `--json` carries `receipt_path`. The mock disclaimer prints only when the mock
+  generator actually ran — a real `--no-mock` run is no longer told its pixels were
+  scripted.
+- **The repair ladder rerolls with genuinely fresh seeds** (measured before: seven
+  attempts, five unique images, the last three identical at would-be GPU cost).
+- **Verdict lines carry their numbers and their claims**: band thresholds print beside
+  scores, PROBLEM atoms name the question they asserted (the compiled DAG now reaches
+  the renderer from both `gate` and `bind`), a multi-colour palette failure names which
+  expected colour was missing, and DSG localization detail reaches the transcript.
+- The contrastive escalation checkpoint is structured multi-line text with per-refusal
+  drift hints (value-drift's remedy is not contract-drift's); `GATE_FAIL`'s hint names
+  the next move when required atoms never scored.
+- **`scripts/mutate_predicates.py` gained argparse and a dirty-tree check**: `--help`
+  used to silently launch a twenty-cycle sweep that rewrites `src/` in place — the
+  red-proof of the fix reproduced exactly that hazard under a hard kill, against a copy.
+- Contract error aggregates render as numbered lines (a five-error contract was one
+  run-on string); a structurally different synth failure got its own code
+  (`SYNTH_EMPTY_PROMPT`) instead of reusing `SYNTH_COVERAGE_MISSING`; refusal voice
+  unified ("cannot apply", never internal jargon); install hints name the PyPI form,
+  not only the checkout-editable one.
+- verify.py failure lines say per leg what failed and what to do (the `-O` leg explains
+  bare-assert enforcement), with `::group::` markers for Actions logs; release.yml's two
+  bare checks got the spelled-out remedy style their sibling already had; unused
+  `pytest-cov` removed with an implication-shaped guard so re-adding it requires
+  actually invoking it.
+
+Earlier rounds follow.
 
 Stage B round (proactive lens — defensive depth, observability, degradation,
 future-proofing; three findings the cross-family panel promoted to CRITICAL):

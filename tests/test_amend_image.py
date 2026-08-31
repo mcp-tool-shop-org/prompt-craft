@@ -30,6 +30,7 @@ from pcraft.domains.image.generator.flux_generator import FluxGenerator
 from pcraft.domains.image.generator.sdxl_generator import SDXLGenerator
 from pcraft.domains.image.subdomains.sprite.identity_subgate import IdentitySubGate
 from pcraft.domains.image.verifier.dsg_verifier import DSGVerifier
+from pcraft.domains.image.verifier.palette_verifier import PaletteVerifier, Tier0Router
 from pcraft.domains.image.verifier.siglip2_screen import SigLIP2Screen
 from pcraft.domains.image.verifier.vqascore_verifier import DEFAULT_MODEL_ID, VQAScoreVerifier
 from pcraft.errors import PromptCraftError
@@ -889,6 +890,200 @@ def test_flux_method_reference_still_raises_cloud_submit(tmp_path):
         )
     assert exc.value.code == "GATE_CLOUD_SUBMIT"
     assert (out / "flux.kontext-stitch-crop-fill.v1.json").is_file()
+
+
+# ======================================================= wave 8 (health-amend-c) -- Stage C polish
+# Four observability/receipt findings and one wording fix, all inside this domain. Nothing here
+# moves a score, a band, or a zone: every assertion below is about what the operator can READ back
+# off an instrument that already computed the answer and then dropped it.
+
+
+def _palette_q(enum: list[str], atom_id: str = "palette") -> Question:
+    return Question(
+        atom_id=atom_id,
+        text="Does this image match the faction palette?",
+        check_type=CheckType.palette,
+        polarity=Polarity.affirm,
+        severity=Severity.required,
+        enum=enum,
+    )
+
+
+# --------------------------------------------------------------------------------- F-1675985a
+# PaletteVerifier.score computed `hits = [_presence(pixels, rgb) for rgb in colours]` and then
+# collapsed it into `round(sum(hits) / len(hits), 4)`, retaining nothing. On the shipped
+# example.faction.contract.json enum (`['#3a3a3a','#d9d4c8','#7a1f1f']`, hand-written) a 0.3333 FAIL
+# could equally mean "all three partially present" or "one present, two entirely absent" -- and the
+# reason string it renders through is the bare 'score 0.3333 -> FAIL (band palette)', naming no
+# colour. This is the ONE verifier in the domain with no model and no GPU, i.e. the one case where
+# an exact answer to "what is missing" is computable -- and it was computed, then discarded.
+
+
+def test_palette_names_which_colour_is_absent_not_only_the_mean(tmp_path):
+    ash = write_solid_png(tmp_path / "ash.png", (58, 58, 58))  # exactly #3a3a3a
+    v = PaletteVerifier()
+    score = v.score(str(ash), _palette_q(["#3a3a3a", "#d9d4c8", "#7a1f1f"]))
+    assert score == pytest.approx(0.3333)
+    breakdown = v.last_breakdown
+    assert breakdown is not None, "the per-colour hit vector is computed and then thrown away"
+    # Echoed as AUTHORED, for the same reason CONTRACT_PALETTE_ENUM_MIXED echoes the written
+    # members: the operator has to find these strings in the contract.
+    assert [entry["hex"] for entry in breakdown] == ["#3a3a3a", "#d9d4c8", "#7a1f1f"]
+    assert breakdown[0]["hit"] == pytest.approx(1.0)
+    assert breakdown[1]["hit"] == pytest.approx(0.0)
+    assert breakdown[2]["hit"] == pytest.approx(0.0)
+    detail = v.breakdown_detail()
+    assert detail is not None
+    assert "#d9d4c8" in detail and "#7a1f1f" in detail
+    assert "absent" in detail
+
+
+def test_the_palette_breakdown_leaves_the_aggregate_score_untouched(tmp_path):
+    """Band semantics must not move. The breakdown is an ADDITIONAL answer beside the mean, never
+    a second number: palette high=0.85/low=0.50 grades exactly what it graded before."""
+    ash = write_solid_png(tmp_path / "ash.png", (58, 58, 58))
+    q = _palette_q(["#3a3a3a", "#d9d4c8", "#7a1f1f"])
+    assert PaletteVerifier().score(str(ash), q) == pytest.approx(0.3333)
+    blood = write_solid_png(tmp_path / "blood.png", (122, 31, 31))  # exactly #7a1f1f
+    only = PaletteVerifier()
+    assert only.score(str(blood), _palette_q(["#7a1f1f"])) == pytest.approx(1.0)
+    assert "absent" not in (only.breakdown_detail() or "")
+
+
+def test_the_router_never_reports_a_stale_palette_breakdown(tmp_path):
+    """last_delegate's own lesson (F-64b4f422): a value left over from the PREVIOUS atom is worse
+    than no value. A siglip2 atom never touches the histogram, so the router must not still be
+    holding the colours of the palette atom before it."""
+    ash = write_solid_png(tmp_path / "ash.png", (58, 58, 58))
+    router = Tier0Router()
+    router.score(str(ash), _palette_q(["#3a3a3a", "#7a1f1f"]))
+    assert router.last_breakdown is not None
+    router.score(str(ash), _question(CheckType.siglip2))
+    assert router.last_breakdown is None
+    assert router.score_detail() is None
+
+
+# --------------------------------------------------------------------------------- F-1d5992bd
+# The palette verifier's own RUNTIME_VERIFIER_CALL_FAILED carried no inline hint, unlike its three
+# model-backed siblings (VQAScoreVerifier.score, SigLIP2Screen.score, DSGVerifier._ask), whose hints
+# all name "CUDA OOM mid-run". This is the one Tier-0 delegate whose module docstring opens "No
+# model, no GPU", so that wording is not merely unhelpful here, it is wrong.
+
+
+def test_the_palette_read_failure_hint_does_not_blame_a_gpu_it_does_not_have(tmp_path):
+    v = PaletteVerifier()
+    with pytest.raises(PromptCraftError) as exc:
+        v.score(str(tmp_path / "gone.png"), _palette_q(["#3a3a3a"]))
+    assert exc.value.code == "RUNTIME_VERIFIER_CALL_FAILED"
+    hint = exc.value.hint or ""
+    assert hint, "the one raise in this verifier family with no inline hint"
+    assert "no gpu" in hint.lower()
+    assert "cuda oom mid-run" not in hint.lower()  # the model-backed siblings' words, wrong here
+
+
+# --------------------------------------------------------------------------------- F-60b76831
+# SDXL's receipt said which identity locks FIRED and nothing at all about the ones that did not. A
+# method=none ref -- a documented skip (conditioning._SKIP_METHODS) -- simply never appeared in any
+# applied[...] sub-list, so an operator had to diff the request against the result by hand and still
+# could not tell an intentional skip from a bug. Both siblings in this file family already answer
+# this: flux_generator stamps applied["negative_prompt"] = {requested, applied: False, reason} and
+# kontext_fill.RecipeReport carries identity_unchosen.
+
+
+def test_sdxl_receipt_names_the_identity_lock_it_skipped(monkeypatch, tmp_path):
+    """The untested shape: one method=none ref MIXED with a ref that does apply."""
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    _install_fake_diffusers(monkeypatch, pipeline_attr="StableDiffusionXLPipeline")
+    _install_fake_pil(monkeypatch)
+    plate = write_solid_png(tmp_path / "face.png")
+    ghost = tmp_path / "inherited.png"  # never resolved: bind_refs does not touch a skip method
+    result = SDXLGenerator(out_dir=tmp_path / "out").generate(
+        "p",
+        "n",
+        {
+            "identity_refs": [
+                {"plate": str(ghost), "method": "none", "scope": "face"},
+                {"plate": str(plate), "method": "ip_adapter", "scope": "face"},
+            ]
+        },
+        seed=5,
+    )
+    applied = result.conditioning["applied"]
+    assert [entry["plate"] for entry in applied["ip_adapter"]] == [str(plate)]
+    skipped = applied["identity_skipped"]
+    assert [entry["plate"] for entry in skipped] == [str(ghost)]
+    assert skipped[0]["method"] == "none"
+    assert skipped[0]["applied"] is False
+    assert "none" in skipped[0]["reason"]
+
+
+def test_sdxl_stamps_an_empty_skip_list_when_every_lock_applied(monkeypatch, tmp_path):
+    """The field is always present, like its pose/ip_adapter/lora/instantid siblings in the same
+    dict -- absence of a key is exactly the silence this fix removes."""
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    _install_fake_diffusers(monkeypatch, pipeline_attr="StableDiffusionXLPipeline")
+    _install_fake_pil(monkeypatch)
+    plate = write_solid_png(tmp_path / "face.png")
+    result = SDXLGenerator(out_dir=tmp_path / "out").generate(
+        "p",
+        "n",
+        {"identity_refs": [{"plate": str(plate), "method": "ip_adapter", "scope": "face"}]},
+        seed=6,
+    )
+    assert result.conditioning["applied"]["identity_skipped"] == []
+
+
+# --------------------------------------------------------------------------------- F-65fe58d5
+# DSGVerifier.score builds the full entity/attribute/relation trail on every call and parks it on
+# last_expansion -- and a grep of the worktree showed the ONLY readers anywhere were this suite.
+# Same shape as F-64b4f422 on the router's last_delegate: a field that looks live, with tests
+# asserting the field rather than the behaviour.
+
+
+def test_dsg_can_say_which_probe_went_na_not_only_the_mean(monkeypatch):
+    class _Answerer:
+        def __init__(self, model=None):
+            pass
+
+        def __call__(self, images, texts):
+            # entity absent -> its dependents are N/A, which is the localization DSG exists for
+            return [[0.10]] if "tabard" in texts[0] else [[0.99]]
+
+    _install_fake_t2v_metrics(monkeypatch, _Answerer)
+    v = DSGVerifier()
+    assert v.score("x.png", _question()) is not None
+    summary = v.expansion_summary()
+    assert summary, "last_expansion still has no reader in src/"
+    assert {row["kind"] for row in summary} >= {"entity", "attribute"}
+    na = [row for row in summary if row["score"] is None]
+    assert na, "the attribute probe goes N/A when the entity is absent"
+    detail = v.localization_detail()
+    assert detail is not None
+    assert na[0]["id"] in detail
+
+
+def test_dsg_has_nothing_to_localize_before_it_has_scored():
+    assert DSGVerifier().expansion_summary() == []
+    assert DSGVerifier().localization_detail() is None
+
+
+# --------------------------------------------------------------------------------- F-de4136eb
+# reference_lock's refusal said "cannot bucket identity method(s)" -- this module's own internal
+# vocabulary -- for what is, from the operator's side, the identical authoring mistake that
+# conditioning.refuse_unimplemented_identity reports as "{who} cannot apply identity method(s)".
+
+
+def test_reference_lock_refuses_in_the_operators_words_not_its_own_buckets(tmp_path):
+    from pcraft.domains.image.generator.reference_lock import RECIPE_GENERATOR_ID, assemble
+
+    plate = write_solid_png(tmp_path / "face.png")
+    with pytest.raises(PromptCraftError) as exc:
+        assemble({"identity_refs": [{"plate": str(plate), "method": "pulid", "scope": "face"}]})
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "cannot apply" in exc.value.message
+    assert "bucket" not in exc.value.message
+    assert RECIPE_GENERATOR_ID in exc.value.message  # the same door FluxGenerator guards
+    assert "pulid" in exc.value.message
 
 
 # =========================== F-a6acaab1 -- user-facing text in this domain must survive cp437

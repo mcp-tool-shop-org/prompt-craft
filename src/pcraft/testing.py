@@ -11,10 +11,34 @@ import struct
 import zlib
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from .core.contract.compile_questions import Polarity, Question
 from .core.gate.verifier_iface import Verifier
 from .core.loop.generator_iface import GenerationResult
+
+MOCK_ID_PREFIXES: Final[tuple[str, ...]] = ("stub.", "scripted.")
+"""Identifier prefixes reserved for the mocks in this module. Every id below starts with one.
+
+This exists so "was this run the GPU-free scaffold?" has ONE answer, owned by the module that
+defines the scaffold, instead of being re-derived by each reader. The CLI's mock disclaimer was
+printed unconditionally and therefore told a real ``bind --no-mock`` run that its scores were
+scripted constants (F-b1b8fd21); the fix keys on the ``generator_id`` the receipt stamps, and
+that question belongs here rather than in the CLI -- the CLI does not decide what a mock is.
+
+Prefixes rather than an exact set because ``ScriptedVerifier`` takes its ``verifier_id`` as a
+constructor argument: a caller can name a scripted verifier anything, and an enumeration would
+answer "not a mock" for every one it had not been told about -- failing in the direction that
+lets a fake pass read as real."""
+
+
+def is_mock_identity(identifier: str) -> bool:
+    """Whether a generator/verifier id stamped into a receipt names one of this module's mocks.
+
+    Accepts the bare id (``stub.sdxl.v0``) and the ``id@version`` form the receipt uses for
+    ``verifier_ids`` (``scripted.vqa.v0@v0``); the version is trimmed before the test.
+    """
+    return identifier.split("@", 1)[0].startswith(MOCK_ID_PREFIXES)
 
 
 def write_solid_png(path: str | Path, rgb: tuple[int, int, int] = (58, 58, 58), size: int = 64) -> Path:

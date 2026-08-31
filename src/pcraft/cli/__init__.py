@@ -239,8 +239,14 @@ def _say(text: str, *, as_json: bool = False) -> None:
     typer.echo(_encodable(text, sys.stderr if as_json else sys.stdout), err=as_json)
 
 
-def _emit_model(model: BaseModel) -> None:
+def _emit_model(model: BaseModel, **extra: Any) -> None:
     """The ``--json`` document, escaped to pure ASCII.
+
+    ``extra`` carries ADDITIVE keys the CLI knows and the model does not -- today only
+    ``receipt_path`` (F-5b783e17), which is a property of the invocation (``--records-dir``
+    plus what ``persist`` actually wrote) rather than of the orchestration result. A key with
+    nothing to say is OMITTED rather than emitted as ``null``: ``null`` reads as "there is a
+    receipt path and it is empty", which is the opposite of "no receipt was written".
 
     ``model_dump_json`` emits raw UTF-8, which is only writable when the console agrees.
     Re-serialising the value pydantic produced with ``ensure_ascii`` makes the document
@@ -253,7 +259,23 @@ def _emit_model(model: BaseModel) -> None:
     so pydantic's own serialisers stay the authority on what the value IS; only the encoding
     of that value changes here.
     """
-    typer.echo(json.dumps(json.loads(model.model_dump_json()), indent=2, ensure_ascii=True))
+    doc = json.loads(model.model_dump_json())
+    doc.update({key: value for key, value in extra.items() if value is not None})
+    typer.echo(json.dumps(doc, indent=2, ensure_ascii=True))
+
+
+_DEBUG_HELP = (
+    "Print the full traceback and the validator's complete report instead of the one-line refusal."
+)
+"""One shared string for the flag every command offers (F-339753d3).
+
+``--debug`` was declared as a bare ``typer.Option(False)`` on all twelve commands, so each help
+page rendered ``--debug --no-debug [default: no-debug]`` with no description -- while the CLI's
+own refusals actively send users here: the aggregated CONTRACT_INVALID message truncates itself
+with "(+1 more, see --debug)" and its hint reads "Re-run with --debug for pydantic's full
+report". The one flag the errors tell you to reach for was the one flag --help declined to
+explain. Shared rather than copied twelve times so the pages cannot drift apart the way
+``--contract`` did (documented on synth/validate/recipe, blank on gate/bind)."""
 
 
 class ListedContract(BaseModel):
@@ -315,7 +337,7 @@ def synth(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     as_json: bool = typer.Option(False, "--json", help="emit SynthResult as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Synthesize a prompt from a contract (deterministic template synthesizer)."""
     from ..core.synth.signature import TemplateSynthesizer
@@ -345,7 +367,7 @@ def synth(
 @app.command()
 def gate(
     image: Path = typer.Argument(..., help="rendered image to gate"),
-    contract: str = typer.Option("char:ashen-reaver"),
+    contract: str = typer.Option("char:ashen-reaver", help="contract id whose atoms the gate blocks on"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     generator_family: str = typer.Option(
@@ -354,10 +376,20 @@ def gate(
         "(defaults to the registered image domain's own generator.family)",
     ),
     as_json: bool = typer.Option(False, "--json", help="emit GateTranscript as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Run the contract gate. Missing path, unreadable file, and 'no verifier
-    could score' are refuses (nonzero exit). SKIPPED atoms are not a pass."""
+    """Run the contract gate on an image you already have. SKIPPED atoms are not a pass.
+
+    Exit codes:
+    0 every required atom passed.
+    1 the contract is unusable (no required atom, or a bad --contracts-dir).
+    2 a required atom failed.
+    3 a required atom was scored but the roll-up is UNCERTAIN.
+    4 could not run: missing or unreadable image, or no verifier could score.
+    4 is never folded into 2 -- could-not-check is not checked-clean, and a CI
+    branch that merges them reads "the gate ran and failed" for a gate that
+    never ran.
+    """
     import pcraft.domains.image  # noqa: F401  (registers the plugin)
 
     from ..core.contract.compile_questions import compile_questions
@@ -378,7 +410,7 @@ def gate(
         verifiers = plugin.verifiers()
         family = generator_family or plugin.generator().family
         transcript = harness.evaluate(dag, str(image), verifiers, table, generator_family=family)
-        _say(format_transcript(transcript), as_json=as_json)
+        _say(format_transcript(transcript, dag=dag), as_json=as_json)
         if as_json:
             _emit_model(transcript)
         err = error_from_transcript(transcript)
@@ -394,15 +426,26 @@ def gate(
 
 @app.command()
 def bind(
-    contract: str = typer.Option("char:ashen-reaver"),
+    contract: str = typer.Option("char:ashen-reaver", help="contract id to synthesize, gate and bind"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     mock: bool = typer.Option(True, help="use deterministic stubs (GPU-free); the default scaffold path"),
-    records_dir: str = typer.Option("records"),
+    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it"),
     as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Run the full synth->generate->gate->retry->bind loop and report the decision."""
+    """Run the full synth->generate->gate->retry->bind loop and report the decision.
+
+    Exit codes:
+    0 bound.
+    1 the contract is unusable.
+    2 a required atom failed.
+    3 a required atom was scored but the roll-up is UNCERTAIN.
+    4 the loop could not run and nothing was scored.
+    2 means the gate ran and refused; 4 means there is no verdict to read.
+    The last line names the receipt it wrote, inside --records-dir; run
+    `pcraft replay` on exactly that path to re-check it.
+    """
     from ..sample import run_live_loop, run_mock_loop
 
     try:
@@ -419,8 +462,9 @@ def bind(
                 contract_id=contract,
                 contracts_dirs=contracts_dir or None,
                 thresholds=thresholds,
+                on_attempt=_announce_attempt,
             )
-        _print_result(result, as_json=as_json)
+        _print_result(result, records_dir=records_dir, as_json=as_json)
         # Replaces a blanket `raise typer.Exit(code=3)`: every non-bound decision reported 3
         # regardless of cause, so "could not run at all" and "ran, unconfirmed" were the same
         # number to a caller -- the merge the four-way contract exists to prevent.
@@ -437,7 +481,7 @@ def bind(
 def list_contracts(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     as_json: bool = typer.Option(False, "--json", help="emit StoreListing as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """List contract ids in the store."""
     from ..sample import load_store
@@ -466,7 +510,7 @@ def validate(
     contract: str = typer.Option("char:ashen-reaver", help="contract id to lint and resolve"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     as_json: bool = typer.Option(False, "--json", help="emit ValidateReport as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Resolve a contract and compile its question DAG. No generate, no gate."""
     from ..core.contract.compile_questions import compile_questions
@@ -501,9 +545,9 @@ def validate(
 
 @app.command()
 def demo(
-    records_dir: str = typer.Option("records"),
+    records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it"),
     as_json: bool = typer.Option(False, "--json", help="emit OrchestrationResult as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """End-to-end sample run on the generic example contract (GPU-free)."""
     from ..sample import load_sprite_example, run_mock_loop
@@ -515,7 +559,7 @@ def demo(
         _say(f"must_not: {[m.id for m in resolved.must_not]}", as_json=as_json)
         _say("", as_json=as_json)
         result = run_mock_loop(records_dir=records_dir)
-        _print_result(result, as_json=as_json)
+        _print_result(result, records_dir=records_dir, as_json=as_json)
         _exit_from_result(result, debug)
     except PromptCraftError as err:
         _emit(err, debug)
@@ -527,14 +571,23 @@ def demo(
 
 @app.command()
 def replay(
-    record: Path = typer.Argument(...),
+    record: Path = typer.Argument(..., help="receipt JSON to replay -- the path `pcraft bind` printed"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON to check the receipt against; default: shipped sprite calibration"),
     skip_threshold_check: bool = typer.Option(False, "--skip-threshold-check", help="replay without comparing the threshold table (states that you have no table to compare, rather than hiding that you did not look)"),
     as_json: bool = typer.Option(False, "--json", help="emit AssetRecord as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Replay a receipt: reconstruct its question DAG from the contract and assert no drift."""
+    """Replay a receipt: reconstruct its question DAG from the contract and assert no drift.
+
+    Exit codes:
+    0 the receipt reproduces.
+    1 it was written by a NEWER prompt-craft than this one -- upgrade, do not
+    re-bind.
+    2 it drifted, is unreadable, or is not a receipt.
+    Nothing is generated and nothing is scored here, so exit 4 (could-not-run)
+    cannot occur. RECORD is the path `pcraft bind` printed.
+    """
     from ..core.gate.thresholds import load_thresholds
     from ..core.receipt.asset_record import load
     from ..core.receipt.asset_record import replay as do_replay
@@ -576,7 +629,7 @@ def doctor(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
     as_json: bool = typer.Option(False, "--json", help="emit DoctorReport as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Check python, optional extras, and that the contract store loads. GPU-free."""
     try:
@@ -685,7 +738,7 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
 @app.command(name="schema")
 def schema_cmd(
     out: Path | None = typer.Option(None, "--out", help="write the JSON Schema here; default stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Emit JSON Schema for the authoring contract. No generate, no gate."""
     from ..core.contract.schema import export_json_schema
@@ -762,7 +815,7 @@ def recipe(
         "split on the LAST '=', so a local filename may contain one)",
     ),
     as_json: bool = typer.Option(False, "--json", help="emit RecipeReport as JSON on stdout"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Write the Cloud Kontext stitch + left crop + fist-only Fill graph. Does not submit."""
     from ..core.loop.orchestrate import _assemble_conditioning
@@ -809,7 +862,7 @@ def recipe(
 @app.command()
 def compile(  # noqa: A001 - the verb is the command name
     seed: bool = typer.Option(False, help="(re)write the scaffold SEED artifact"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Offline synthesizer compile (GEPA). Heavy + Director-gated -- not on a per-asset path."""
     try:
@@ -847,7 +900,7 @@ def compile(  # noqa: A001 - the verb is the command name
 @app.command(name="sync-rules")
 def sync_rules(
     db: Path = typer.Option(None, help="path to the readouts sprites-knowledge recipes.db"),
-    debug: bool = typer.Option(False),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
     """Regenerate domains/image/rules/encoder_craft.md from the readouts prompt-craft lane."""
     # The one command body that used to run unguarded. Only SystemExit was caught, which
@@ -925,24 +978,109 @@ def _exit_from_result(result, debug: bool) -> None:
     )
 
 
-def _print_result(result, *, as_json: bool = False) -> None:
+def _announce_attempt(attempt: int, seed: int, state: str, detail: str = "") -> None:
+    """One progress line per generate, on stderr, while it is still useful (F-710c9599).
+
+    ``bind`` printed nothing whatsoever between invocation and final verdict, and the loop it
+    drives can run many generate-and-verify cycles inside that silence -- MEASURED with the
+    generator slowed, a single failing bind drove the repair ladder to seven attempts and
+    emitted zero bytes before returning. Nothing in the report is incremental: the whole
+    attempt table is reconstructed by ``_print_result`` after the fact. On live hardware each
+    attempt is a real generation plus a full verifier pass, so ``bind --no-mock`` is minutes of
+    silence on this product's one spend path, during which an operator cannot distinguish
+    "working through attempt 5" from "hung on a model load" -- and the natural answer to that
+    ambiguity is Ctrl-C, which the CLI handles correctly (exit 130) and which discards the work
+    regardless.
+
+    ``as_json=True`` unconditionally: that is this file's existing routing for non-document
+    output, so stdout stays a clean parseable document for --json callers and the lines are
+    still there for everyone else. No logger and no levels -- the declined framing is not
+    reopened. Only the live path passes this callback in; the mock path is fast enough that
+    silence costs nothing, and chattering there would be a regression for the command the test
+    suite calls most.
+    """
+    _say(f"[attempt {attempt}] seed={seed} {state}{detail}", as_json=True)
+
+
+def _receipt_path(result, records_dir: str | Path) -> Path | None:
+    """Where the receipt for this run actually landed. ``None`` when none was written.
+
+    This line used to be built from the literal prefix ``records/`` while both commands that
+    print it accept ``--records-dir``, so every non-default value was misreported (F-5b783e17).
+    MEASURED through a real subprocess: ``bind --records-dir out/receipts`` wrote
+    ``out/receipts/char_...json`` and printed ``receipt: records/char_...json``; feeding the
+    printed path to ``replay`` -- the documented next command -- refused ``IO_RECORD_READ`` at
+    exit 2, and THAT refusal's hint reads "pcraft bind prints the path it wrote", which sends
+    the operator back to the line that misreported it. The recovery loop was closed, not open.
+
+    ``getattr`` rather than a plain attribute read: ``persist()`` already returns the Path it
+    wrote and the loop is growing a field to hand that back, but the fallback is not a
+    placeholder -- ``persist`` derives the filename as ``Path(records_dir) / f"{record_id}.json"``
+    and refuses to overwrite, so reconstructing it here is exact for every path this CLI can
+    take. Preferring the written value when it exists means the two can never drift; deriving
+    it when it does not means this fix does not wait on a sibling landing.
+    """
+    if result.record is None:
+        return None
+    written = getattr(result, "receipt_path", None) or getattr(result, "record_path", None)
+    return Path(written) if written else Path(records_dir) / f"{result.record.record_id}.json"
+
+
+def _ran_mock(result) -> bool | None:
+    """Whether the GPU-free stub produced these pixels. ``None`` when nothing was generated.
+
+    Keyed on the generator identity the RECEIPT stamps, never on the ``--mock`` flag
+    (F-b1b8fd21). The flag is a request; ``generator_id`` is what actually ran, and it is the
+    only one of the two that cannot be wrong. The unconditional banner this replaces printed
+    "scores are scripted constants; the image pixels were not read" above a real ``--no-mock``
+    BOUND verdict -- the exact inverse of the defect the line was added for, and permanent in
+    any CI log archived from that run.
+
+    ``None`` (no record) prints no banner in either direction, and that is the honest answer
+    rather than a gap: a run that produced no record produced no scores, so there is nothing
+    to disclaim and nothing to vouch for. ``Attempt`` rows carry no generator id, so the
+    record is the only evidence available here.
+    """
+    if result.record is None:
+        return None
+    from ..testing import is_mock_identity
+
+    return is_mock_identity(result.record.generator_id)
+
+
+def _print_result(result, *, records_dir: str | Path = "records", as_json: bool = False) -> None:
     # CLI-C-001: demo/bind --mock used to print BOUND + a wall of [PASS] 0.950
-    # with no indication the scores never touched pixels.
-    _say("mock: scores are scripted constants; the image pixels were not read.", as_json=as_json)
+    # with no indication the scores never touched pixels. F-b1b8fd21: and then printed the
+    # same line on the live path, which is the same conflation running the other way. The
+    # live case is marked POSITIVELY -- an absent disclaimer is easy to misread as a stripped
+    # banner, whereas a claim in the affirmative is something a reader can check.
+    mock = _ran_mock(result)
+    if mock is True:
+        _say("mock: scores are scripted constants; the image pixels were not read.", as_json=as_json)
+    elif mock is False:
+        _say("live: scores came from the [image] verifiers reading this image.", as_json=as_json)
     _say(f"decision: {result.decision.upper()}  ({result.reason})", as_json=as_json)
     _say(f"attempts: {len(result.attempts)}", as_json=as_json)
     for a in result.attempts:
         extra = f" repair={a.repair.value}" if a.repair else ""
         _say(f"  #{a.attempt} seed={a.seed} -> {a.overall.value} ({a.verdict.value}){extra}", as_json=as_json)
+    receipt = _receipt_path(result, records_dir)
     if result.record is not None:
         _say("", as_json=as_json)
-        _say(format_transcript(result.record.gate_transcript), as_json=as_json)
         _say(
-            f"receipt: records/{result.record.record_id}.json  hash={result.record.contract_hash[:19]}...",
+            format_transcript(result.record.gate_transcript, dag=result.record.question_dag),
+            as_json=as_json,
+        )
+        _say(
+            f"receipt: {receipt}  hash={result.record.contract_hash[:19]}...",
             as_json=as_json,
         )
     if as_json:
-        _emit_model(result)
+        # Additive, and omitted when there is no receipt. The document already carried
+        # `record.record_id` and `record.image_path` but never said where the receipt itself
+        # landed, so a machine caller had to rejoin record_id with the flag it passed --
+        # reimplementing the exact line that was wrong.
+        _emit_model(result, receipt_path=None if receipt is None else str(receipt))
 
 
 if __name__ == "__main__":

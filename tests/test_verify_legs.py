@@ -14,6 +14,15 @@ gate must be wired to something that runs.
 
 So this reads verify.py's own call graph rather than matching strings, and generalizes --
 add ``[tool.bandit]`` to pyproject without a leg and this fails.
+
+The file has since grown two more sections, and they belong here for one reason: this is
+where the repo pins the behaviour of its OWN gate tooling, as opposed to the behaviour of
+the package. The gate is not only verify.py. It is also release.yml's refusals (the last
+thing an operator reads before an irreversible publish) and scripts/mutate_predicates.py
+(which rewrites tracked source files in place, and until it grew a consent flag did so on
+any invocation, ``--help`` included). Both sections say in their own docstrings exactly how
+much they prove, because two of them read the file as text and text is easy to over-claim
+from.
 """
 
 from __future__ import annotations
@@ -21,6 +30,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import os
+import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -30,6 +41,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 VERIFY = ROOT / "verify.py"
 PYPROJECT = ROOT / "pyproject.toml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+MUTATE = ROOT / "scripts" / "mutate_predicates.py"
 
 # `[tool.X]` tables that are quality GATES (a tool that can fail a build), mapped to the
 # module verify.py runs. Config-only tables (tool.pytest.ini_options, tool.hatch,
@@ -154,6 +167,28 @@ def test_each_configured_gate_tool_is_a_verify_leg(tool: str):
     assert GATE_TOOLS[tool] in invoked, (
         f"[tool.{tool}] is configured in pyproject but verify.py never invokes it. "
         f"A gate nothing runs cannot fail -- wire it as a _run leg or drop the config."
+    )
+
+
+def test_coverage_tooling_is_declared_only_if_something_invokes_it():
+    """``pytest-cov>=5.0`` sat in the ``dev`` extra with no ``--cov`` anywhere in the tree.
+
+    The same "configured but invoked by nothing" shape as ``[tool.mypy]``, landing on a
+    dependency instead of a tool table -- so nothing read as a false-green gate, but every
+    ``pip install -e ".[dev]"`` still paid install time for a plugin that measured nothing.
+    It was removed rather than wired up, because ``--cov`` with no threshold is a number
+    nobody agreed to. Written as an implication rather than as "must be absent": bring the
+    dependency back in the same commit as the leg that uses it and this passes.
+    """
+    dev = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]["dev"]
+    declared = any(req.startswith("pytest-cov") for req in dev)
+    invoked = "--cov" in VERIFY.read_text(encoding="utf-8")
+    assert not (declared and not invoked), (
+        "pytest-cov is in the [dev] extra but verify.py never passes --cov, so every "
+        "contributor installs a plugin that measures nothing and gates nothing. Wire it to "
+        "the suite leg or drop the dependency."
     )
 
 
@@ -347,6 +382,86 @@ def test_a_failing_leg_is_not_recorded_as_checked():
     with pytest.raises(SystemExit):
         verify._run("boom", [sys.executable, "-c", "raise SystemExit(3)"], dict(os.environ), ran)
     assert ran == [], f"a failed leg was recorded as checked: {ran}"
+
+
+def _fail_leg(verify, label: str) -> str:
+    """Run a guaranteed-failing leg under ``label`` and return the refusal text."""
+    ran: list[str] = []
+    with pytest.raises(SystemExit) as excinfo:
+        verify._run(label, [sys.executable, "-c", "raise SystemExit(1)"], dict(os.environ), ran)
+    return str(excinfo.value)
+
+
+def test_every_leg_carries_its_own_failure_guidance():
+    """One template for five legs is true of all of them and diagnostic for none.
+
+    Read from the call graph rather than from the hint table, so the direction of the
+    check is right: adding a sixth leg without a hint fails here, while a hint for a leg
+    that no longer exists does not. Reachability again -- the same reason
+    ``_each_configured_gate_tool_is_a_verify_leg`` reads pyproject and not verify.py.
+    """
+    verify = _load_verify()
+    for label in _verify_legs():
+        assert label in verify._LEG_HINTS, (
+            f"the {label!r} leg falls through to the shared 'VERIFY FAIL: {label} exited N' "
+            f"template, which says what happened and nothing about what to do next"
+        )
+
+
+def test_the_optimized_leg_failure_sends_the_fix_to_src_not_to_the_test():
+    """The one leg whose failure means something different from every other leg.
+
+    ``suite under -O`` fails when application code enforces an invariant with a bare
+    ``assert``, which -O strips. A contributor reading the shared template right after the
+    plain ``suite`` leg passed concludes "a test regressed" and goes to tests/ -- the wrong
+    file. This is that reasoning, which already lived in this file's own docstrings, moved
+    to where it is read at the moment it matters.
+    """
+    message = _fail_leg(_load_verify(), "suite under -O")
+    assert "assert" in message, "the -O refusal never names the bare assert it exists to catch"
+    assert "raise" in message, "the -O refusal never names the replacement (an explicit raise)"
+    assert "src/" in message, "the -O refusal does not say which tree the fix belongs in"
+
+
+def test_a_leg_with_no_hint_still_refuses_cleanly():
+    """The hint table is an addition, not a dependency -- an unknown label must still halt."""
+    message = _fail_leg(_load_verify(), "boom")
+    assert message.startswith("VERIFY FAIL: boom exited 1")
+
+
+def test_legs_are_collapsible_in_actions_logs(capsys, monkeypatch):
+    """ci.yml runs all five legs as ONE step, so the reader gets one flat log without these.
+
+    Only the framing is asserted. What each child process prints is its own business and
+    is deliberately left uncaptured; this pins that the markers wrap it.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    verify = _load_verify()
+    ran: list[str] = []
+    verify._run("noop", [sys.executable, "-c", ""], dict(os.environ), ran)
+    out = capsys.readouterr().out
+    assert "::group::noop" in out and "::endgroup::" in out
+    assert out.index("::group::noop") < out.index("-- noop:"), (
+        "the leg header prints outside its own group, so the collapsed group is unlabelled"
+    )
+
+
+def test_a_failing_leg_still_closes_its_log_group(capsys, monkeypatch):
+    """An unclosed group swallows every later leg into the failing one's collapsed block."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    _fail_leg(_load_verify(), "boom")
+    out = capsys.readouterr().out
+    assert out.count("::group::") == out.count("::endgroup::") == 1
+
+
+def test_local_runs_print_no_actions_markers(capsys, monkeypatch):
+    """Outside Actions the markers are noise, so the local run reads exactly as before."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    verify = _load_verify()
+    ran: list[str] = []
+    verify._run("noop", [sys.executable, "-c", ""], dict(os.environ), ran)
+    out = capsys.readouterr().out
+    assert "::group::" not in out and "::endgroup::" not in out
 # A pip-audit report with one of every case that matters, in the real JSON shape:
 # a clean dep, an advisory with no published fix, an advisory with one (emitted TWICE,
 # as pip-audit really does), and a distribution it could not audit at all. Skipped
@@ -485,3 +600,224 @@ def test_the_gate_checks_the_file_that_defines_the_gate():
     assert "verify.py" in legs["typecheck"], (
         "the typecheck leg does not check verify.py"
     )
+
+
+# --- release.yml's refusals -------------------------------------------------------------
+#
+# HONESTY NOTE, because a test over a workflow file can read far stronger than it is.
+# Everything below reads release.yml as TEXT. It does not parse the YAML (no parser ships
+# in the [dev] extra), it does not execute the workflow, it does not reach GitHub, and it
+# cannot show that the step runs, that the shell substitutes what these messages assume, or
+# that any of this was ever printed on a real runner. Static validation only, and no run of
+# release.yml was performed for this change.
+#
+# What it does pin is the thing that was actually wrong: two of the three refusals in the
+# version-check step were bare value dumps. That step fires inside the one workflow holding
+# live OIDC publish credentials, typically after a human approval has already been spent,
+# so the message an operator reads at that moment is the whole remedy they get.
+
+_ERROR_LINE = re.compile(r'::error::(.+?)"')
+_REMEDY_MIN = 40
+
+
+def _release_refusals() -> list[str]:
+    """Every ``::error::`` message in release.yml, as text."""
+    return _ERROR_LINE.findall(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _remedy(msg: str) -> str:
+    """The part of a refusal that says what to DO, split off the part that says what broke.
+
+    Two conventions are live in this file and both are fine: a `` -- `` clause (the npm and
+    tag checks) and a second sentence (the ref-type check). What is not fine is a bare
+    mismatch with neither, which is what two of these three were.
+    """
+    _head, sep, tail = msg.partition(" -- ")
+    if sep:
+        return tail.strip()
+    _first, dot, rest = msg.partition(". ")
+    return rest.strip() if dot else ""
+
+
+def test_every_release_refusal_spells_out_the_next_move():
+    """A value dump is not guidance, and here it is the last guidance anyone gets."""
+    refusals = _release_refusals()
+    assert len(refusals) >= 3, (
+        f"expected the version-check step's three refusals, found {len(refusals)} -- the "
+        f"step's shape changed and this test is no longer reading it"
+    )
+    for msg in refusals:
+        remedy = _remedy(msg)
+        assert len(remedy) >= _REMEDY_MIN, (
+            f"this refusal states a mismatch and stops there: {msg!r}. Its sibling three "
+            f"lines away names the exact corrective action; say what to do next here too."
+        )
+
+
+def test_the_tag_mismatch_refusal_warns_against_moving_the_tag():
+    """The sharpest of the three, because the obvious corrective action is the wrong one.
+
+    A GitHub Release may already point at this tag, so retagging in place silently changes
+    what that release refers to. This is the case the step's own 25-line comment block
+    spends its length explaining is still reachable -- 'a tag cut before a version-bump
+    commit, or a hotfix tag based on an older commit'.
+    """
+    tag_refusals = [m for m in _release_refusals() if m.startswith("tag ")]
+    assert len(tag_refusals) == 1, f"expected one tag-mismatch refusal, found {tag_refusals}"
+    lowered = tag_refusals[0].lower()
+    assert "force-push" in lowered or "force push" in lowered, (
+        "the refusal does not warn against the move an operator reaches for first"
+    )
+    assert "re-tag" in lowered or "cut a new" in lowered, (
+        "the refusal warns against the wrong move without naming a right one"
+    )
+
+
+def test_the_manifest_mismatch_refusal_names_the_cheap_fix():
+    """pyproject vs npm is the recoverable one, and saying so is most of the guidance."""
+    npm_refusals = [m for m in _release_refusals() if m.startswith("pyproject ")]
+    assert len(npm_refusals) == 1, f"expected one manifest refusal, found {npm_refusals}"
+    lowered = npm_refusals[0].lower()
+    assert "bump" in lowered, "the refusal does not name the fix (bump the lagging file)"
+    assert "tag" in lowered, "the refusal does not say a new tag is needed after the bump"
+
+
+# --- scripts/mutate_predicates.py, and consent ------------------------------------------
+#
+# This script rewrites tracked files under src/pcraft/core/ in place. That is its job and
+# it stays -- a mutant has to be real for the suite to have any chance of catching it. What
+# it lacked was consent: it read no argv at all, so `--help` was accepted, ignored, and
+# followed by the full sweep. NOTHING BELOW EVER PASSES `--run`. The refusal paths and the
+# dirty-tree parser are exercised directly; the sweep itself is never started from a test.
+
+
+def _load_mutate():
+    """Import scripts/mutate_predicates.py by path, under a private name.
+
+    Same reason ``_load_verify`` does it, with higher stakes: letting the ``__main__``
+    guard fire used to mean twenty in-place rewrites of tracked source files and twenty
+    full suite runs, as a side effect of an import.
+    """
+    spec = importlib.util.spec_from_file_location("_mutate_under_test", MUTATE)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _target_snapshot(mutate) -> dict[str, str]:
+    """Current text of every file the sweep would rewrite."""
+    return {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in mutate._target_paths()}
+
+
+def test_a_bare_invocation_describes_instead_of_sweeping(capsys):
+    """The defect exactly: running this with no arguments WAS the sweep.
+
+    The files are compared before and after rather than trusting the return code, because
+    the claim being made is 'this touched nothing', not 'this exited non-zero'.
+    """
+    mutate = _load_mutate()
+    before = _target_snapshot(mutate)
+    rc = mutate.main([])
+    assert rc != 0, "a bare invocation reports success without having done anything"
+    assert _target_snapshot(mutate) == before, "the refusal path modified a tracked file"
+    printed = capsys.readouterr()
+    text = printed.out + printed.err
+    assert "--run" in text, "the refusal does not name the flag that would have run it"
+    assert "git checkout" in text, "the banner does not name the recovery command"
+
+
+def test_listing_the_mutants_touches_nothing(capsys):
+    """A way to read the table without the tree ever being wrong for a second."""
+    mutate = _load_mutate()
+    before = _target_snapshot(mutate)
+    assert mutate.main(["--list"]) == 0
+    assert _target_snapshot(mutate) == before, "--list modified a tracked file"
+    assert "CQ58 drop first" in capsys.readouterr().out
+
+
+def _detached_copy(tmp_path: Path) -> Path:
+    """A copy of the script whose ``ROOT`` is a temp dir instead of this repo.
+
+    The script derives ``ROOT`` from ``Path(__file__).resolve().parents[1]``, so a copy at
+    ``<tmp>/scripts/mutate_predicates.py`` believes the repo is ``<tmp>`` -- which has no
+    ``src/pcraft/`` in it.
+
+    This is not fussiness. The two tests below drive the real command line as a
+    subprocess, and the regression they exist to catch is 'the argv gate was removed'. Run
+    against the repo, a test for that regression would DISCOVER it by launching the sweep:
+    twenty in-place rewrites of tracked source files, from inside a test run, with a
+    pytest timeout as the likeliest way it ends -- which is precisely the uncatchable
+    interrupt the script's docstring warns about. Measured, not theorised: that is exactly
+    what happened while this test was being written. Detached, the same regression makes
+    these tests fail in a few seconds and touches nothing.
+    """
+    dest = tmp_path / "scripts"
+    dest.mkdir(parents=True, exist_ok=True)
+    target = dest / MUTATE.name
+    target.write_text(MUTATE.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+def test_help_prints_usage_instead_of_starting_a_sweep(tmp_path):
+    """``--help`` used to be swallowed by a script that never read argv.
+
+    Driven as a real subprocess because the claim is about the real command line -- what a
+    contributor types, and what the docstring's own usage lines promise.
+    """
+    script = _detached_copy(tmp_path)
+    proc = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=120,
+    )
+    assert proc.returncode == 0, f"--help exited {proc.returncode}: {proc.stderr[:400]}"
+    for expected in ("usage:", "--run", "--list", "--allow-dirty", "git checkout -- src/pcraft/core"):
+        assert expected in proc.stdout, f"--help never mentions {expected!r}"
+
+
+def test_an_unknown_flag_is_refused_rather_than_ignored(tmp_path):
+    """Proof that argv is read at all: the old script ignored every argument equally."""
+    script = _detached_copy(tmp_path)
+    proc = subprocess.run(
+        [sys.executable, str(script), "--sweep-everything-now"],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=120,
+    )
+    assert proc.returncode == 2
+    assert "unrecognized arguments" in proc.stderr
+
+
+def test_a_dirty_target_is_seen_before_the_sweep_starts():
+    """Porcelain parsing, isolated from git so the refusal can be exercised at all."""
+    mutate = _load_mutate()
+    targets = set(mutate._target_paths())
+    victim = min(targets)
+    porcelain = f" M {victim}\n?? scratch/notes.txt\n M some/other/file.py\n"
+    assert mutate._dirty_from_porcelain(porcelain, targets) == [victim]
+
+
+def test_a_clean_tree_reports_no_dirty_targets():
+    mutate = _load_mutate()
+    assert mutate._dirty_from_porcelain("", set(mutate._target_paths())) == []
+
+
+def test_git_being_unable_to_answer_is_not_read_as_a_clean_tree(monkeypatch):
+    """None, not [] -- the distinction this whole codebase is built around.
+
+    A missing git or a non-repo checkout makes the question unanswerable. Returning an
+    empty list there would hand the caller 'could not check' wearing 'checked clean'.
+    """
+    mutate = _load_mutate()
+    monkeypatch.setattr(mutate, "_git_porcelain", lambda _paths: None)
+    assert mutate._dirty_targets() is None
+
+
+def test_the_sweep_refuses_to_start_on_a_dirty_target(capsys, monkeypatch):
+    """The restore writes back the text read at start, so a dirty target loses its edits."""
+    mutate = _load_mutate()
+    victim = min(mutate._target_paths())
+    monkeypatch.setattr(mutate, "_git_porcelain", lambda _paths: f" M {victim}\n")
+    assert mutate._preflight(allow_dirty=False) == 2
+    err = capsys.readouterr().err
+    assert victim in err, "the refusal does not name which file is dirty"
+    assert "git checkout" in err, "the refusal does not name the recovery command"
+    assert mutate._preflight(allow_dirty=True) == 0, "--allow-dirty does not override"

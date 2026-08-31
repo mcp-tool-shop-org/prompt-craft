@@ -88,7 +88,14 @@ def assemble(conditioning: dict) -> ReferenceLock:
     if unsupported:
         raise PromptCraftError(
             "GATE_CONDITIONING_UNSUPPORTED",
-            f"reference lock cannot bucket identity method(s) {unsupported}: "
+            # F-de4136eb: this said "reference lock cannot bucket", using this module's own
+            # internal vocabulary (assemble() sorts refs into pose/identity/costume/extras buckets
+            # a few lines below) for what is, from the operator's side, the identical authoring
+            # mistake conditioning.refuse_unimplemented_identity reports as "{who} cannot apply
+            # identity method(s) ...". Same mistake, different entry point, and every other
+            # GATE_CONDITIONING_UNSUPPORTED in this domain says "cannot apply". RECIPE_GENERATOR_ID
+            # is the {who} the very next call in this function already uses.
+            f"{RECIPE_GENERATOR_ID} cannot apply identity method(s) {unsupported}: "
             "no encoder is wired for that method",
             hint="Set identity_ref.method to ip_adapter, lora, instantid, reference, or none.",
         )

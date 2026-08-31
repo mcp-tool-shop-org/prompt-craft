@@ -4,11 +4,39 @@
 Not a CI stage. Applies one mutant, runs the suite, restores the file.
 A surviving mutant is a decorative test.
 
-    PYTHONPATH=src python scripts/mutate_predicates.py
+THIS SCRIPT REWRITES TRACKED SOURCE FILES IN PLACE. That is the job, not a
+side effect -- a mutant has to be real for the suite to have any chance of
+catching it -- so the safety here is consent, not capability. The sweep runs
+only when it is asked for by name. A bare invocation describes and exits, and
+so does --help, which used to be accepted silently and then ignored while the
+full 20-cycle sweep ran anyway.
+
+    POSIX        PYTHONPATH=src python scripts/mutate_predicates.py --run
+    PowerShell   $env:PYTHONPATH="src"; python scripts/mutate_predicates.py --run
+
+    --run          perform the sweep (one full suite run per mutant)
+    --list         print the mutant table and exit, touching nothing
+    --help         print this and exit, touching nothing
+    --allow-dirty  sweep even though a target file has uncommitted changes
+
+Each mutant is restored by a try/finally around the suite run, so every
+interrupt Python can see -- Ctrl-C included -- still restores the file. What
+that cannot cover is a kill that never reaches Python: taskkill /F, an
+OOM-kill, a closed laptop, a CI-style timeout. Any of those, landing during
+one of the back-to-back full suite runs this performs, leaves ONE tracked file
+under src/pcraft/core/ holding a deliberately wrong predicate, with nothing
+red to say so. Recover with:
+
+    git checkout -- src/pcraft/core
+
+That is also why the sweep refuses to start on a dirty tree: on a clean tree
+the recovery above is exact and costs nothing, and on a dirty one it would
+discard work this script never wrote.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -17,6 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 SCRATCH = ROOT / ".pytest-scratch-mutate"
+RECOVER = "git checkout -- src/pcraft/core"
 
 # (id, path relative to ROOT, exact original snippet, mutant snippet, what the flip does)
 MUTANTS: list[tuple[str, str, str, str, str]] = [
@@ -170,6 +199,99 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
 ]
 
 
+def _target_paths() -> list[str]:
+    """The tracked files this sweep rewrites, repo-relative and slash-separated."""
+    return sorted({rel for _name, rel, _old, _new, _why in MUTANTS})
+
+
+def _consent_banner() -> str:
+    """One line, printed before anything is touched, saying what is about to happen."""
+    return (
+        f"NOTE: this rewrites {len(_target_paths())} tracked files under src/pcraft/core/ "
+        f"IN PLACE, one at a time, restoring each from a try/finally around the suite run. "
+        f"A kill that never reaches Python (taskkill /F, OOM, a CI timeout) leaves one file "
+        f"holding a wrong predicate. Recover with: {RECOVER}"
+    )
+
+
+def _dirty_from_porcelain(out: str, targets: set[str]) -> list[str]:
+    """Target files carrying uncommitted changes, parsed from ``git status --porcelain``.
+
+    Split out from the git call so the refusal can be exercised without putting a real
+    working tree into the one state this script must never be run against.
+    """
+    dirty: list[str] = []
+    for raw in out.splitlines():
+        line = raw.rstrip()
+        if len(line) < 4:
+            continue
+        path = line[3:].strip()
+        if " -> " in path:  # rename: `R  old -> new`; the new name is the tracked one
+            path = path.split(" -> ", 1)[1]
+        path = path.strip('"').replace("\\", "/")
+        if path in targets:
+            dirty.append(path)
+    return sorted(set(dirty))
+
+
+def _git_porcelain(paths: list[str]) -> str | None:
+    """``git status --porcelain`` for these paths, or None when git could not answer.
+
+    None is not the empty string, and the difference is the point: a missing git, a
+    detached checkout, anything that makes the question unanswerable must not arrive at
+    the caller looking like "the tree is clean".
+    """
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--", *paths],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _dirty_targets() -> list[str] | None:
+    """Which target files are already modified; None when that could not be determined."""
+    targets = _target_paths()
+    out = _git_porcelain(targets)
+    if out is None:
+        return None
+    return _dirty_from_porcelain(out, set(targets))
+
+
+def _preflight(allow_dirty: bool) -> int:
+    """0 when the sweep may start; a non-zero exit code, already explained, otherwise.
+
+    The restore path writes back the text this script read at start, so a target file
+    that arrives dirty loses whatever was in it. ``--allow-dirty`` is the override, and
+    it is a flag rather than a prompt because this script is also run unattended.
+    """
+    if allow_dirty:
+        return 0
+    dirty = _dirty_targets()
+    if dirty is None:
+        print(
+            "REFUSE: could not read `git status` for the target files, so this cannot tell "
+            "a clean tree from a dirty one. Could not check is not checked clean. Pass "
+            "--allow-dirty if you are certain the tree is clean.",
+            file=sys.stderr,
+        )
+        return 2
+    if dirty:
+        print("REFUSE: files this sweep rewrites already have uncommitted changes:", file=sys.stderr)
+        for path in dirty:
+            print(f"  {path}", file=sys.stderr)
+        print(
+            f"Commit or stash them first. The restore writes back the text read at start, "
+            f"and `{RECOVER}` -- the recovery if a hard kill interrupts the sweep -- would "
+            f"discard them too. --allow-dirty overrides.",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def run_suite() -> tuple[int, str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
@@ -185,7 +307,49 @@ def run_suite() -> tuple[int, str]:
     return proc.returncode, summary
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--run",
+        action="store_true",
+        help="perform the sweep: rewrite each target file in place, run the suite against "
+             "it, restore it. Required -- a bare invocation describes and exits.",
+    )
+    ap.add_argument(
+        "--list",
+        action="store_true",
+        help="print the mutant table and exit without touching anything",
+    )
+    ap.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="sweep even though a target file has uncommitted changes (the restore writes "
+             "back the text read at start, so those changes are lost)",
+    )
+    args = ap.parse_args(argv)
+
+    if args.list:
+        for name, rel, _old, _new, why in MUTANTS:
+            print(f"{name:24} {rel}  ({why})")
+        print(f"{len(MUTANTS)} mutants across {len(_target_paths())} files. Nothing was modified.")
+        return 0
+
+    if not args.run:
+        print(_consent_banner())
+        print(
+            "Refusing to sweep without --run. `--list` prints the mutants and `--help` "
+            "prints usage; neither touches a file."
+        )
+        return 2
+
+    rc = _preflight(args.allow_dirty)
+    if rc != 0:
+        return rc
+
+    print(_consent_banner(), flush=True)
     print("baseline...", flush=True)
     rc, summary = run_suite()
     print(f"  {summary}")

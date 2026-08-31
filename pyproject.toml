@@ -101,7 +101,15 @@ image = [
 ]
 dev = [
     "pytest>=8.0",
-    "pytest-cov>=5.0",
+    # `pytest-cov>=5.0` was declared here and invoked by nothing: no `--cov` in verify.py,
+    # ci.yml, release.yml or scripts/, so every `pip install -e ".[dev]"` -- the documented
+    # setup command, run by every contributor and by both ci.yml legs -- paid install time
+    # for a plugin that measured nothing and gated nothing. Removed rather than wired up,
+    # because coverage is not a gate this repo has decided to hold and adding `--cov` to the
+    # suite leg would have invented a threshold nobody set. Same shape as [tool.ruff] with
+    # no `select` and [tool.mypy] invoked by nothing: quality tooling that reads as
+    # configured while doing nothing. If coverage becomes a goal, it comes back WITH a
+    # verify.py leg, in the same commit.
     # Upper-bounded because lint is a hard release gate (verify.py). Unbounded, CI
     # resolved 0.16.3 against a local 0.15.16 and the same tree linted clean here and
     # failed there. `[tool.ruff.lint] select` already fixes the rule set; this stops the

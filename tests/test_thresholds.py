@@ -154,3 +154,73 @@ def test_a_missing_table_names_where_the_default_one_lives(tmp_path):
     assert exc.value.code == "IO_THRESHOLDS_READ"
     assert exc.value.hint
     assert "--thresholds" in exc.value.hint
+
+
+# --------------------------------------------------------------------------- coordinator addition
+# (F-eaa870d6 family, the same delimiter collision core-contract-synth fixed in loader.py.)
+# ``_describe`` joined its per-error aggregate with "; " -- a sequence that also occurs INSIDE a
+# pydantic ``msg``, because a msg is free text written by whichever validator raised. So an entry
+# containing a semicolon was indistinguishable from the boundary between two entries. The shape
+# converged on across the package: an explicit "[n]" index per entry, " | " between them.
+
+
+def _table_with(**overrides) -> dict:
+    data = _shipped_table()
+    data.update(overrides)
+    return data
+
+
+def test_an_aggregate_of_several_errors_is_unambiguously_delimited(tmp_path):
+    data = _shipped_table()
+    del data["default"]
+    data["bands"]["vqa"]["high"] = 4.0
+    path = tmp_path / "twobad.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PromptCraftError) as exc:
+        load_thresholds(path)
+    message = exc.value.message
+    assert exc.value.code == "CONFIG_THRESHOLDS_INVALID"
+    assert "[1] " in message and "[2] " in message, "each entry has to announce its own start"
+    assert " | " in message, "the aggregate separator is ' | ', not '; '"
+    assert "error(s)" in message, "say how many, the way the loader's sibling does"
+    assert "default" in message and "vqa" in message
+
+
+def test_an_entry_whose_own_message_contains_a_semicolon_is_not_split_by_it():
+    """The collision itself. ``msg`` is free text from whichever validator raised -- this file
+    does not own those sentences -- so an entry containing '; ' used to be indistinguishable from
+    the boundary between two entries, for a reader and for a script alike."""
+    from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+
+    from pcraft.core.gate.thresholds import _describe
+
+    class _Semicoloned(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        version: str = ""
+
+        @model_validator(mode="after")
+        def _always_objects(self):
+            raise ValueError("band high is unset; low is unset; neither can be defaulted")
+
+    with pytest.raises(ValidationError) as exc:
+        _Semicoloned()
+    rendered = _describe(exc.value)
+
+    assert "; " in rendered, "the fixture's own sentence is the thing under test; keep it intact"
+    assert rendered.count(" | ") == 0, "one error is one entry, whatever punctuation it contains"
+    assert rendered.split(" | ") == [rendered], "splitting on the real separator yields one entry"
+
+
+def test_one_error_still_reads_as_one_error(tmp_path):
+    """The single-entry case must not grow a separator it does not need."""
+    data = _shipped_table()
+    del data["default"]
+    path = tmp_path / "onebad.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PromptCraftError) as exc:
+        load_thresholds(path)
+    assert " | " not in exc.value.message
+    assert "[1] " in exc.value.message
+    assert "1 error(s)" in exc.value.message

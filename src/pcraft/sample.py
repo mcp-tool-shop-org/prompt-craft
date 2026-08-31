@@ -166,16 +166,62 @@ def image_extra_present() -> bool:
     return not missing_image_modules()
 
 
+class _AnnouncingGenerator:
+    """Narrate each generate() to a callback, then delegate. Progress without a framework.
+
+    ``run_live_loop`` is minutes of silence on real hardware (F-710c9599), and the incremental
+    information an operator needs -- which attempt is running, at which seed -- exists only
+    inside ``orchestrate.run``, which is domain-agnostic and has no opinion about output. Rather
+    than teach the loop about progress, this wraps the one object the loop calls once per
+    attempt. The loop reads exactly two things off a generator: ``family`` (once, for
+    ``assert_distinct_families``) and ``generate(...)`` (once per attempt), so forwarding those
+    is the whole surface.
+
+    The receipt is untouched by design: ``generator_id`` and ``generator_family`` are stamped
+    from the ``GenerationResult`` the REAL generator returns, so provenance still names the
+    model that made the pixels and never this wrapper.
+
+    A raised generate() is announced before it is re-raised. The loop classifies that failure
+    itself (TRANSIENT retries, SEMANTIC escalates) and records its own Attempt row; swallowing
+    it here would be a defect, and staying silent about it would put the one attempt an operator
+    most wants to see back inside the silence this class exists to end.
+    """
+
+    def __init__(self, inner, on_attempt: Callable[..., None]) -> None:
+        self._inner = inner
+        self._on_attempt = on_attempt
+        self._n = 0
+        self.generator_id = inner.generator_id
+        self.family = inner.family
+
+    def generate(self, prompt: str, negative_prompt: str, conditioning: dict, seed: int):
+        self._n += 1
+        n = self._n
+        self._on_attempt(n, seed, "generating...")
+        try:
+            result = self._inner.generate(prompt, negative_prompt, conditioning, seed)
+        except Exception as err:  # announced, then re-raised untouched -- not a blind except
+            self._on_attempt(n, seed, "generate FAILED: ", type(err).__name__)
+            raise
+        self._on_attempt(n, seed, "generated ", result.image_path)
+        return result
+
+
 def run_live_loop(
     *,
     records_dir: str | Path = "records",
     contract_id: str | None = None,
     contracts_dirs: list[Path] | None = None,
     thresholds: Path | None = None,
+    on_attempt: Callable[..., None] | None = None,
 ) -> OrchestrationResult:
     """Real plugin generator + verifiers. Not the stub. Needs [image].
 
     The per-asset synthesizer stays TemplateSynthesizer. GEPA is offline.
+
+    ``on_attempt(attempt, seed, state, detail)`` is called around every generate() so a caller
+    can report progress during a run that is otherwise silent for minutes; the CLI passes one
+    and renders to stderr. Omitting it changes nothing about the run.
     """
     from .domains.image import ImagePlugin
 
@@ -189,14 +235,28 @@ def run_live_loop(
         raise PromptCraftError(
             "DEP_IMAGE_MISSING",
             f"real bind needs the [image] extra; missing: {', '.join(missing)}",
-            hint="pip install -e '.[image]'. Use --mock for the GPU-free scaffold.",
+            # The registry form LEADS; the checkout form is the parenthetical (F-3c6d9f4f).
+            # This is the product's principal "how do I go live" unblock, and it used to name
+            # only `pip install -e '.[image]'` -- which needs a buildable project in the cwd.
+            # README.md makes `pip install prompt-crafter` (PyPI, non-editable, no checkout
+            # anywhere) the primary documented install, and the npm launcher installs no
+            # checkout either, so for the majority install the hinted command failed inside pip
+            # with "neither setup.py nor pyproject.toml found" -- a second and less legible wall
+            # than the one the user started at, reached by following the CLI's own advice.
+            # npm/bin/pcraft.mjs already tells users the registry form; this is the layer that
+            # was undoing it. The quotes are load-bearing and stay in the string: unquoted
+            # brackets are glob characters in zsh, the default shell on macOS.
+            hint="pip install 'prompt-crafter[image]' (from a source checkout: "
+            "pip install -e '.[image]'). Use --mock for the GPU-free scaffold.",
         )
     _store, resolved, table, compiled = load_workspace(
         contracts_dirs=contracts_dirs, thresholds=thresholds, contract_id=contract_id
     )
     plugin = ImagePlugin()
     gen = plugin.generator()
-    gen.out_dir = Path(records_dir) / "_image"
+    gen.out_dir = Path(records_dir) / "_image"  # set on the REAL generator, before wrapping
+    if on_attempt is not None:
+        gen = _AnnouncingGenerator(gen, on_attempt)
     config = LoopConfig(
         encoder_rules=_encoder_rules(),
         thresholds_version=table.version,

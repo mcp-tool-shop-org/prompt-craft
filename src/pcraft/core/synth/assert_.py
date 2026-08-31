@@ -12,12 +12,27 @@ from ..contract.schema import ResolvedContract
 
 
 def assert_coverage(resolved: ResolvedContract, atom_coverage: dict[str, str]) -> None:
-    """Raise SYNTH_COVERAGE_MISSING listing any required atom with no non-empty coverage phrase."""
-    missing = [a.id for a in resolved.required_atoms() if not atom_coverage.get(a.id, "").strip()]
+    """Raise SYNTH_COVERAGE_MISSING listing any required atom with no non-empty coverage phrase.
+
+    The message names each missing atom's CLAIM alongside its id (F-27344f8e). It used to name
+    ids only -- "2 required atom(s) have no coverage phrase: ['tabard', 'sigil']" -- so the
+    person this refusal is aimed at, someone actively tuning a template or a synthesizer, had to
+    reopen the contract file to recall what 'tabard' actually claims before they could act on it.
+    This function is already holding the resolved contract, so the claim text costs a lookup it
+    was choosing not to do. The sibling guard in ``visual_inventory`` (assert_tokens_trace /
+    SYNTH_PROSE_DUMP) already names the offending prompt segments rather than a count, and this
+    is the same standard applied to the other half of the pre-generation gate.
+
+    The atoms are carried through rather than re-resolved by id: ``missing`` is built FROM
+    ``required_atoms()``, so every entry has its claim in hand and there is no
+    ``atom_by_id`` return that a reader has to prove non-None.
+    """
+    missing = [a for a in resolved.required_atoms() if not atom_coverage.get(a.id, "").strip()]
     if missing:
+        named = ", ".join(f"{a.id} ({a.claim!r})" for a in missing)
         raise PromptCraftError(
             "SYNTH_COVERAGE_MISSING",
-            f"{len(missing)} required atom(s) have no coverage phrase: {missing}",
+            f"{len(missing)} required atom(s) have no coverage phrase: {named}",
             hint="Re-synthesize with these atom ids injected; do not generate until every "
             "required atom is covered.",
         )

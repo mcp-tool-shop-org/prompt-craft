@@ -153,13 +153,13 @@ jobs:
           PKG=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           NPM=$(node -p "require('./npm/package.json').version")
           echo "trigger=$GITHUB_EVENT_NAME ref_type=$GITHUB_REF_TYPE ref_name=$GITHUB_REF_NAME pyproject=$PKG npm=$NPM"
-          [ "$PKG" = "$NPM" ] || { echo "::error::pyproject $PKG != npm $NPM"; exit 1; }
+          [ "$PKG" = "$NPM" ] || { echo "::error::pyproject $PKG != npm $NPM -- the two manifests in this tree declare different versions, so publishing would put a number on one registry that the other does not claim. This is the cheap one: bump the lagging file to match the other, commit, and cut a fresh tag from that commit. Do not publish from this ref."; exit 1; }
           if [ "$GITHUB_REF_TYPE" != "tag" ]; then
             echo "::error::release.yml is standing on $GITHUB_REF_TYPE '$GITHUB_REF_NAME', not a tag, so the tag-vs-package version check could not run. This workflow publishes only from a v* tag; re-dispatch it against one. Refusing rather than reporting an unchecked version as checked."
             exit 1
           fi
           TAG="${GITHUB_REF_NAME#v}"
-          [ "$TAG" = "$PKG" ] || { echo "::error::tag $TAG != pyproject $PKG"; exit 1; }
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag $TAG != pyproject $PKG -- the tag names a version this tree does not declare, which is the tag-cut-before-the-version-bump case the comment above describes. There is no cheap fix and the obvious one is wrong: do not force-push or move this tag, because a GitHub Release may already point at it and moving it silently changes what that release refers to. Either cut a new release from a commit where pyproject.toml and npm/package.json already read $TAG, or delete this release and its tag and re-tag from such a commit."; exit 1; }
 
       # upload@v7 here and download@v8 in the `pypi` job are a matched pair and must be
       # bumped together -- the artifact this uploads is the one that gets published, so a

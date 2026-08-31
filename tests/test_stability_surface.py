@@ -374,3 +374,58 @@ def test_opting_out_of_the_threshold_check_is_explicit_not_a_default():
     assert param.default is inspect.Parameter.empty, (
         "a default here would restore the exact silence this check was added to remove"
     )
+
+
+# --------------------------------------------------------------------------- coordinator addition
+# (hint-wording family.) Several DEFAULT_HINTS entries named ONLY the editable install --
+# ``pip install -e '.[image]'`` -- which is a command that requires a CHECKOUT. A user who ran
+# ``pip install prompt-crafter`` has no '.' to point at, so the one actionable sentence those
+# refusals give could not be run at all. DEP_IMAGE_MISSING and GATE_UNAVAILABLE are precisely the
+# codes that user meets first. Codes and exit codes are untouched; this is about the prose.
+
+
+def test_no_hint_recommends_the_editable_install_without_the_installed_form():
+    """``pip install -e`` presumes a checkout. A hint may still mention it -- contributors exist --
+    but never as the only route, and never without saying it is the checkout case."""
+    from pcraft.errors import DEFAULT_HINTS
+
+    offenders = {}
+    for code, hint in DEFAULT_HINTS.items():
+        if "pip install -e" not in hint:
+            continue
+        names_installed_form = "pip install 'prompt-crafter" in hint or (
+            "pip install " in hint.replace("pip install -e", "")
+        )
+        if not (names_installed_form and "checkout" in hint):
+            offenders[code] = hint
+    assert not offenders, (
+        "these hints tell a pip-installed user to run a command that needs a source checkout, "
+        f"and name no alternative: {sorted(offenders)}"
+    )
+
+
+def test_the_install_hints_name_the_distribution_that_actually_publishes():
+    """The project is published as ``prompt-crafter``; ``pip install prompt-craft`` installs
+    something else or nothing. A hint that names the wrong distribution is worse than none."""
+    from pcraft.errors import DEFAULT_HINTS
+
+    wrong = {
+        code: hint
+        for code, hint in DEFAULT_HINTS.items()
+        if "pip install prompt-craft " in hint or hint.rstrip(".").endswith("pip install prompt-craft")
+    }
+    assert not wrong, f"these name a distribution that is not what pyproject publishes: {sorted(wrong)}"
+
+
+def test_the_receipt_path_hint_is_backed_by_a_field_that_carries_it():
+    """IO_RECORD_READ tells the operator "pcraft bind prints the path it wrote". That sentence was
+    a promise about a path nothing carried: ``persist()`` returned the Path and ``run()`` dropped
+    it, so the CLI had to re-derive the filename. ``OrchestrationResult.record_path`` is what makes
+    the sentence true, so the sentence and the field are pinned together (F-5b783e17)."""
+    from pcraft.core.loop.orchestrate import OrchestrationResult
+    from pcraft.errors import DEFAULT_HINTS
+
+    assert "prints the path it wrote" in DEFAULT_HINTS["IO_RECORD_READ"]
+    assert "record_path" in OrchestrationResult.model_fields, (
+        "the hint claims the path is printed; the result object has to be able to supply it"
+    )

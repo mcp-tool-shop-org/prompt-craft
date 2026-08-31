@@ -401,6 +401,151 @@ def test_a_valid_pinned_artifact_still_loads(tmp_path):
     assert load_pinned(good).artifact_id == "x@v1-test"
 
 
+# ---------------------------------------------------------------------------
+# F-936b313e -- IO_ARTIFACT_INVALID must be diagnosable without --debug
+#
+# The default message named no field and no location -- "compiled artifact <path> is JSON
+# but does not match the CompiledProgram schema" -- and the hint said to pass --debug to
+# learn which field failed. That is the exact shape CONTRACT_INVALID had before F-40a4956f
+# fixed it, and this function's own comment cites that sibling as its precedent for the
+# code choice without carrying forward the message-detail half of it. The audience is
+# whoever inspects a pinned artifact after a truncated write or a hand-edit -- precisely
+# the scenario the DO-NOT-EDIT banner exists for.
+# ---------------------------------------------------------------------------
+
+
+def test_a_schema_invalid_pinned_artifact_names_the_field_without_debug(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps({"program_id": "x", "version": 123, "instruction": "y"}), encoding="utf-8"
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        load_pinned(bad)
+    safe = exc.value.to_safe_text()
+    assert exc.value.code == "IO_ARTIFACT_INVALID"
+    assert "1 error(s)" in safe  # how many things are wrong...
+    assert "version" in safe  # ...and which field, with no flag needed
+
+
+def test_a_pinned_artifact_missing_several_fields_reports_every_location(tmp_path):
+    """Truncation does not remove one field. The count and the locations are what tell a
+    reader whether the file is subtly wrong or mostly absent."""
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"program_id": "x"}), encoding="utf-8")
+    with pytest.raises(PromptCraftError) as exc:
+        load_pinned(bad)
+    safe = exc.value.to_safe_text()
+    assert "2 error(s)" in safe
+    assert "version" in safe
+    assert "instruction" in safe
+
+
+def test_the_artifact_refusal_keeps_its_path_its_banner_hint_and_its_cause(tmp_path):
+    """Collateral guard: the enrichment is additive. The path still names the file, the
+    hint still says do not hand-edit it, and --debug still reaches pydantic's own report."""
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"program_id": "x"}), encoding="utf-8")
+    with pytest.raises(PromptCraftError) as exc:
+        load_pinned(bad)
+    assert bad.name in exc.value.message
+    assert "hand-edit" in exc.value.hint
+    assert exc.value.cause is not None
+    assert "2 validation errors for CompiledProgram" in exc.value.to_debug_text()
+
+
+# ---------------------------------------------------------------------------
+# F-97765221 -- one covered code must not carry two unrelated meanings
+#
+# _run_dspy's empty-prompt guard raised SYNTH_COVERAGE_MISSING with "DSPy returned an
+# empty prompt" -- no atom ids -- while the only other producer of that code
+# (assert_.assert_coverage) always embeds the uncovered atoms. STABILITY.md tells callers
+# to parse the code and not the prose, so a caller keying on SYNTH_COVERAGE_MISSING and
+# reading the atom list every other producer gives it found none when this branch fired.
+# _run_dspy is the real local-8B / Ollama-Cloud path, and a small model returning an empty
+# completion is a live failure mode; MEASURED, no test exercised this branch at all.
+#
+# Same defect class STABILITY.md's own history names for CONFIG_THRESHOLDS_INVALID
+# (F-09f30018): "one covered, machine-parseable code now carries two unrelated meanings."
+# ---------------------------------------------------------------------------
+
+
+class _EmptyPromptPredict:
+    """Stands in for dspy.Predict: a pinned program that returns no tokens at all."""
+
+    def __init__(self, signature):
+        self.signature = signature
+
+    def __call__(self, **kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(prompt="   ", negative_prompt="", atom_coverage="{}")
+
+
+def _fake_dspy(monkeypatch, predict_cls):
+    """Reach _run_dspy without the [synth] extra installed. dspy and ContractToPrompt only
+    exist as module globals when the extra is present, hence raising=False."""
+    from types import SimpleNamespace
+
+    import pcraft.core.synth.signature as sig
+
+    monkeypatch.setattr(sig, "dspy", SimpleNamespace(Predict=predict_cls), raising=False)
+    monkeypatch.setattr(sig, "ContractToPrompt", object(), raising=False)
+    monkeypatch.setattr(sig, "_HAS_DSPY", True)
+    return sig
+
+
+def test_an_empty_dspy_prompt_no_longer_borrows_the_coverage_code(monkeypatch):
+    """The production door, not a direct call to the private branch: synthesize() with no
+    injected predictor is what reaches _run_dspy on the real backend."""
+    _s, resolved, _t, compiled = load_sprite_example()
+    sig = _fake_dspy(monkeypatch, _EmptyPromptPredict)
+    with pytest.raises(PromptCraftError) as exc:
+        sig.DSPySynthesizer(compiled).synthesize(resolved, "rules")
+    assert exc.value.code == "SYNTH_EMPTY_PROMPT"
+    assert exc.value.code != "SYNTH_COVERAGE_MISSING"
+
+
+def test_the_empty_prompt_refusal_stays_a_synth_failure_with_a_resolved_hint(monkeypatch):
+    """A new code is additive only if the surface around it is unchanged: same SYNTH_
+    namespace, same exit 2, and a hint that resolves at the raise site rather than an
+    empty hint line."""
+    _s, resolved, _t, compiled = load_sprite_example()
+    sig = _fake_dspy(monkeypatch, _EmptyPromptPredict)
+    with pytest.raises(PromptCraftError) as exc:
+        sig.DSPySynthesizer(compiled).synthesize(resolved, "rules")
+    assert exc.value.exit_code == 2
+    assert exc.value.hint
+    assert resolved.id in exc.value.message  # which asset produced nothing
+
+
+def test_the_coverage_code_keeps_one_shape_across_every_producer():
+    """The property the divergence broke, asserted where a caller would meet it: every
+    SYNTH_COVERAGE_MISSING in the shipped package is raised by the coverage guard, so a
+    caller parsing that code always finds the atom list it names."""
+    import ast
+    import pathlib
+
+    import pcraft
+
+    src = pathlib.Path(pcraft.__file__).resolve().parent
+    producers = []
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name != "PromptCraftError" or not node.args:
+                continue
+            code = node.args[0]
+            if isinstance(code, ast.Constant) and code.value == "SYNTH_COVERAGE_MISSING":
+                producers.append(path.relative_to(src).as_posix())
+    assert producers == ["core/synth/assert_.py"], (
+        "a second producer of a covered code is a second meaning for it: "
+        f"{producers}"
+    )
+
+
 def test_cli_compile_seed_still_pins(tmp_path, monkeypatch):
     from pcraft.core.optimize.compile import write_seed_artifact
 

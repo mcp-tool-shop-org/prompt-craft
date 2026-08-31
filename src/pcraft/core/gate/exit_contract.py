@@ -50,11 +50,34 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
         )
     failed = transcript.failed_required()
     if failed:
-        return PromptCraftError(
-            "GATE_FAIL",
-            "required atom(s) failed: " + ", ".join(v.atom_id for v in failed),
-            hint="A failed required atom blocks. Identity still gates nothing.",
-        )
+        # CORRECTED IN PLACE (F-56203d3d). This branch is the gate's entire purpose and the code
+        # every content failure lands on, and its message carried only the failed atom ids.
+        # MEASURED, real ``pcraft gate`` on a stub PNG with no [image] extra:
+        # ``error[GATE_FAIL]: required atom(s) failed: palette`` at exit 2, on a transcript where
+        # four required atoms were SKIPPED ('vqascore.clip-flant5.v1 unavailable'), a fifth was NA
+        # behind a skipped parent, only ONE of six required atoms produced a score at all, and the
+        # census line printed above read 'tiers executed: 1 of 2'. The exit code is defensible --
+        # a real FAIL is a real FAIL -- but the STRUCTURED error is the only thing a CI job, an
+        # MCP client or an LLM consumer sees, and it said a content atom failed while saying
+        # nothing about the half-installed gate that skipped the other five. That is the plain
+        # ``pip install prompt-craft`` experience, not an exotic path.
+        #
+        # Every fact below is already on the transcript; none of it is recomputed here.
+        parts = ["required atom(s) failed: " + ", ".join(v.atom_id for v in failed)]
+        required = transcript.required_atoms()
+        unscored = [v for v in required if v.score is None]
+        if unscored:
+            by_zone: dict[str, list[str]] = {}
+            for v in unscored:
+                by_zone.setdefault(v.zone.value, []).append(v.atom_id)
+            detail = "; ".join(f"{zone}: {', '.join(ids)}" for zone, ids in sorted(by_zone.items()))
+            parts.append(
+                f"{len(unscored)} of {len(required)} required atoms produced no score ({detail})"
+            )
+        census = transcript.tier_census
+        if census.m:
+            parts.append(f"{census.n} of {census.m} required tiers executed")
+        return PromptCraftError("GATE_FAIL", "; ".join(parts))
     if transcript.overall is Zone.UNCERTAIN:
         unconfirmed = [v.atom_id for v in transcript.uncertain_required()]
         return PromptCraftError(

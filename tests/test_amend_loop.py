@@ -768,3 +768,112 @@ def test_the_generation_blocked_docstring_describes_the_return_shape_it_actually
         "asserting it as current is the defect"
     )
     assert "DEP_" in doc, "SEMANTIC is wider than schema-invalid output now; name what is in it"
+
+
+# --------------------------------------------------------------------------- F-0eab8b1f
+# REROLL_NEW_SEED stopped producing a new seed after the first one. The seed was derived from the
+# CURRENT WINNER (``seed = gen.seed + 100``) and ``gen`` is reassigned from ``_select_best(...)``,
+# which is ``min(candidates, key=...)`` -- min returns the FIRST minimum, so a reroll that scores
+# no better leaves ``gen`` on the old candidate and the next reroll computes the identical
+# ``gen.seed + 100`` again. Nothing else in the branch varies (no resynth happened, so the prompt
+# is unchanged; ``cond = conditioning`` is unchanged), which makes it generate(same prompt, same
+# negative, same conditioning, same seed) -- byte-identical output for any deterministic sampler,
+# a full GPU generation per repeat, and ``budget.rerolls -= 1`` charged for each one.
+
+_ALL_REQUIRED = ("tabard", "sigil", "palette", "skin", "weapon", "face")
+
+
+def test_every_generate_in_the_ladder_burns_a_seed_that_was_never_burned_before(tmp_path):
+    """The measured red case, pinned as a sequence.
+
+    MEASURED before the fix on the SHIPPED example contract with the six required atoms scripted
+    to 0.05: 7 attempts recorded, seeds [1000, 1001, 1002, 1003, 1100, 1100, 1100], attempts 5-7
+    all labelled repair='reroll_new_seed' at seed 1100. Reachable on the default path rather than
+    a constructed one -- the example's ``sigil`` depends_on ``tabard``, so any tabard failure makes
+    tabard a presence atom in ``choose_repair`` and REROLL_NEW_SEED is what the ladder picks.
+    """
+    result = _run(tmp_path, verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    seeds = [a.seed for a in result.attempts]
+    assert len(seeds) == 7, f"the measured ladder is 4 best-of-N + 3 repairs, got {seeds}"
+    assert len(set(seeds)) == 7, f"a seed was generated more than once: {seeds}"
+
+
+def test_a_reroll_that_scores_no_better_still_advances_the_seed(tmp_path):
+    """The mechanism, isolated from the count: every REROLL_NEW_SEED row is a distinct seed even
+    though ``_select_best`` keeps the older candidate on every pass (all seven attempts score
+    identically, so ``min`` never moves off the first)."""
+    from pcraft.core.loop.retry_policy import RepairAction
+
+    result = _run(tmp_path, verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    rerolls = [a.seed for a in result.attempts if a.repair is RepairAction.REROLL_NEW_SEED]
+    assert len(rerolls) >= 2, "the scenario has to actually reach the ladder more than once"
+    assert len(set(rerolls)) == len(rerolls), f"'new seed' that was not new: {rerolls}"
+
+
+def test_the_wasted_generations_show_up_as_images_that_were_never_rendered(tmp_path):
+    """The cost half, measured the way the finding measured it: the StubGenerator writes
+    ``stub_seed{N}.png``, so a repeated seed leaves fewer files on disk than generate() calls.
+    MEASURED red: 5 stub images for 7 generate() calls."""
+    result = _run(tmp_path, verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    images = sorted((tmp_path / "_stub_images").glob("*.png"))
+    assert len(images) == len(result.attempts), (
+        f"{len(result.attempts)} generate() calls produced {len(images)} distinct images -- "
+        "the difference is GPU time paid for pixels that already existed"
+    )
+
+
+def test_the_fresh_seed_counter_does_not_reuse_a_best_of_n_seed(tmp_path):
+    """The counter starts above the whole best-of-N block rather than 100 past whichever
+    candidate happened to win, so a ladder seed can never collide with a screening seed."""
+    result = _run(tmp_path, verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    screening = [a.seed for a in result.attempts if a.repair is None]
+    ladder = [a.seed for a in result.attempts if a.repair is not None]
+    assert screening == [1000, 1001, 1002, 1003], "base_seed + i is unchanged"
+    assert not (set(screening) & set(ladder)), "the ladder re-burned a screening seed"
+
+
+def test_a_reroll_seed_is_derived_deterministically_not_from_a_clock(tmp_path):
+    """PIN_PER_STEP: replayability is the reason a fresh seed may not come from wall clock or an
+    unpinned RNG. Two identical runs must record the identical seed sequence."""
+    first = _run(tmp_path / "a", verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    second = _run(tmp_path / "b", verifier_scores=dict.fromkeys(_ALL_REQUIRED, 0.05))
+    assert [a.seed for a in first.attempts] == [a.seed for a in second.attempts]
+
+
+# --------------------------------------------------------------------------- F-5b783e17
+# ``persist()`` returns the Path it wrote and ``run()`` discarded it, so no caller could name the
+# receipt without re-deriving the filename from ``record_id`` -- which is the CLI's job to print
+# and exactly the string ``DEFAULT_HINTS['IO_RECORD_READ']`` tells the operator to look for
+# ("pcraft bind prints the path it wrote").
+
+
+def test_a_bound_result_names_the_receipt_it_wrote(tmp_path):
+    from pathlib import Path
+
+    result = _run(tmp_path)
+    assert result.decision == "bound"
+    assert result.record_path, "the written path was computed, returned by persist(), and dropped"
+    assert Path(result.record_path).is_file()
+    assert Path(result.record_path) == tmp_path / f"{result.record.record_id}.json"
+
+
+def test_an_escalated_result_names_its_receipt_too(tmp_path):
+    """Both persist() doors, not just the bound one -- an escalated receipt is the artifact a
+    human is being sent to read."""
+    from pathlib import Path
+
+    result = _run(tmp_path, verifier_scores={"weapon": 0.05})
+    assert result.decision == "escalated"
+    assert result.record_path and Path(result.record_path).is_file()
+
+
+def test_a_run_that_never_wrote_a_receipt_reports_no_path(tmp_path):
+    """The early escalations (prose-dump synth defect, SEMANTIC generate failure) persist nothing.
+    An empty string is 'no receipt', which is a different answer from a stale one."""
+    gen = _AlwaysRaisesGenerator(
+        lambda: PromptCraftError("DEP_IMAGE_MISSING", "torch is not installed")
+    )
+    result = _run(tmp_path, generator=gen)
+    assert result.decision == "escalated"
+    assert result.record is None
+    assert result.record_path == ""

@@ -154,3 +154,85 @@ def test_a_contract_with_required_atoms_that_never_scored_is_still_gate_unavaila
     err = error_from_transcript(t)
     assert err is not None and err.code == "GATE_UNAVAILABLE"
     assert err.exit_code == 4
+
+
+# --------------------------------------------------------------------------- F-56203d3d
+# GATE_FAIL is the gate's entire purpose and the code every content failure lands on, and its
+# structured error -- the only thing a CI job, an MCP client or an LLM consumer sees -- said a
+# content atom failed and said nothing about a half-installed gate that skipped the other five.
+# MEASURED, real ``pcraft gate`` on a stub PNG with no [image] extra: exit 2 with
+# ``required atom(s) failed: palette`` on a transcript where four required atoms were SKIPPED
+# ('vqascore.clip-flant5.v1 unavailable'), a fifth was NA behind a skipped parent, only ONE of six
+# required atoms produced a score at all, and the census line above read 'tiers executed: 1 of 2'.
+# That is the plain ``pip install prompt-craft`` experience, not an exotic path.
+
+
+def _half_installed(resolved, thresholds):
+    """Tier-0 present, Tier-1 absent: the shape a missing [image] extra actually produces."""
+    tier0 = ScriptedVerifier(
+        {"palette": 0.333}, family="siglip2", tier=0, verifier_id="palette.hist.v1"
+    )
+    dag = compile_questions(resolved)
+    return harness.evaluate(
+        dag, "x.png", {0: tier0}, thresholds, generator_family="stable-diffusion"
+    )
+
+
+def test_gate_fail_says_how_much_of_the_gate_never_scored(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    err = error_from_transcript(_half_installed(resolved, thresholds))
+    assert err is not None and err.code == "GATE_FAIL", "a real FAIL is still a real FAIL"
+    assert "palette" in err.message, "the failed atom is still named first"
+    assert "5 of 6" in err.message, (
+        "one required atom of six produced a score; the structured error said nothing about "
+        "the other five"
+    )
+    assert "SKIPPED" in err.message and "NA" in err.message
+    assert "tabard" in err.message and "sigil" in err.message
+
+
+def test_gate_fail_carries_the_tier_census_it_was_decided_under(sprite_example):
+    _s, resolved, thresholds, _c = sprite_example
+    err = error_from_transcript(_half_installed(resolved, thresholds))
+    assert "1 of 2" in err.message, "the census line is printed above; the error dropped it"
+
+
+def test_gate_fail_hint_names_a_next_move(sprite_example):
+    """The hint was 'A failed required atom blocks. Identity still gates nothing.' -- sentence one
+    restates the code, sentence two is project jargon (the identity_subgate fence) answering a
+    question the operator did not ask. There was no next move at all."""
+    _s, resolved, thresholds, _c = sprite_example
+    err = error_from_transcript(_half_installed(resolved, thresholds))
+    hint = err.hint.lower()
+    assert "severity" in hint, "lowering the atom's severity in the contract is one real move"
+    assert "[image]" in hint or "pip install" in hint, (
+        "a gate whose atoms are mostly SKIPPED is half-installed, not a content failure"
+    )
+    assert "identity still gates nothing" not in hint, (
+        "the identity_subgate fence is not an operator-facing next move"
+    )
+
+
+def test_a_fully_scored_failure_does_not_claim_a_half_installed_gate(sprite_example):
+    """The common case must not grow census prose it did not earn: every required atom scored,
+    both tiers ran, one atom failed."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(
+        dag, "x.png", passing_verifiers(scores={"weapon": 0.05}), thresholds,
+        generator_family="stable-diffusion",
+    )
+    err = error_from_transcript(t)
+    assert err is not None and err.code == "GATE_FAIL"
+    assert "weapon" in err.message
+    assert "produced no score" not in err.message, "every required atom scored on this run"
+    assert "2 of 2" in err.message or "tiers" not in err.message
+
+
+def test_the_gate_fail_exit_code_is_unchanged(sprite_example):
+    """Widening the message and the hint may not move the number a CI branch reads."""
+    from pcraft.errors import exit_code_for
+
+    _s, resolved, thresholds, _c = sprite_example
+    err = error_from_transcript(_half_installed(resolved, thresholds))
+    assert exit_code_for(err.code) == 2

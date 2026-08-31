@@ -34,7 +34,15 @@ class PaletteVerifier:
     verifier_id = "palette.hist.v1"
     version = "v1"
 
+    def __init__(self) -> None:
+        # F-1675985a. The per-colour hit vector behind the most recent score, or None when the most
+        # recent call produced no score (a text enum, an empty image, a refusal). Reset at the top
+        # of every score() rather than only written on success: a vector left over from the previous
+        # atom is the F-64b4f422 defect (a field that looks live and answers about something else).
+        self.last_breakdown: list[dict] | None = None
+
     def score(self, image_path: str, question: Question) -> float | None:
+        self.last_breakdown = None
         colours = _colours_or_refuse(question)
         if not colours:
             return None
@@ -46,12 +54,56 @@ class PaletteVerifier:
             raise PromptCraftError(
                 "RUNTIME_VERIFIER_CALL_FAILED",
                 f"palette verifier could not read {image_path!r}: {err}",
+                # F-1d5992bd: the three model-backed siblings in this verifier family
+                # (VQAScoreVerifier.score, SigLIP2Screen.score, DSGVerifier._ask) each name "CUDA
+                # OOM mid-run" here. This is the one Tier-0 delegate with no model and no GPU (see
+                # the module docstring), so inheriting the shared fallback's model-shaped wording
+                # would point the operator at an instrument that does not exist on this path.
+                hint="The histogram verifier has no model and no GPU -- this is a file-read or "
+                "decode failure (missing file, corrupt or oversized PNG, a PNG the stdlib reader "
+                "cannot decode), not a CUDA or model problem. Check the cause.",
                 cause=err,
             ) from err
         if not pixels:
             return None
         hits = [_presence(pixels, rgb) for rgb in colours]
+        # Echoed as AUTHORED, for the reason CONTRACT_PALETTE_ENUM_MIXED already echoes the written
+        # members: the operator has to find these strings in the contract, and '#00FF00' is not
+        # '#00ff00' to a text search. strict=True because a length mismatch between the authored
+        # members and the parsed colours would mean _colours_or_refuse let a malformed member
+        # through, which is precisely what it exists to refuse.
+        self.last_breakdown = [
+            {"hex": written, "rgb": rgb, "hit": round(hit, 4)}
+            for written, rgb, hit in zip(_written_hex(question.enum), colours, hits, strict=True)
+        ]
         return round(sum(hits) / len(hits), 4)
+
+    def breakdown_detail(self) -> str | None:
+        """What a multi-colour verdict cannot say from the mean alone: which colours were missing.
+
+        F-1675985a. ``score`` collapsed a genuinely per-colour measurement into one float, so a
+        FAIL on the shipped ``['#3a3a3a','#d9d4c8','#7a1f1f']`` atom read only 'score 0.3333 ->
+        FAIL (band palette)' -- indistinguishable from 'all three partially present'. The aggregate
+        is untouched (the calibration bands grade exactly what they graded before); this is the
+        additional sentence beside it.
+
+        ``_presence`` returns 1.0 once a colour covers ``_MIN_FRAC`` of the frame, 0.0 when it is
+        wholly absent, and the ratio in between -- so those three cases are named differently
+        rather than all rendered as one number the reader has to interpret.
+        """
+        if not self.last_breakdown:
+            return None
+        expected = ", ".join(entry["hex"] for entry in self.last_breakdown)
+        short = [entry for entry in self.last_breakdown if entry["hit"] < 1.0]
+        if not short:
+            return f"expected {expected}; all present"
+        named = ", ".join(
+            f"{entry['hex']} "
+            + ("absent" if entry["hit"] <= 0.0 else "below the presence floor")
+            + f" (hit {entry['hit']:.2f})"
+            for entry in short
+        )
+        return f"expected {expected}; {named}"
 
 
 class Tier0Router:
@@ -136,6 +188,37 @@ class Tier0Router:
         """
         return self.verifier_id.split(".", 1)[0]
 
+    @property
+    def last_breakdown(self) -> list[dict] | None:
+        """The per-colour hits behind the most recent score -- None when SigLIP2 produced it.
+
+        F-1675985a. DERIVED from ``last_delegate`` rather than stored, exactly like ``band_key``
+        above and for the same reason: a ``check_type=siglip2`` atom never calls the histogram at
+        all, so a stored copy would keep answering about whichever palette atom ran last. Gating on
+        the recorded delegate makes "the histogram did not measure this one" and "the histogram
+        measured this one and found nothing" different answers instead of the same stale list.
+        """
+        if self.last_delegate is None:
+            return None
+        if self.last_delegate["verifier_id"] != self._palette.verifier_id:
+            return None
+        return self._palette.last_breakdown
+
+    def score_detail(self) -> str | None:
+        """The operator-facing sentence for the most recent score, or None if there is none.
+
+        The reader ``last_breakdown`` needs so it is not the stranded field F-64b4f422 named on
+        ``last_delegate``: this is where a palette FAIL becomes "expected #3a3a3a, #d9d4c8, #7a1f1f;
+        #7a1f1f absent (hit 0.00)" instead of only a mean. Scope note, stated rather than implied:
+        stamping this onto the gate transcript needs a field on ``core.gate.harness.AtomVerdict``
+        (``extra='forbid'``, and its ``reason`` is composed harness-side) -- that half is core/gate's
+        and is deliberately not reached around from here. The value is on the router, which is the
+        object the harness and the plugin already hold.
+        """
+        if self.last_breakdown is None:
+            return None
+        return self._palette.breakdown_detail()
+
     def _record(self, delegate) -> None:
         self.last_delegate = {
             "verifier_id": delegate.verifier_id,
@@ -179,6 +262,16 @@ def _parse_hex(text: str) -> tuple[int, int, int] | None:
         return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
     except ValueError:
         return None
+
+
+def _written_hex(enum: list[str] | None) -> list[str]:
+    """The ``#``-prefixed enum members exactly as authored, in declaration order.
+
+    Order-aligned with ``_split_enum``'s ``colours`` for anything that actually scores: a ``#``
+    member that does not parse is a refusal (F-411f3f58) and an enum mixing hex with text is a
+    refusal too, so once ``_colours_or_refuse`` returns, these are the same members twice.
+    """
+    return [m for m in (enum or []) if m.strip().startswith("#")]
 
 
 def _split_enum(enum: list[str] | None) -> tuple[list[tuple[int, int, int]], list[str], list[str]]:
@@ -240,7 +333,7 @@ def _colours_or_refuse(question: Question) -> list[tuple[int, int, int]]:
     if colours and text:
         # Echo the members as AUTHORED, not as re-rendered from the parsed RGB: the author has to
         # find these strings in the contract, and '#00FF00' is not '#00ff00' to a text search.
-        written = [m for m in (question.enum or []) if m.strip().startswith("#")]
+        written = _written_hex(question.enum)
         raise PromptCraftError(
             "CONTRACT_PALETTE_ENUM_MIXED",
             f"palette atom {question.atom_id!r} mixes hex colours {written} "

@@ -52,6 +52,53 @@ class DSGVerifier:
             "vqascore.clip-flant5.v1" if answerer_model == _VQA_TIER1_DEFAULT_MODEL_ID else None
         )
 
+    def expansion_summary(self) -> list[dict]:
+        """The most recent expansion as flat rows: probe id, kind, and its score or None for N/A.
+
+        F-65fe58d5. ``score`` has always parked the full entity/attribute/relation trail on
+        ``last_expansion`` -- and a grep of the worktree found the only readers anywhere were this
+        verifier's own tests. That is the shape F-64b4f422 named on ``Tier0Router.last_delegate``:
+        a field that looks live, with tests asserting the field rather than the behaviour.
+
+        PARITY NOTE (stated, because the remedies differ and the difference matters). The router's
+        fix needed no new plumbing: ``verifier_id`` is a field the harness ALREADY reads and it was
+        answering the question wrongly, so deriving it from the recorded delegate put the right
+        answer on the transcript by itself. There is no equivalent field here.
+        ``core.gate.harness.AtomVerdict`` is ``extra='forbid'`` with no detail/evidence member, and
+        its ``reason`` is composed harness-side, so carrying a probe-level localization to the
+        transcript is a core/gate change, not this domain's. Smuggling it through ``verifier_id``
+        instead would break the ``"<band>.<instrument>.<version>"`` convention wave 6 wrote down in
+        ``palette_verifier`` and would put a per-atom string into the receipt's ``verifier_ids``
+        set. So this is the reader plus the rendered line, sitting on the instrument, waiting for
+        the one field on the other side of the boundary.
+        """
+        expansion = self.last_expansion
+        if expansion is None:
+            return []
+        scores = expansion.scores or {}
+        return [
+            {"id": probe.id, "kind": probe.kind, "score": scores.get(probe.id)}
+            for probe in expansion.probes
+        ]
+
+    def localization_detail(self) -> str | None:
+        """Which named probe failed or went N/A -- the thing a DSG mean cannot say.
+
+        The reader ``expansion_summary`` needs so it is not stranded in turn, and the same service
+        ``per_view`` already performs for ``IdentitySubGate``'s reason string. N/A is spelled out
+        rather than shown as a number, because it is not a low score: it is the answer "the entity
+        this probe depends on was absent, so the question did not apply".
+        """
+        rows = self.expansion_summary()
+        if not rows:
+            return None
+        parts = [
+            f"{row['id']}({row['kind']}) "
+            + ("N/A" if row["score"] is None else f"{row['score']:.2f}")
+            for row in rows
+        ]
+        return f"{len(rows)} probe(s): " + ", ".join(parts)
+
     def expand(self, question: Question) -> DSGExpansion:
         """Run the QG slot. Template by default; injected ``qg`` wins."""
         if self._qg is not None:

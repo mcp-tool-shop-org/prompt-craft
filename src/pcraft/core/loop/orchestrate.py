@@ -119,6 +119,21 @@ class OrchestrationResult(BaseModel):
     attempts: list[Attempt]
     record: AssetRecord | None = None
     checkpoint: ContrastiveCheckpoint | None = None
+    record_path: str = ""
+    """The file ``persist()`` actually wrote, or "" when this run wrote no receipt (F-5b783e17).
+
+    ``persist`` has always returned the ``Path`` it claimed with ``O_EXCL``, and ``run()``
+    discarded it at both doors -- so the only way for a caller to name the receipt was to
+    re-derive ``<records_dir>/<record_id>.json`` itself, duplicating a filename convention that
+    ``persist`` owns and that ``_record_id``'s ``_fs_safe`` sanitizer can change. That is the
+    string ``DEFAULT_HINTS['IO_RECORD_READ']`` sends the operator to look for ("pcraft bind
+    prints the path it wrote"), so the path has to travel with the result rather than be guessed
+    at the far end.
+
+    Additive and defaulted: the two early escalations (a prose-dump synth defect, a SEMANTIC
+    generate failure) persist nothing and report "". Empty means "no receipt was written", which
+    is a different answer from a stale one -- the same absent-not-null rule the receipt's own
+    additive fields use. ``str``, not ``Path``, because this model is dumped to JSON."""
 
 
 class _GenerationBlockedError(Exception):
@@ -242,8 +257,11 @@ def run(
             resolved, chosen_synth, gen, transcript, thresholds, dag, len(attempts), "bound",
             attempts=attempts, synthesizer=synthesizer,
         )
-        persist(record, config.records_dir)
-        return OrchestrationResult(decision="bound", reason="all required atoms passed", attempts=attempts, record=record)
+        written = persist(record, config.records_dir)
+        return OrchestrationResult(
+            decision="bound", reason="all required atoms passed", attempts=attempts,
+            record=record, record_path=str(written),
+        )
 
     # FAIL / UNCERTAIN after the budget -> human checkpoint (uncertainty / retry-exhaustion).
     # ⚑ CORRECTED IN PLACE (F-b269af73): this persist() call is structurally identical to the
@@ -252,12 +270,15 @@ def run(
     # but not "records-write" let this write through unguarded. Both doors now require both.
     compensators.require("records-write")
     compensators.require("escalation-ticket")
-    checkpoint = build_checkpoint(transcript, dag)
+    # F-b1b29cef: the table travels with the transcript to the checkpoint, so the human artifact
+    # can print the margin (score AND the band that graded it) rather than a bare float on a
+    # column whose scale changes per row. run() is holding `thresholds` already.
+    checkpoint = build_checkpoint(transcript, dag, thresholds)
     record = _build_record(
         resolved, chosen_synth, gen, transcript, thresholds, dag, len(attempts), "escalated",
         attempts=attempts, checkpoint=checkpoint, synthesizer=synthesizer,
     )
-    persist(record, config.records_dir)
+    written = persist(record, config.records_dir)
     reason = checkpoint.text
     return OrchestrationResult(
         decision="escalated",
@@ -265,6 +286,7 @@ def run(
         attempts=attempts,
         record=record,
         checkpoint=checkpoint,
+        record_path=str(written),
     )
 
 
@@ -499,21 +521,46 @@ def _repair_ladder(
     # the one attached to whichever candidate is currently winning. They diverge the moment a
     # RESYNTH_REWEIGHT lands and _select_best keeps the older image.
     current_synth = chosen_synth
+    # --- The fresh-seed counter (F-0eab8b1f).
+    #
+    # Every repair that means "generate DIFFERENT pixels" draws its seed from here, and this
+    # counter only ever advances. It used to be derived from the current WINNER
+    # (``seed = gen.seed + 100``), and ``gen`` is reassigned below from ``_select_best(...)``,
+    # which is ``min(candidates, key=...)`` -- min returns the FIRST minimum, so a reroll that
+    # scored no better left ``gen`` on the old candidate and the next pass recomputed the
+    # identical seed. Nothing else in the REROLL branch varies (no resynth happened, so the
+    # prompt is unchanged, and ``cond = conditioning`` is unchanged), which made it
+    # generate(same prompt, same negative, same conditioning, same seed): byte-identical output
+    # for any deterministic sampler, a full GPU generation charged for pixels already rendered,
+    # ``budget.rerolls -= 1`` charged for each repeat, and a receipt claiming a "new seed" that
+    # was not new -- in the record whose module docstring opens "per-asset provenance".
+    # MEASURED on the shipped example with the six required atoms at 0.05: 7 attempts, seeds
+    # [1000, 1001, 1002, 1003, 1100, 1100, 1100], 5 stub images on disk for 7 generate() calls.
+    #
+    # Starting at ``base_seed + best_of_n`` rather than at the winner's seed is what makes a
+    # ladder seed unable to collide with a screening seed: ``_best_of_n`` burns
+    # ``base_seed + i`` for i < n and can only stop early, so every seed it burned is below this.
+    #
+    # Derived, not drawn: no wall clock and no RNG. PIN_PER_STEP is the reason -- a receipt whose
+    # seeds came from a clock does not replay, so "fresh" has to mean "counted", not "random".
+    next_seed = config.base_seed + max(1, budget.best_of_n)
     # Hard cap guarantees termination even if one repair action keeps being chosen (e.g. an identity
     # atom that never recovers): cap = total remaining repair budget, then escalate to a human.
     repairs_left = budget.inpaints + budget.reprompts + budget.rerolls
     while transcript.overall is not Zone.PASS and repairs_left > 0:
         repairs_left -= 1
         repair = choose_repair(transcript, budget, dag)
+        # INPAINT_REGION is the one action that deliberately KEEPS this seed (the mask is the
+        # variation), so it is the default and the three re-generating actions overwrite it.
         seed = gen.seed
         cond = conditioning
         if repair is RepairAction.STRENGTHEN_IDENTITY:
             bump += 0.15
             cond = _assemble_conditioning(resolved, identity_weight_bump=bump)
-            seed = gen.seed + 100
+            seed, next_seed = next_seed, next_seed + 1
             budget.rerolls -= 1
         elif repair is RepairAction.REROLL_NEW_SEED:
-            seed = gen.seed + 100
+            seed, next_seed = next_seed, next_seed + 1
             budget.rerolls -= 1
         elif repair is RepairAction.RESYNTH_REWEIGHT:
             failed_ids = [
@@ -523,7 +570,11 @@ def _repair_ladder(
             current_synth = _resynth_reweight(
                 synthesizer, resolved, config.encoder_rules, failed_ids, current_synth
             )
-            seed = gen.seed + 1
+            # Same defect, same shape: ``gen.seed + 1`` is derived from the winner and repeats
+            # when _select_best keeps the older candidate, and _resynth_reweight is deterministic
+            # given the same failed set -- so a repeated RESYNTH was the same prompt at the same
+            # seed. It draws from the counter for the same reason the two above do.
+            seed, next_seed = next_seed, next_seed + 1
             budget.reprompts -= 1
         elif repair is RepairAction.INPAINT_REGION:
             # Same seed: the mask is the variation. The generator sees inpaint_from

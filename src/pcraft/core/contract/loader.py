@@ -88,7 +88,8 @@ def _read_contract(path: Path) -> Contract:
         # exit-code contract both promise 1 with a CONTRACT_ code.
         raise PromptCraftError(
             "CONTRACT_INVALID",
-            f"contract {path} does not match the contract schema: {_describe(err)}",
+            f"contract {path} does not match the contract schema: "
+            f"{describe_validation_error(err)}",
             hint=(
                 "Fix the field(s) the message names, or run `pcraft schema` to dump the "
                 "authoring JSON Schema. Re-run with --debug for pydantic's full report."
@@ -101,8 +102,14 @@ def _read_contract(path: Path) -> Contract:
 # A diagnosis, not a dump: --debug still carries every one of them, via `cause`.
 _MAX_REPORTED_ERRORS = 3
 
+# The between-entry delimiter, and the per-entry ordinal that survives a message which
+# contains the delimiter anyway (F-eaa870d6). See describe_validation_error's docstring.
+_ENTRY_SEP = " | "
 
-def _describe(err: ValidationError) -> str:
+
+def describe_validation_error(
+    err: ValidationError, *, max_reported: int = _MAX_REPORTED_ERRORS
+) -> str:
     """Summarize a pydantic ValidationError for the DEFAULT error surface (F-40a4956f).
 
     The refusal used to read "contract <path> does not match the contract schema" and nothing
@@ -122,15 +129,38 @@ def _describe(err: ValidationError) -> str:
     Only ``loc`` and ``msg`` are used. The offending ``input`` value is deliberately left out:
     it is arbitrary text from a file we did not write, and this string is printed to a console
     whose codepage we do not control (F-fd21bd37).
+
+    [!] THE DELIMITER IS NOT "; " (F-eaa870d6). The aggregate joined entries with "; " and
+    prefixed the count with "; " too -- while two of this schema's own field validators
+    (``_reject_blank_id``, ``_reject_blank_claim``) raise ValueError text that CONTAINS "; ":
+    "id must not be blank; '   ' is empty once stripped". Pydantic folds that into the
+    per-field ``msg``, so the same two characters played three roles in one run-on line and a
+    reader could not tell where one field's clause ended and the next entry began without
+    already knowing the "field.path:" pattern to look for. The authoring mistake that produces
+    it is ordinary: copy a template atom, forget to fill in both its id and its claim.
+
+    Two mechanisms, because one is not enough. ``_ENTRY_SEP`` separates entries, and each entry
+    is numbered ``[n]``. The separator does the reading; the ordinals are what still segment the
+    line if a message ever contains the separator itself -- ``msg`` can embed a ``repr`` of
+    author-written text, so no single character is safe to assume absent. The count and the
+    "(+n more)" pointer are chunks of the same sequence, not exceptions to it.
+
+    Shared with ``optimize/artifact.load_pinned`` (F-936b313e), which had the same
+    says-nothing-by-default refusal for the same on-disk-JSON-vs-pydantic-model failure. It is
+    one function rather than two copies so the next improvement here cannot fail to reach that
+    sibling -- which is exactly how that finding was born. Its natural home is ``pcraft.errors``
+    beside ``PromptCraftError``; it lives here because this is where its history is.
     """
     errors = err.errors()
-    shown = errors[:_MAX_REPORTED_ERRORS]
-    parts = [f"{'.'.join(str(p) for p in e['loc']) or '<root>'}: {e['msg']}" for e in shown]
-    summary = "; ".join(parts)
+    shown = errors[:max_reported]
+    parts = [
+        f"[{n}] {'.'.join(str(p) for p in e['loc']) or '<root>'}: {e['msg']}"
+        for n, e in enumerate(shown, start=1)
+    ]
     remaining = len(errors) - len(shown)
     if remaining > 0:
-        summary += f"; (+{remaining} more, see --debug)"
-    return f"{len(errors)} error(s); {summary}"
+        parts.append(f"(+{remaining} more, see --debug)")
+    return _ENTRY_SEP.join([f"{len(errors)} error(s)", *parts])
 
 
 _MAX_EXTENDS_DEPTH = 64

@@ -76,8 +76,16 @@ _EXIT_BY_CODE: Final[dict[str, int]] = {
 }
 
 DEFAULT_HINTS: Final[dict[str, str]] = {
-    "DEP_IMAGE_MISSING": "Install the GPU extra: pip install -e '.[image]' (torch + diffusers).",
-    "DEP_SYNTH_MISSING": "Install the synth extra: pip install -e '.[synth]' (DSPy + an LM backend).",
+    # CORRECTED IN PLACE (coordinator addition, same family as the hint sweep below). These
+    # named ONLY the editable form -- pip install -e '.[image]' -- which is a command that
+    # requires a CHECKOUT. A user who ran `pip install prompt-crafter` has no '.' to point at, so
+    # the one actionable sentence they were given could not be run at all, and DEP_IMAGE_MISSING
+    # is precisely the code that user hits first. The installed form leads; the editable form is
+    # kept in parentheses for the contributor case, which is the smaller of the two audiences.
+    "DEP_IMAGE_MISSING": "Install the GPU extra: pip install 'prompt-crafter[image]' (or, from a "
+    "checkout, pip install -e '.[image]') -- torch + diffusers.",
+    "DEP_SYNTH_MISSING": "Install the synth extra: pip install 'prompt-crafter[synth]' (or, from "
+    "a checkout, pip install -e '.[synth]') -- DSPy + an LM backend.",
     "STATE_COMPILE_NEEDS_GATE": "Call compile_synthesizer from Python with an EXTERNAL gate_metric. "
     "The CLI does not generate pixels. --seed pins the scaffold artifact.",
     "STATE_COMPILE_NOT_WIRED": "Use optimizer='gepa' or 'miprov2'. Unknown names refuse.",
@@ -99,8 +107,23 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "and may not rewrite inherited content (claim, check_type, spatial, enum, depends_on). "
     "Raise the severity, or add a new id -- never substitute an existing id's content.",
     "IO_GATE_INPUT": "Pass a readable image file. A missing path is not a failed atom. Exit 4.",
-    "GATE_UNAVAILABLE": "Install the [image] extra (pip install -e '.[image]') so a verifier can score. Exit 4, not 2 -- this is not a failed atom.",
-    "GATE_FAIL": "A required contract atom failed. Identity still gates nothing. Exit 2.",
+    "GATE_UNAVAILABLE": "Install the [image] extra (pip install 'prompt-crafter[image]', or "
+    "pip install -e '.[image]' from a checkout) so a verifier can score. Exit 4, not 2 -- this is "
+    "not a failed atom.",
+    # CORRECTED IN PLACE (F-56203d3d). This read "A required contract atom failed. Identity still
+    # gates nothing. Exit 2." on the code every content failure lands on: sentence one restates
+    # the code, sentence two is project jargon (the identity_subgate fence) answering a question
+    # the operator did not ask, and between them there was no next move -- not "the atoms are
+    # listed above", not "repair, or lower the severity in the contract", nothing. The
+    # identity_subgate fact is true and belongs in the docs, not in the one line an operator gets
+    # when the gate refuses. The half-installed sentence is here because it is the plain
+    # ``pip install prompt-craft`` experience: with no [image] extra, five of the example's six
+    # required atoms are SKIPPED and the sixth's FAIL is the only thing this code reports.
+    "GATE_FAIL": "Fix the atom named above or lower its severity in the contract; the transcript "
+    "lists each atom, its score and the band that graded it. If most required atoms are SKIPPED "
+    "the gate is half-installed -- install the [image] extra (pip install 'prompt-crafter[image]', "
+    "or pip install -e '.[image]' from a checkout) and re-run before treating this as a content "
+    "failure. Exit 2.",
     "PARTIAL_UNCONFIRMED": "At least one required atom was scored but the roll-up is UNCERTAIN. Human band. Exit 3.",
     "IO_RECORD_INVALID": "The receipt is JSON but does not match the AssetRecord schema. Re-bind, or pass --debug.",
     "IO_RECORD_SCHEMA_UNSUPPORTED": "This receipt was written by a NEWER prompt-craft than the "
@@ -158,7 +181,8 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "IO_ARTIFACT_READ": "The pinned compiled artifact could not be read. Run pcraft compile "
     "(offline GEPA), or pass --seed to write the scaffold artifact.",
     "IO_SCRIPT_MISSING": "The script this command runs is not in the installed package. Re-install "
-    "prompt-craft (pip install -e .) rather than editing the CLI.",
+    "it (pip install --force-reinstall prompt-crafter, or pip install -e . from a checkout) rather "
+    "than editing the CLI.",
     "CONTRACT_SCHEMA_UNSUPPORTED": "This contract declares a $schema this build does not read. "
     "Upgrade prompt-craft, or set $schema to prompt-craft/contract.v1. The file is well formed, "
     "not corrupt. Exit 1 (your input), not 2.",

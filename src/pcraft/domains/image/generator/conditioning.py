@@ -54,6 +54,24 @@ def identity_refs(conditioning: dict) -> list[dict[str, Any]]:
     return out
 
 
+def skipped_identity_refs(conditioning: dict) -> list[dict[str, Any]]:
+    """Plate-carrying identity refs whose method is a documented SKIP, with the method resolved.
+
+    F-60b76831: the complement of ``identity_refs`` -- the refs every method-specific accessor
+    above deliberately drops. Reads the RAW refs for the same reason ``declared_methods`` does: a
+    skip is invisible to every filtered view by construction, and a receipt that can only show the
+    filtered views cannot say a skip happened.
+    """
+    out: list[dict[str, Any]] = []
+    for raw in conditioning.get("identity_refs") or []:
+        if not isinstance(raw, dict) or not raw.get("plate"):
+            continue
+        method = str(raw.get("method") or _IP_ADAPTER)
+        if method in _SKIP_METHODS:
+            out.append({**raw, "method": method})
+    return out
+
+
 def ip_adapter_refs(conditioning: dict) -> list[dict[str, Any]]:
     return [r for r in identity_refs(conditioning) if r["method"] == _IP_ADAPTER]
 
