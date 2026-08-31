@@ -13,6 +13,9 @@ plus the Director-requested `pcraft gate` / --generator-family same-family regre
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
 
 import pytest
 import typer.main
@@ -306,9 +309,16 @@ def test_gate_default_generator_family_comes_from_the_registered_plugin(tmp_path
 # changes nothing. The em-dash in `compile`'s docstring also rendered inside the ROOT
 # `pcraft --help` listing, so a single character took the whole front door down.
 #
-# cp437 is the assertion rather than str.isascii() on the RENDERED page because Rich draws
-# the help panels with box characters (U+2500/2502/250C/2510/2514/2518) that cp437 encodes
-# fine. The source-declared strings are checked for pure ASCII separately, below.
+# The assertion is a REAL subprocess with stdio pinned to cp437:strict -- the honest
+# simulation of the classic Windows OEM console. The first form of this test rendered
+# in-process and then encode()d the captured page, which asserted an ENVIRONMENT property
+# instead of the repo's: Rich picks its panel glyphs from the attached terminal, drew
+# rounded corners (U+256D -- not in cp437) on the Linux CI runner and square ones (which
+# cp437 has) on every Windows box this was written on, so the test failed CI over glyphs
+# this repo does not author. With the child's encoding pinned, Rich adapts exactly as it
+# does on a real cp437 console, and a non-encodable character in OUR strings still dies
+# as an unhandled UnicodeEncodeError with exit 1, outside every --debug gate.
+# The source-declared strings are checked for pure ASCII separately, below.
 
 
 def _help_argvs() -> list[list[str]]:
@@ -318,18 +328,18 @@ def _help_argvs() -> list[list[str]]:
 
 @pytest.mark.parametrize("argv", _help_argvs(), ids=lambda a: "-".join(a).replace("--", ""))
 def test_every_rendered_help_page_encodes_on_a_cp437_console(argv):
-    result = runner.invoke(app, argv)
-    assert result.exit_code == 0, f"pcraft {' '.join(argv)} did not render"
-    text = (result.stdout or "") + (result.stderr or "")
-    try:
-        text.encode("cp437")
-    except UnicodeEncodeError as exc:
-        offending = text[exc.start : exc.end]
-        pytest.fail(
-            f"pcraft {' '.join(argv)} renders U+{ord(offending[0]):04X} ({offending!r}), which a "
-            "cp437 console cannot encode -- on such a console this help page dies with an "
-            "unhandled UnicodeEncodeError and exit 1, outside every --debug gate"
-        )
+    env = {**os.environ, "PYTHONIOENCODING": "cp437:strict", "PYTHONUTF8": "0"}
+    proc = subprocess.run(
+        [sys.executable, "-m", "pcraft", *argv],
+        capture_output=True,
+        env=env,
+        timeout=60,
+        check=False,  # the return code IS the assertion below
+    )
+    assert proc.returncode == 0, (
+        f"pcraft {' '.join(argv)} died on a cp437-pinned console: "
+        f"{proc.stderr.decode('cp437', 'replace')[-400:]}"
+    )
 
 
 def _declared_help_strings() -> list[tuple[str, str]]:
