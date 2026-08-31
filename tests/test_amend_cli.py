@@ -1451,14 +1451,17 @@ def _stdout_at(argv, columns="100"):
         # NO_COLOR: the GitHub runner makes Rich force ANSI even when piped, so every
         # rendered line starts with an escape sequence instead of its indent and the
         # layout regexes match nothing -- same class as the width cache, third axis
-        # (color). Pin all three: width, encoding, color.
+        # (color). And NO_COLOR alone is not enough: Rich reads it as "no colors" and
+        # STILL emits style escapes (dim/bold), measured on the runner. The env pin
+        # stays for the axes it does hold (width, encoding), and the return strips
+        # whatever escapes survive -- these tests assert the geometry a human sees.
         env={**os.environ, "COLUMNS": columns, "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"},
         timeout=60,
         check=False,
         text=True,
         encoding="utf-8",
     )
-    return proc.stdout or ""
+    return re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout or "")
 
 
 # --------------------------------------------------------------------------- F-f880d5a4
