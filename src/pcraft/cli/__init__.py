@@ -17,28 +17,30 @@ import typer
 from pydantic import BaseModel, ConfigDict
 
 # Typer 0.26 vendored Click as `typer._click`; 0.25 and earlier use the standalone
-# `click` package. pyproject declares `typer>=0.12`, so BOTH are inside the range this
-# package says it supports and neither import works on its own. Reaching for one and
-# not the other made the whole CLI unimportable on a conforming install
-# (ModuleNotFoundError at import time, before any command runs) -- caught only because
-# the swarm's deterministic floor happened to run on a different interpreter than the
-# dev venv. These are the exception types Click raises for its OWN parser errors; there
-# is no public re-export of them under either layout, so the fallback is the portable
-# form rather than a preference.
+# `click` package; 0.27 moved Abort OUT of the vendored module into typer's own
+# `typer.exceptions` and ships no `click` at all. pyproject declares `typer>=0.12`, so
+# all three layouts are inside the supported range. The private-module import below
+# broke twice, each time at import (before any command runs): once as
+# ModuleNotFoundError on <0.26, then on 0.27 as ImportError from a module that still
+# EXISTS -- which a `except ModuleNotFoundError` does not catch, so the "portable"
+# fallback was unreachable exactly when needed, and the fallback's `click` no longer
+# exists there anyway.
+#
+# Abort needs none of this: `typer.Abort` is public on every supported layout and is
+# identity-equal to whatever class the active machinery raises (measured: on 0.26.7 it
+# IS the vendored click Abort; on 0.27.2 it is typer.exceptions.Abort). Prefer the
+# public name; keep the two-branch import only for ClickException, which stayed in the
+# vendored module on >=0.26 and in real click before that.
+from typer import Abort as _ClickAbort
+
 try:
-    from typer._click.exceptions import Abort as _ClickAbort
     from typer._click.exceptions import ClickException as _ClickException
-except ModuleNotFoundError:  # typer < 0.26
-    # Same role, different class object under each layout -- binding both to one
-    # name is the whole point of the fallback, so the assignment mismatch is
-    # expected rather than a defect to fix.
-    #
+except ModuleNotFoundError:  # typer < 0.26 -- click is a real dependency there
     # The ClickException import is WRAPPED because it exceeds line-length, and the ignore
     # must therefore sit on the statement's FIRST line: mypy does not apply a `type: ignore`
     # found on an inner line of a parenthesised import. Adopting isort wrapped this line and
     # left the comment inside, which silently detached the suppression -- caught by mypy in a
     # CI-equivalent venv, not locally. Do not move it back inside the parentheses.
-    from click.exceptions import Abort as _ClickAbort  # type: ignore[assignment,no-redef]
     from click.exceptions import (  # type: ignore[assignment,no-redef]
         ClickException as _ClickException,
     )

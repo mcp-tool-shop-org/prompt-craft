@@ -152,6 +152,43 @@ def _install_fake_t2v_metrics(monkeypatch, vqascore_cls) -> None:
     monkeypatch.setitem(sys.modules, "t2v_metrics", fake_t2v)
 
 
+def _install_fake_pil(monkeypatch) -> None:
+    # The suite must pass on a bare [dev] install: cond.open_image / mask_for_region
+    # import PIL at call time, so the Fill-branch test needs PIL faked the same way
+    # torch and diffusers are (coordinator fold fix: this test passed only where the
+    # [image] extra happened to be installed -- CI has no PIL and refused with
+    # DEP_IMAGE_MISSING, which is the door working and the test leaning on the env).
+    fake_pil = types.ModuleType("PIL")
+    fake_image = types.ModuleType("PIL.Image")
+    fake_draw = types.ModuleType("PIL.ImageDraw")
+
+    class _Img:
+        def __init__(self, mode="RGB", size=(64, 64), color=0):
+            self.mode = mode
+            self.size = size
+            self.color = color
+
+        def save(self, path):
+            Path(path).write_bytes(b"fake-png")
+
+    fake_image.open = lambda path: _Img()
+    fake_image.new = lambda mode, size, color=0: _Img(mode, size, color)
+
+    class _Draw:
+        def __init__(self, img):
+            self.img = img
+
+        def rectangle(self, box, fill=0):
+            pass
+
+    fake_draw.Draw = _Draw
+    fake_pil.Image = fake_image
+    fake_pil.ImageDraw = fake_draw
+    monkeypatch.setitem(sys.modules, "PIL", fake_pil)
+    monkeypatch.setitem(sys.modules, "PIL.Image", fake_image)
+    monkeypatch.setitem(sys.modules, "PIL.ImageDraw", fake_draw)
+
+
 # =========================================================================== F-657db549 / F-d628ec97
 # conditioning is accepted, documented, and never read. generate() must now refuse rather than
 # silently no-op when asked for pose_refs/identity_refs it cannot apply. No fake torch/diffusers
@@ -814,6 +851,7 @@ def test_flux_records_the_negative_prompt_it_discards(monkeypatch, tmp_path):
 
 def test_flux_records_the_drop_on_the_fill_branch_too(monkeypatch, tmp_path):
     _install_fake_torch(monkeypatch, cuda_available=False)
+    _install_fake_pil(monkeypatch)
     captured = _install_fake_diffusers(monkeypatch, pipeline_attr="FluxFillPipeline")
     src = write_solid_png(tmp_path / "prev.png")
     gen = FluxGenerator(out_dir=tmp_path / "out")
