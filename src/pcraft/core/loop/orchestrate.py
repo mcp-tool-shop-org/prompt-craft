@@ -38,6 +38,7 @@ same atoms — one declarative source, two consumers."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -225,7 +226,12 @@ def run(
         compensators.require("escalation-ticket")
         return OrchestrationResult(decision="escalated", reason=blocked.err.to_safe_text(), attempts=attempts)
 
-    gen, transcript = chosen
+    # F-f99c78f8: the THIRD element is the SynthResult that produced this image, not the one
+    # ``_synthesize_with_assert`` returned at the top. The repair ladder can re-synthesize
+    # (RESYNTH_REWEIGHT) and ``_select_best`` can then keep either candidate, so stamping the
+    # receipt from the original ``synth`` would have written a prompt that did not produce the
+    # pixels the receipt certifies -- a field that is wrong is worse than a field that is absent.
+    gen, transcript, chosen_synth = chosen
     verdict = verdict_from_transcript(transcript)
 
     # --- DECIDE. Bind only on ADVANCE (every required atom PASS AND a complete tier census).
@@ -233,8 +239,8 @@ def run(
         compensators.require("records-write")
         compensators.require("bind-to-canon")  # no-skip gate BEFORE the irreversible action
         record = _build_record(
-            resolved, synth, gen, transcript, thresholds, dag, len(attempts), "bound",
-            attempts=attempts,
+            resolved, chosen_synth, gen, transcript, thresholds, dag, len(attempts), "bound",
+            attempts=attempts, synthesizer=synthesizer,
         )
         persist(record, config.records_dir)
         return OrchestrationResult(decision="bound", reason="all required atoms passed", attempts=attempts, record=record)
@@ -248,8 +254,8 @@ def run(
     compensators.require("escalation-ticket")
     checkpoint = build_checkpoint(transcript, dag)
     record = _build_record(
-        resolved, synth, gen, transcript, thresholds, dag, len(attempts), "escalated",
-        attempts=attempts, checkpoint=checkpoint,
+        resolved, chosen_synth, gen, transcript, thresholds, dag, len(attempts), "escalated",
+        attempts=attempts, checkpoint=checkpoint, synthesizer=synthesizer,
     )
     persist(record, config.records_dir)
     reason = checkpoint.text
@@ -424,7 +430,8 @@ def _gate(gen: GenerationResult, verifiers, thresholds, dag, generator_family: s
 
 
 def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, conditioning, config, attempts, budget):
-    candidates: list[tuple[GenerationResult, harness.GateTranscript]] = []
+    # (generation, transcript, the SynthResult whose prompt produced it) -- see run()'s unpack.
+    candidates: list[tuple[GenerationResult, harness.GateTranscript, SynthResult]] = []
     last_err: PromptCraftError | None = None
     n = max(1, budget.best_of_n)
     for i in range(n):
@@ -443,7 +450,7 @@ def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, condition
         transcript = _gate(gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=transcript.overall,
                                 verdict=verdict_from_transcript(transcript), note="best-of-N"))
-        candidates.append((gen, transcript))
+        candidates.append((gen, transcript, synth))
         if transcript.overall is Zone.PASS:  # early exit on first clean pass
             break
     budget.rerolls = max(0, budget.rerolls - len(candidates))
@@ -469,7 +476,7 @@ def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, condition
 def _select_best(candidates):
     # The VERIFIER is the selector: prefer PASS, then fewest required failures, then most passes.
     def key(item):
-        _gen, t = item
+        _gen, t, _synth = item
         rank = {Zone.PASS: 0, Zone.UNCERTAIN: 1, Zone.FAIL: 2, Zone.UNAVAILABLE: 3}.get(
             t.overall, 4
         )
@@ -484,11 +491,14 @@ def _repair_ladder(
     resolved, synth, synthesizer, generator, verifiers, thresholds, dag,
     conditioning, attempts, budget, chosen, config,
 ):
-    gen, transcript = chosen
+    gen, transcript, chosen_synth = chosen
     if is_unrepairable(transcript):
-        return gen, transcript
+        return gen, transcript, chosen_synth
     bump = 0.0
-    current_synth = synth
+    # ``current_synth`` is the ACTIVE prompt (what the next generate uses); ``chosen_synth`` is
+    # the one attached to whichever candidate is currently winning. They diverge the moment a
+    # RESYNTH_REWEIGHT lands and _select_best keeps the older image.
+    current_synth = chosen_synth
     # Hard cap guarantees termination even if one repair action keeps being chosen (e.g. an identity
     # atom that never recovers): cap = total remaining repair budget, then escalate to a human.
     repairs_left = budget.inpaints + budget.reprompts + budget.rerolls
@@ -539,21 +549,67 @@ def _repair_ladder(
         new_t = _gate(new_gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=new_t.overall,
                                 verdict=verdict_from_transcript(new_t), repair=repair, note="repair"))
-        # keep the better of old/new (the verifier is still the selector)
-        gen, transcript = _select_best([(gen, transcript), (new_gen, new_t)])
-    return gen, transcript
+        # keep the better of old/new (the verifier is still the selector), carrying each
+        # candidate's own prompt with it so the receipt can name the one that made the pixels
+        gen, transcript, chosen_synth = _select_best(
+            [(gen, transcript, chosen_synth), (new_gen, new_t, current_synth)]
+        )
+    return gen, transcript, chosen_synth
+
+
+def _record_id(resolved, gen, chash: str, created_at: str) -> str:
+    """A receipt id that varies per run (F-a99ec99e).
+
+    This was ``f"{resolved.id.replace(':', '_')}-seed{gen.seed}"`` and carried no run identity: no
+    time, no contract_hash, no attempt discriminator. ``persist`` derives the filename from it, so
+    two runs of one contract targeted one path and the second truncated the first -- and the
+    collision was most likely on exactly the runs that matter, since ``base_seed`` defaults to
+    1000 and best-of-N early-exits on the first clean PASS. A contract EDIT did not help either:
+    contract_hash is stored in the record but was not part of the id, so re-binding after a
+    revision overwrote the previous revision's receipt too.
+
+    The hash prefix separates contract revisions; the UTC stamp separates runs of the same
+    revision. Microseconds, not seconds: two binds inside one second is an ordinary thing for a
+    test or a batch.
+
+    Everything is pushed through ``_fs_safe`` because ``persist`` turns this string into a
+    filename. That is not defensive decoration: the first draft of this function spliced in
+    ``contract_hash(resolved)[:8]``, which is ``"sha256:a"`` -- the hash is PREFIXED with its
+    algorithm -- and on NTFS a colon in a path is not an error, it opens an ALTERNATE DATA STREAM.
+    The receipt wrote successfully, ``Path.exists()`` returned True, and the directory listing was
+    empty. Caught by ``test_a_second_run_cannot_destroy_the_first_bound_receipt`` counting files
+    rather than trusting exists(); the sanitizer is here so the next component with punctuation in
+    it cannot repeat it.
+    """
+    digest = chash.rsplit(":", 1)[-1][:8]
+    return _fs_safe(f"{resolved.id}-seed{gen.seed}-{digest}-{created_at}")
+
+
+def _fs_safe(text: str) -> str:
+    """Reduce to characters that are a filename on every platform this ships to."""
+    return "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in text)
 
 
 def _build_record(
     resolved, synth, gen, transcript, thresholds, dag, retry_count, decision,
-    *, attempts=None, checkpoint=None,
+    *, attempts=None, checkpoint=None, synthesizer=None,
 ) -> AssetRecord:
     verifier_ids = sorted({v.verifier_id for v in transcript.verdicts if v.verifier_id})
+    chash = contract_hash(resolved)
+    now = datetime.now(UTC)
+    stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
+    # F-f99c78f8: compiled_synth_id and synth_backend were assigned the IDENTICAL expression here
+    # (both ``synth.backend``), so on the shipped template path both read "template" and the module
+    # docstring credited a pinned field carrying no information the field beside it did not. The
+    # synthesizer already publishes the id of the artifact it is running --
+    # "template.v1+<program_id>@<version>" or "dspy.v1+<artifact_id>" -- which is what
+    # "compiled synth id" was always supposed to mean. The backend label stays what it was.
+    compiled_synth_id = getattr(synthesizer, "synthesizer_id", "") or synth.backend
     return AssetRecord(
-        record_id=f"{resolved.id.replace(':', '_')}-seed{gen.seed}",
+        record_id=_record_id(resolved, gen, chash, stamp),
         contract_id=resolved.id,
-        contract_hash=contract_hash(resolved),
-        compiled_synth_id=synth.backend,
+        contract_hash=chash,
+        compiled_synth_id=compiled_synth_id,
         synth_backend=synth.backend,
         synth_degraded=synth.degraded,
         generator_id=gen.generator_id,
@@ -563,10 +619,15 @@ def _build_record(
         conditioning=gen.conditioning,
         verifier_ids=verifier_ids,
         thresholds_version=thresholds.version,
+        thresholds_fingerprint=thresholds.fingerprint(),
         question_dag=dag,
         gate_transcript=transcript,
         retry_count=retry_count,
         decision=decision,
         attempts=list(attempts or []),
         checkpoint=checkpoint,
+        image_path=gen.image_path,
+        created_at=now.isoformat().replace("+00:00", "Z"),
+        prompt=synth.prompt,
+        negative_prompt=synth.negative_prompt,
     )

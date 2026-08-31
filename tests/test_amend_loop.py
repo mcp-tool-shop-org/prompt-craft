@@ -680,7 +680,12 @@ def test_a_semantic_failure_during_a_repair_records_the_repair_it_was_paying_for
     with pytest.raises(orchestrate._GenerationBlockedError):
         orchestrate._repair_ladder(
             resolved, synth_result, TemplateSynthesizer(compiled), blocked, verifiers,
-            thresholds, dag, {}, attempts, RetryBudget(), (first, transcript),
+            thresholds, dag, {}, attempts, RetryBudget(),
+            # F-f99c78f8: a candidate is (generation, transcript, the SynthResult whose prompt
+            # produced it). The third element exists so the receipt can name the prompt that made
+            # the pixels rather than the prompt the run started with -- the repair ladder can
+            # re-synthesize and then keep the older image.
+            (first, transcript, synth_result),
             LoopConfig(records_dir=str(tmp_path)),
         )
     assert len(attempts) == 1

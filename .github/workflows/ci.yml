@@ -36,9 +36,31 @@ jobs:
         # not claimed on 3.11.
         python-version: ["3.11", "3.13"]
     steps:
+      # ACTION MAJORS ARE PINNED TO THE NODE24-NATIVE ONES, IN ALL THREE WORKFLOWS.
+      # The reason lives here because this is the file that already had half of it.
+      #
+      # Every third-party action except this checkout used to target the Node 20 runtime
+      # GitHub is removing. Nothing was red: the runner force-ran them on Node 24 and
+      # printed "Node.js 20 is deprecated" once per step. That warning is a schedule, and
+      # the schedule is GitHub's, not this repo's -- on the Node16->20 cycle the sequence
+      # was warn, then force, then remove the shim, and removal turns every un-bumped step
+      # into a hard failure at `Run actions/X`. That would have taken ci.yml, pages.yml
+      # AND release.yml -- the credentialed publish path -- on the same day, chosen by
+      # someone else. checkout@v5 sitting one file away from release.yml's checkout@v4 for
+      # the identical action was the tell: solved once, not propagated.
+      #
+      # Each target major was read back before it was pinned: `runs.using: node24` in its
+      # own action.yml, and every input this repo passes still declared there.
+      # upload-pages-artifact@v5 is `using: composite` rather than node24 and is not an
+      # exception -- it delegates to a SHA-pinned actions/upload-artifact@v7, which is.
+      #
+      # These are drop-in majors for this repo's plain usage, verified statically. A major
+      # bump can still carry behavior this reading did not cover; one real run per workflow
+      # is what actually settles that, and pages.yml/release.yml are triggered rarely enough
+      # that the first such run may be a real deploy or a real release.
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 

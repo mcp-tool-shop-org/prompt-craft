@@ -128,6 +128,59 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "existed, so nothing was gated. The message names the last failure -- fix THAT code, not the "
     "seed. A failure that repeats on every attempt is not transient: check the generator's model "
     "load and its dependencies. Re-run with --debug for the underlying traceback.",
+    # ---------------------------------------------------------------- F-5592ffad
+    # `pcraft replay` is a covered command ("flags and drift refusals") and 100 percent of its
+    # refusal surface shipped with this field empty, because to_safe_text() omits the hint LINE
+    # entirely when hint resolves to ''. The three below are that command's whole refusal set.
+    # The rest close the CLASS rather than the instances: every PromptCraftError construction
+    # site in src/ now resolves advice, pinned by
+    # tests/test_stability_surface.py::test_every_error_construction_site_in_src_resolves_a_hint,
+    # which is what makes the NEXT hintless code go red instead of shipping.
+    "STATE_REPLAY_DRIFT": "The receipt is NOT corrupt -- it was decided under a different "
+    "contract, question DAG or threshold table than this run loaded. Either re-run replay with "
+    "--thresholds pointed at the table the receipt names, or accept the retune and re-bind the "
+    "asset. Do not edit the receipt.",
+    "IO_RECORD_READ": "The path does not exist, or the file is not valid JSON -- the message says "
+    "which. Point at a receipt under your records dir (pcraft bind prints the path it wrote).",
+    "IO_THRESHOLDS_READ": "Pass --thresholds at a readable calibration JSON, or omit it to use "
+    "the shipped sprite table (pcraft.domains.image.subdomains.sprite THRESHOLDS_PATH).",
+    "CONFIG_THRESHOLDS_SCHEMA_UNSUPPORTED": "This calibration table was written by a NEWER "
+    "prompt-craft than the one reading it. Upgrade prompt-craft to read it. Do NOT recalibrate or "
+    "hand-edit the bands: the table is well formed, not miscalibrated.",
+    "IO_RECORD_EXISTS": "A receipt already exists at that path and prompt-craft will not "
+    "overwrite one. The message names the file. Move or delete it deliberately, or pass a "
+    "different --records-dir; a bound receipt is the audit trail for pixels already in canon.",
+    "CONTRACT_NO_REQUIRED_ATOM": "This contract declares no required atom, so the gate has "
+    "nothing it is allowed to block on and a bind would assert nothing. Raise at least one atom "
+    "to severity=required. Nothing here is a missing verifier.",
+    "IO_CONTRACT_READ": "The path does not exist, or the file is not valid JSON. Point "
+    "--contracts-dir at a tree of *.contract.json files.",
+    "IO_ARTIFACT_READ": "The pinned compiled artifact could not be read. Run pcraft compile "
+    "(offline GEPA), or pass --seed to write the scaffold artifact.",
+    "IO_SCRIPT_MISSING": "The script this command runs is not in the installed package. Re-install "
+    "prompt-craft (pip install -e .) rather than editing the CLI.",
+    "CONTRACT_SCHEMA_UNSUPPORTED": "This contract declares a $schema this build does not read. "
+    "Upgrade prompt-craft, or set $schema to prompt-craft/contract.v1. The file is well formed, "
+    "not corrupt. Exit 1 (your input), not 2.",
+    "CONTRACT_MISSING_BASE": "The contract extends a base id that is not in the store. Add the "
+    "base contract to --contracts-dir, or fix the extends id.",
+    "INPUT_DUPLICATE_CONTRACT_ID": "Two files in the contract store declare the same id. Ids are "
+    "the key the resolver and every receipt use; rename one.",
+    "INPUT_NO_DOMAIN": "No domain plugin is registered. Install the [image] extra, or register a "
+    "domain before calling this.",
+    "SYNTH_COVERAGE_UNKNOWN_ATOM": "The synthesizer claimed coverage of an atom id the contract "
+    "does not declare. Fix the synthesizer's atom_coverage keys -- a claim about an atom that "
+    "does not exist covers nothing.",
+    "RUNTIME_GENERATE_FAILED": "generate() raised. This is classified TRANSIENT, so the loop "
+    "retries within its existing budget and this code is normally absorbed into an Attempt note "
+    "or quoted by RUNTIME_GENERATE_EXHAUSTED. If you are reading it directly, re-run with --debug "
+    "for the generator's own traceback.",
+    "RUNTIME_GENERATOR_LOAD_FAILED": "The generator's model could not be loaded (weights, VRAM, "
+    "or a broken install). This is SEMANTIC, not transient: another seed will not fix it. Check "
+    "the model path and the [image] extra.",
+    "RUNTIME_VERIFIER_CALL_FAILED": "A verifier raised while scoring. That is a defect, not a "
+    "missing score, so it is not recorded as SKIPPED. The message names the instrument and the "
+    "input; re-run with --debug for its traceback.",
 }
 
 

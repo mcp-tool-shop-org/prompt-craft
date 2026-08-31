@@ -6,6 +6,7 @@ required atom passed. A check that cannot see its input, or that produced
 no score, must not look like success to a caller reading the exit code.
 
   IO_GATE_INPUT      path unreadable — raised by preflight, not here
+  CONTRACT_NO_REQUIRED_ATOM  the contract declares nothing the gate may block on
   GATE_UNAVAILABLE   no required atom produced a score (extras missing)
   GATE_FAIL          a required atom scored FAIL — may block
   PARTIAL_UNCONFIRMED required atom unconfirmed after at least one real score
@@ -26,6 +27,18 @@ from .thresholds import Zone
 
 def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None:
     """None means PASS (exit 0). Anything else is a refuse."""
+    if transcript.declares_no_required_atom():
+        # F-2c7b997a. This branch used to be inside could_not_run(), so a run in which every
+        # verifier scored and every atom passed was answered GATE_UNAVAILABLE at exit 4, and that
+        # code's hint says "Install the [image] extra ... so a verifier can score". The refusal
+        # itself is right -- a gate with nothing it may block on has decided nothing, and nothing
+        # binds -- but the defect is in the CONTRACT, not in the environment, so it takes a
+        # CONTRACT_ code at exit 1 like every other contract-authoring refusal.
+        return PromptCraftError(
+            "CONTRACT_NO_REQUIRED_ATOM",
+            f"contract {transcript.contract_id!r} declares no required atom, so the gate has "
+            f"nothing it may block on ({len(transcript.verdicts)} atom(s) evaluated, all optional)",
+        )
     if transcript.could_not_run():
         skipped = [v.atom_id for v in transcript.verdicts if v.zone is Zone.SKIPPED]
         return PromptCraftError(

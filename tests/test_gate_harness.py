@@ -130,3 +130,58 @@ def test_evaluate_stamps_the_thresholds_version(sprite_example):
     dag = compile_questions(resolved)
     t = harness.evaluate(dag, "x.png", passing_verifiers(), thresholds, generator_family="stable-diffusion")
     assert t.thresholds_version == thresholds.version == "sprite.cal.v1"
+
+
+# --------------------------------------------------------------------------- F-00cfd3f8
+# The band is chosen by the INSTRUMENT that produced the number, not by the atom's declared
+# check_type, whenever the two name different band families. The shipped bands are almost an
+# order of magnitude apart (siglip2 high=0.10 vs palette high=0.85), so grading one
+# instrument's confident answer on another's scale is a WRONG verdict, not an unconfirmed one.
+
+
+def _verdict(transcript, atom_id):
+    return {v.atom_id: v for v in transcript.verdicts}[atom_id]
+
+
+def test_a_delegated_screen_score_is_zoned_on_the_screen_band(sprite_example):
+    """The Tier-0 router hands a ``palette`` atom whose enum carries no hex colours to SigLIP2 and
+    reports ``siglip2.screen.v1`` as the instrument. The score comes back on the SigLIP2 scale and
+    used to be graded against the palette band: 0.30 is a strong SigLIP2 match (high 0.10) and a
+    confident palette FAIL (low 0.50). Same number, opposite answers."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    screen = ScriptedVerifier(
+        {"palette": 0.30}, family="siglip2", tier=0, verifier_id="siglip2.screen.v1"
+    )
+    t = harness.evaluate(dag, "x.png", {0: screen}, thresholds, generator_family="stable-diffusion")
+    v = _verdict(t, "palette")
+    assert v.verifier_id == "siglip2.screen.v1"
+    assert v.band_key == "siglip2", "the band must follow the instrument that produced the number"
+    assert v.zone is Zone.PASS, "0.30 is a FAIL only on someone else's calibration"
+
+
+def test_a_palette_score_still_uses_the_palette_band(sprite_example):
+    """The other direction: when the histogram really did measure it, nothing moves."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    hist = ScriptedVerifier(
+        {"palette": 0.30}, family="palette-hist", tier=0, verifier_id="palette.hist.v1"
+    )
+    t = harness.evaluate(dag, "x.png", {0: hist}, thresholds, generator_family="stable-diffusion")
+    v = _verdict(t, "palette")
+    assert v.band_key == "palette"
+    assert v.zone is Zone.FAIL  # 0.30 <= palette low 0.50
+
+
+def test_an_instrument_that_names_no_band_keeps_the_check_type_band(sprite_example):
+    """``scripted.siglip2.v0`` leads with ``scripted``, which is not a band in the table, so the
+    atom's declared check_type stays the answer. The rule may only ever redirect to a band the
+    table actually declares -- inventing one out of an arbitrary verifier_id would be a second
+    silent re-scale, wearing the first one's fix as a disguise."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(dag, "x.png", passing_verifiers(), thresholds, generator_family="stable-diffusion")
+    v = _verdict(t, "palette")
+    assert v.verifier_id == "scripted.siglip2.v0"
+    assert v.band_key == "palette"
+    assert v.zone is Zone.PASS

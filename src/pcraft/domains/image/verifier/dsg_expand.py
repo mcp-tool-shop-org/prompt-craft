@@ -10,9 +10,10 @@ unless the caller wired one.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ....core.contract.compile_questions import Question
+from ....errors import PromptCraftError
 
 _ARTICLES = frozenset({"a", "an", "the"})
 _AFFIRM_PREFIX = "Does this image show "
@@ -44,16 +45,74 @@ class DSGExpansion(BaseModel):
     probes: list[SubProbe]
     scores: dict[str, float | None] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _reject_duplicate_probe_ids(self) -> DSGExpansion:
+        """Fail closed on a repeated probe id (F-f5cc9257), the way ``ResolvedContract`` does.
+
+        ``topological()`` keys its walk purely by id: the ``index`` dict keeps the LAST probe with a
+        given id while the ``done`` set keeps the FIRST, so a duplicate silently vanished from the
+        order and which declaration survived was an accident of list order. MEASURED: an expansion
+        with two probes sharing id 'p1' constructed with zero error and ``topological()`` returned 1
+        probe for 2 in. ``_reject_duplicate_ids`` in ``core/contract/schema.py`` refuses exactly this
+        shape at construction time, for exactly this reason: a walker's dedup must never be the
+        enforcement mechanism.
+        """
+        seen: set[str] = set()
+        for probe in self.probes:
+            if probe.id in seen:
+                raise PromptCraftError(
+                    "CONTRACT_DUPLICATE_PROBE_ID",
+                    f"DSG expansion for atom {self.atom_id!r} (source {self.source!r}) declares "
+                    f"probe id {probe.id!r} more than once",
+                    hint="Each probe id must be unique within one expansion. A duplicate is not "
+                    "deterministically evaluated -- the dependency walk keeps only one "
+                    "declaration and drops the rest. If this came from an injected qg, give each "
+                    "probe its own id.",
+                )
+            seen.add(probe.id)
+        return self
+
     def topological(self) -> list[SubProbe]:
+        """Parent-first probe order, or a coded refusal.
+
+        F-f5cc9257: this is the image domain's own copy of the walker in
+        ``core/contract/compile_questions.py``, and it never received the cycle guard that one got.
+        ``QuestionDAG.topological`` carries a ``visiting`` set and raises
+        ``CONTRACT_CYCLIC_DEPENDS_ON``; this added to ``done`` only AFTER the recursive call, so a
+        two-probe cycle recursed forever. MEASURED: probes p1.depends_on='p2' and p2.depends_on='p1'
+        raised a raw ``RecursionError`` here -- a RuntimeError, outside the PromptCraftError
+        hierarchy -- while the sibling raised the coded refusal on the identical shape. Driven
+        through ``DSGVerifier.score`` it was then swallowed by ``harness._safe_score``'s bare
+        ``except Exception`` into a SKIPPED verdict reading 'dsg.localizer.v1 raised RecursionError',
+        so a malformed expansion presented as an UNAVAILABLE INSTRUMENT.
+
+        REACHABILITY, stated honestly: the shipped ``template_expand`` never emits a cycle (it always
+        emits the entity probe every attribute/relation depends on), so this is reachable only
+        through the injected ``qg`` slot -- but that slot is a documented, advertised extension
+        point, and an injected QG is exactly the caller whose edges nothing else validates.
+        """
         index = {p.id: p for p in self.probes}
         order: list[SubProbe] = []
         done: set[str] = set()
+        visiting: list[str] = []  # a list, not a set, so the refusal can name the cycle it found
 
         def visit(probe: SubProbe) -> None:
             if probe.id in done:
                 return
+            if probe.id in visiting:
+                cycle = [*visiting[visiting.index(probe.id) :], probe.id]
+                raise PromptCraftError(
+                    "CONTRACT_CYCLIC_DEPENDS_ON",
+                    f"DSG expansion for atom {self.atom_id!r} (source {self.source!r}) has a "
+                    f"depends_on cycle {' -> '.join(cycle)}, so no parent-first probe order exists",
+                    hint="A DSG probe may only depend on a probe evaluated before it -- a missing "
+                    "entity is what makes its dependents N/A, and a cycle has no first probe. "
+                    "Break the cycle in the expansion's depends_on edges.",
+                )
+            visiting.append(probe.id)
             if probe.depends_on and probe.depends_on in index:
                 visit(index[probe.depends_on])
+            visiting.pop()
             done.add(probe.id)
             order.append(probe)
 

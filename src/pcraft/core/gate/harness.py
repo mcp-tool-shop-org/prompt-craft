@@ -35,6 +35,17 @@ class AtomVerdict(BaseModel):
     tier_used: int | None
     tiers_consulted: list[int] = Field(default_factory=list)
     verifier_id: str | None
+    band_key: str = ""
+    """Which calibration band graded ``score``. Empty when nothing scored.
+
+    F-00cfd3f8: this was never recorded because it was never in doubt -- the zone came from
+    ``thresholds.zone(q.check_type.value, ...)``, keyed purely by the atom's DECLARED check_type,
+    with no relationship to which instrument produced the number. That assumption broke the moment
+    a Tier-0 router began delegating: a ``palette`` atom whose enum carries no hex colours falls
+    through to SigLIP2, whose scale is almost an order of magnitude away from the palette band
+    (siglip2 high 0.10 / low 0.01 vs palette high 0.85 / low 0.50), so a confident SigLIP2 match
+    read as a confident palette FAIL. Which band graded the number is now an answer on the
+    transcript rather than something a reader has to re-derive from the check_type."""
     reason: str
 
 
@@ -81,9 +92,25 @@ class GateTranscript(BaseModel):
         """Required / must_not atoms that produced a numeric score."""
         return [v for v in self.verdicts if _counts(v) and v.score is not None]
 
+    def declares_no_required_atom(self) -> bool:
+        """This contract has nothing the gate is allowed to block on.
+
+        F-2c7b997a: ``could_not_run()`` merged this with "no required atom produced a score" and
+        only the second is a could-not-run. MEASURED through ``sample.run_mock_loop`` with every
+        atom's severity set to optional: all ten atoms scored and all ten passed, and the run
+        still reported ``GATE_UNAVAILABLE`` at exit 4 -- whose hint tells the operator to
+        "Install the [image] extra ... so a verifier can score", advice for a run in which every
+        verifier scored. Fail-closed is right (nothing binds either way); the DIAGNOSIS was
+        wrong, and it pointed at a repair that has no bearing on the actual defect, which is in
+        the contract.
+        """
+        return not any(_counts(v) for v in self.verdicts)
+
     def could_not_run(self) -> bool:
-        """No required atom produced a score. Distinct from UNCERTAIN-after-a-score."""
-        return not self.scored_required()
+        """A required atom exists and none of them produced a score. Distinct from
+        UNCERTAIN-after-a-score, and (since F-2c7b997a) distinct from a contract that declares no
+        required atom at all -- see ``declares_no_required_atom``."""
+        return not self.declares_no_required_atom() and not self.scored_required()
 
 
 def _counts(v: AtomVerdict) -> bool:
@@ -219,16 +246,18 @@ def evaluate(
             verdicts[q.atom_id] = _skipped(q, skip_reason or f"{verifier.verifier_id} unavailable")
             continue
 
-        zone = thresholds.zone(q.check_type.value, score, q.polarity)
         used_id, used_tier = verifier.verifier_id, tier
+        band_key = _band_key(q.check_type, used_id, thresholds)
+        zone = thresholds.zone(band_key, score, q.polarity)
         tiers_consulted = [tier]
 
         # Escalate a borderline/failed Tier-1 result to Tier-2 (DSG) for localization.
         if tier == 1 and zone in (Zone.UNCERTAIN, Zone.FAIL) and 2 in verifiers:
             score2, _skip2 = _safe_score(verifiers[2], image_path, q)
             if score2 is not None:
-                score, zone = score2, thresholds.zone(q.check_type.value, score2, q.polarity)
                 used_id, used_tier = verifiers[2].verifier_id, 2
+                band_key = _band_key(q.check_type, used_id, thresholds)
+                score, zone = score2, thresholds.zone(band_key, score2, q.polarity)
                 # ⚑ CORRECTED IN PLACE (F-d9b28ca6). used_tier used to be overwritten with no
                 # record that Tier-1 ran first -- Tier-1's UNCERTAIN/FAIL score is what
                 # triggered this escalation, so it necessarily ran. tier_used keeps meaning
@@ -240,8 +269,8 @@ def evaluate(
         verdicts[q.atom_id] = AtomVerdict(
             atom_id=q.atom_id, polarity=q.polarity, severity=q.severity,
             score=round(score, 4), zone=zone, tier_used=used_tier, tiers_consulted=tiers_consulted,
-            verifier_id=used_id,
-            reason=f"score {score:.4f} -> {zone.value}",
+            verifier_id=used_id, band_key=band_key,
+            reason=f"score {score:.4f} -> {zone.value} (band {band_key})",
         )
 
     ordered = [verdicts[q.atom_id] for q in dag.questions]
@@ -276,6 +305,38 @@ def _safe_score(verifier: Verifier, image_path: str, question: Question) -> tupl
     if math.isnan(score) or math.isinf(score) or score < 0.0 or score > 1.0:
         return None, f"{verifier.verifier_id} rejected score {raw!r} (need finite [0, 1])"
     return score, None
+
+
+def _band_key(check_type: CheckType, verifier_id: str | None, thresholds: ThresholdTable) -> str:
+    """Which band grades this number: the one belonging to the instrument that produced it.
+
+    F-00cfd3f8 (this domain's half). Zoning was keyed on ``q.check_type`` alone, which assumes the
+    atom's declared check_type also names the instrument. A Tier-0 ROUTER breaks that assumption
+    without any signature changing: ``Tier0Router.score`` sends a ``palette`` atom whose enum
+    carries no hex colours on to SigLIP2 (its own docstring says text enums "belong to SigLIP2"),
+    and the SigLIP2 number was then graded against the palette band. Those bands are almost an
+    order of magnitude apart, so the result is a CONFIDENT WRONG verdict, not an unconfirmed one --
+    the same class of defect ``_pick``'s F-175c3b3e fix removed from the tier-fallback door, coming
+    back through the delegation door.
+
+    The agreement with the router is the value it already publishes: ``verifier_id`` is "who
+    produced the score I just returned" (F-64b4f422), and this package names instruments
+    ``<family>.<role>.<version>`` -- ``siglip2.screen.v1``, ``palette.hist.v1``. So the leading
+    segment is the band family. No cross-import into ``domains/`` and no new protocol member.
+
+    Deliberately conservative in one direction: the redirect only fires when the leading segment
+    names a band the table ACTUALLY DECLARES. ``scripted.siglip2.v0``, ``vqascore.clip-flant5.v1``
+    and ``dsg.localizer.v1`` all lead with a segment that is not a band key, so they keep the
+    atom's check_type -- inventing a band out of an arbitrary verifier_id, or falling to
+    ``default``, would be a second silent re-scale wearing the first one's fix as a disguise.
+    """
+    declared = check_type.value
+    if not verifier_id:
+        return declared
+    family = verifier_id.split(".", 1)[0]
+    if family != declared and family in thresholds.bands:
+        return family
+    return declared
 
 
 def _skipped(q, reason: str) -> AtomVerdict:
@@ -317,6 +378,13 @@ def _rollup(verdicts: list[AtomVerdict]) -> Zone:
     A mid-band score is UNCERTAIN (the atom was checked). A missing score is
     not UNCERTAIN — if nothing scored, the roll-up is UNAVAILABLE. Mixing
     those two into one Zone was the same merge the exit contract had to split.
+
+    A contract that declares NO required atom also lands on UNAVAILABLE here, and deliberately
+    stays there (F-2c7b997a): the roll-up is a Zone, and there is no Zone that honestly means
+    "there was nothing to decide", so it fails closed and nothing binds. What changed is that the
+    Zone is no longer the whole answer -- ``GateTranscript.declares_no_required_atom`` states the
+    cause, ``exit_contract`` answers ``CONTRACT_NO_REQUIRED_ATOM`` instead of telling the operator
+    to install extras, and the checkpoint says which of the two it is.
     """
     relevant = [v for v in verdicts if _counts(v)]
     scored = [v for v in relevant if v.score is not None]

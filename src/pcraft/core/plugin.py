@@ -29,6 +29,44 @@ _REGISTRY: dict[str, DomainPlugin] = {}
 
 
 def register(plugin: DomainPlugin) -> None:
+    """Add a domain plugin. FAIL-CLOSED on a malformed plugin or a name already taken.
+
+    [!] Both guards added for F-d1d2833f. This was a bare ``_REGISTRY[plugin.name] = plugin``:
+
+    * A second registration under an existing name SILENTLY overwrote the first -- no warning,
+      no log, no error -- against the strong precedent set twice in this same package:
+      ``ContractStore.__init__`` raises INPUT_DUPLICATE_CONTRACT_ID and
+      ``schema._reject_duplicate_ids`` raises CONTRACT_DUPLICATE_ATOM_ID, both fail-closed on
+      "two things claiming the same identity". The registry is the higher-stakes of the three:
+      ``get(name)`` is what ``cli/__init__.py`` uses to select the Generator that gets bound
+      (real GPU / Cloud spend), so a clobbered registration misroutes generation with no
+      signal anywhere.
+    * Nothing checked that the object actually satisfies ``DomainPlugin`` (already declared
+      ``@runtime_checkable``), so a malformed plugin registered cleanly and failed later as a
+      raw AttributeError at whatever call site first touched the missing method.
+
+    Not reachable today -- ``register`` is called from exactly one site, the sole shipped
+    domain plugin -- but this module's own docstring names the intended near-future shape
+    ("Adding ``video`` or ``workflow`` is one ``register`` call"), and ``_REGISTRY`` is
+    unscoped module-global state with no reset hook, so a future second domain reusing a name
+    would go undetected.
+    """
+    if not isinstance(plugin, DomainPlugin):
+        raise PromptCraftError(
+            "INPUT_INVALID_DOMAIN_PLUGIN",
+            f"{type(plugin).__name__} does not satisfy the DomainPlugin protocol",
+            hint="A domain plugin needs a `name` plus generator(), verifiers() and "
+            "encoder_rules_path(). Registering without them defers the failure to the first "
+            "call site that touches the missing member, as a raw AttributeError.",
+        )
+    if plugin.name in _REGISTRY:
+        raise PromptCraftError(
+            "INPUT_DUPLICATE_DOMAIN",
+            f"a domain plugin named {plugin.name!r} is already registered",
+            hint="Two plugins may not claim one domain name: get(name) selects the generator "
+            "that gets bound, so the second registration would silently misroute generation. "
+            "Give the new domain its own name.",
+        )
     _REGISTRY[plugin.name] = plugin
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -58,13 +59,48 @@ def test_version_is_one_or_later_and_the_public_surface_agrees():
     )
 
 
-def test_ci_runs_the_declared_python_floor():
-    """requires-python >=3.11 was metadata only. The 3.11 CI leg is the proof."""
-    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["requires-python"] == ">=3.11"
+def _ci_matrix_python_versions() -> list[str]:
+    """The python-version list the verify job's matrix actually expands.
+
+    Bounded to the `matrix:` key rather than parsed as YAML on purpose: pyyaml is only
+    transitively present in this environment and is declared nowhere in pyproject's [dev]
+    extra, so importing it here would make a gate depend on an undeclared package.
+    """
     ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert '"3.11"' in ci
-    assert '"3.13"' in ci
+    match = re.search(
+        r"^\s*matrix:\s*$(?:.*\n)*?\s*python-version:\s*\[(.*?)\]", ci, re.MULTILINE
+    )
+    assert match, "ci.yml has no `python-version: [...]` list under a `matrix:` key"
+    return [v.strip().strip("\"'") for v in match.group(1).split(",") if v.strip()]
+
+
+def test_ci_runs_the_declared_python_floor():
+    """requires-python >=3.11 was metadata only. The 3.11 CI leg is the proof.
+
+    F-f86addc9: this used to assert `'"3.11"' in ci` against the raw file text, which reads
+    as a configured gate while checking nothing structural -- the exact shape
+    `test_verify_legs.py::test_each_configured_gate_tool_is_a_verify_leg` exists to catch one
+    file over. There is no live false positive today (the only quoted "3.11" in ci.yml IS the
+    matrix entry; the prose comment beside it is unquoted), but the drift it would miss is
+    ordinary: "3.11" moving into an `exclude:` entry, or into an unrelated job added by a
+    future restructure -- still a substring, no longer a leg that runs -- and the test would
+    stay green while the declared floor silently stopped being tested. So the floor is
+    asserted to be a MEMBER of the matrix list, not a substring of the file.
+    """
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    requires = data["project"]["requires-python"]
+    assert requires == ">=3.11"
+    floor = requires.removeprefix(">=").strip()
+
+    versions = _ci_matrix_python_versions()
+    assert floor in versions, (
+        f"pyproject declares requires-python {requires!r} but ci.yml's verify matrix expands "
+        f"to {versions!r}; the declared floor is metadata again"
+    )
+    assert "3.13" in versions, (
+        f"the upper leg left the matrix: {versions!r}. The floor alone does not prove the "
+        "package still works on a current Python"
+    )
 
 
 def test_installed_package_ships_the_py_typed_marker():

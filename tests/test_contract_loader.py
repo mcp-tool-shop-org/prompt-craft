@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from pcraft.core.contract.loader import resolve
@@ -416,3 +418,183 @@ def test_the_shipped_example_contracts_are_still_acyclic(sprite_example):
     store, resolved, _t, _c = sprite_example
     assert store.resolve("faction:ashen-pact").atom_by_id("sigil").depends_on == "tabard"
     assert resolved.atom_by_id("sigil").depends_on == "tabard"
+
+
+# ---------------------------------------------------------------------------
+# F-ca6f8509 -- an `extends` CYCLE is refused at resolve, under a named code
+#
+# The sibling mechanism the depends_on cycle fix (F-2b317b56) never touched. resolve()
+# recursed on contract.extends with no visited set and no depth guard, so the same defect
+# class this repo has now closed three times (F-45c39f7d, F-84788251, F-2b317b56: an
+# exception from OUTSIDE the PromptCraftError hierarchy crossing the loader boundary) was
+# still open on extends: a one-line typo -- `"extends": "<its own id>"` -- died as a raw
+# RecursionError, which the CLI backstop reports as RUNTIME_UNEXPECTED (exit 2, "prompt-craft
+# crashed") for what is really a contract-authoring mistake (exit 1, "fix your input").
+#
+# Multi-hop extends is a SUPPORTED shape (resolve()'s own comment says "recurse: support
+# multi-level chains"), and a character may extend a character, so long chains -- and
+# therefore cyclic ones -- are reachable through ordinary authoring rather than a contrived
+# direct-API call. The guard must refuse the loop without refusing the chain.
+# ---------------------------------------------------------------------------
+
+
+def _extends_chain(links: int) -> list[Contract]:
+    """A legal faction -> char0 -> char1 -> ... chain, leaf LAST. `links` character levels."""
+    root = Contract(
+        id="faction:root",
+        level="faction",
+        must_have=[Atom(id="tabard", claim="a tabard", check_type=CheckType.vqa)],
+    )
+    chain: list[Contract] = [root]
+    for i in range(links):
+        chain.append(
+            Contract(
+                id=f"char:{i}",
+                level="character",
+                extends=chain[-1].id,
+                must_have=[Atom(id=f"a{i}", claim=f"an a{i}", check_type=CheckType.vqa)],
+            )
+        )
+    return chain
+
+
+def test_a_self_extending_contract_is_refused_at_resolve():
+    """The finding's own one-line repro: a template contract copy-pasted without retargeting
+    `extends`. Before the guard this raised a raw RecursionError out of resolve()."""
+    loop = Contract(id="char:self-loop", level="character", extends="char:self-loop")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(loop, _lookup([loop]))
+    assert exc.value.code == "CONTRACT_CYCLIC_EXTENDS"
+    assert exc.value.exit_code == 1
+    assert "char:self-loop -> char:self-loop" in exc.value.message
+
+
+def test_a_two_contract_extends_cycle_is_refused_at_resolve():
+    a = Contract(id="char:a", level="character", extends="char:b")
+    b = Contract(id="char:b", level="character", extends="char:a")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(a, _lookup([a, b]))
+    assert exc.value.code == "CONTRACT_CYCLIC_EXTENDS"
+    assert "char:a -> char:b -> char:a" in exc.value.message
+
+
+def test_an_extends_cycle_reached_through_an_acyclic_tail_names_only_the_cycle():
+    """Same discipline as the depends_on walk: the PATH is the loop, not the road into it.
+
+    The message still opens with the contract being resolved -- exactly as
+    ``_reject_cyclic_depends_on``'s does -- so the reader knows which resolve failed; what must
+    not drift is the path after the colon, which is the diagnosis."""
+    tail = Contract(id="char:tail", level="character", extends="char:a")
+    a = Contract(id="char:a", level="character", extends="char:b")
+    b = Contract(id="char:b", level="character", extends="char:a")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(tail, _lookup([tail, a, b]))
+    assert exc.value.code == "CONTRACT_CYCLIC_EXTENDS"
+    path = exc.value.message.split("extends cycle:", 1)[1]
+    assert path.strip() == "char:a -> char:b -> char:a"
+    assert "char:tail" not in path
+
+
+def test_no_extends_cycle_escapes_as_a_recursionerror():
+    """The reclassification itself, stated as the finding states it: whatever else changes,
+    an authoring typo may not leave this module as an exception class from outside the
+    PromptCraftError hierarchy."""
+    loop = Contract(id="char:self-loop", level="character", extends="char:self-loop")
+    try:
+        resolve(loop, _lookup([loop]))
+    except PromptCraftError:
+        pass
+    except RecursionError as err:  # pragma: no cover - the pre-fix behaviour
+        pytest.fail(f"resolve() leaked a RecursionError on a cyclic extends: {err}")
+
+
+def test_a_deep_but_finite_extends_chain_still_resolves():
+    """The collateral guard. Multi-level extends is supported, and a long chain is not a
+    loop: every atom on the way down must survive into the leaf's resolved contract."""
+    chain = _extends_chain(30)
+    leaf = chain[-1]
+    out = resolve(leaf, _lookup(chain))
+    assert out.lineage == [c.id for c in chain]
+    assert out.atom_by_id("tabard") is not None  # the faction root's atom is inherited
+    assert {f"a{i}" for i in range(30)} <= {a.id for a in out.must_have}
+
+
+def test_the_extends_walk_does_not_grow_the_python_stack():
+    """Why RecursionError is now IMPOSSIBLE here rather than merely unlikely.
+
+    A visited set alone would still leave the walk recursive -- one Python frame per link --
+    so a long-enough legitimate chain could exhaust the stack and produce the same
+    unclassified crash by a different road. Measuring the interpreter frame depth at each
+    lookup is the direct proof that the walk is iterative: pre-fix the depth grows by one per
+    link, post-fix it is constant.
+    """
+    chain = _extends_chain(25)
+    by_id = {c.id: c for c in chain}
+    depths: list[int] = []
+
+    def probe(contract_id: str):
+        depth = 0
+        frame = sys._getframe()
+        while frame is not None:
+            depth += 1
+            frame = frame.f_back
+        depths.append(depth)
+        return by_id.get(contract_id)
+
+    resolve(chain[-1], probe)
+    assert len(depths) == 25  # one lookup per extends hop
+    assert max(depths) - min(depths) <= 1, (
+        f"the extends walk consumes a Python frame per link (depths {min(depths)}..{max(depths)}); "
+        "a long legitimate chain would then die as a RecursionError instead of resolving"
+    )
+
+
+def test_an_extends_chain_beyond_the_depth_ceiling_is_a_named_refusal():
+    """The backstop for a lookup that MANUFACTURES contracts instead of reading a store.
+
+    A real ContractStore bounds the walk by its own id count, so the visited set above is
+    already enough for every shipped path. A dynamic lookup is not bounded that way, and an
+    unbounded walk with no cycle to detect would hang rather than refuse. The ceiling makes
+    that a diagnosis.
+    """
+
+    def manufacture(contract_id: str) -> Contract:
+        return Contract(id=contract_id, level="character", extends=contract_id + "x")
+
+    start = Contract(id="char:0", level="character", extends="char:0x")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(start, manufacture)
+    assert exc.value.code == "CONTRACT_EXTENDS_TOO_DEEP"
+    assert exc.value.exit_code == 1
+
+
+def test_a_lookup_that_returns_a_mismatched_id_still_refuses_structurally():
+    """The refusal must not contain this finding's own defect class.
+
+    `lookup` is an arbitrary callable, so one that returns a contract whose id differs from the
+    key it was asked for can leave a key in the visited set that never entered the chain.
+    Locating the cycle with a bare `index()` would then raise a ValueError -- an unclassified
+    exception out of the refusal path itself.
+    """
+
+    def mismatched(_contract_id: str) -> Contract:
+        return Contract(id="char:a", level="character", extends="faction:x")
+
+    start = Contract(id="char:a", level="character", extends="faction:x")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(start, mismatched)
+    assert exc.value.code == "CONTRACT_CYCLIC_EXTENDS"
+    assert "faction:x" in exc.value.message
+
+
+def test_the_missing_base_refusal_survives_the_iterative_walk():
+    """The collateral guard for the rewrite: a dangling extends is still CONTRACT_MISSING_BASE,
+    and it still names the contract that carries the bad edge -- not the leaf that started the
+    walk."""
+    leaf = Contract(id="char:leaf", level="character", extends="char:mid")
+    mid = Contract(id="char:mid", level="character", extends="faction:nope")
+    with pytest.raises(PromptCraftError) as exc:
+        resolve(leaf, _lookup([leaf, mid]))
+    assert exc.value.code == "CONTRACT_MISSING_BASE"
+    assert "char:mid" in exc.value.message
+    assert "faction:nope" in exc.value.message

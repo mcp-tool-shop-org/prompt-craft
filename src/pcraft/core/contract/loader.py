@@ -88,58 +88,180 @@ def _read_contract(path: Path) -> Contract:
         # exit-code contract both promise 1 with a CONTRACT_ code.
         raise PromptCraftError(
             "CONTRACT_INVALID",
-            f"contract {path} does not match the contract schema",
+            f"contract {path} does not match the contract schema: {_describe(err)}",
             hint=(
-                "Fix the field the validator names, or run `pcraft schema` to dump the "
-                "authoring JSON Schema. Re-run with --debug to see which field failed."
+                "Fix the field(s) the message names, or run `pcraft schema` to dump the "
+                "authoring JSON Schema. Re-run with --debug for pydantic's full report."
             ),
             cause=err,
         ) from err
+
+
+# How many field-level locations the default (non-debug) message names before it stops.
+# A diagnosis, not a dump: --debug still carries every one of them, via `cause`.
+_MAX_REPORTED_ERRORS = 3
+
+
+def _describe(err: ValidationError) -> str:
+    """Summarize a pydantic ValidationError for the DEFAULT error surface (F-40a4956f).
+
+    The refusal used to read "contract <path> does not match the contract schema" and nothing
+    else -- no field name, no count, no location -- so --debug was required for ANY diagnostic
+    content at all, even to learn how many things were wrong. That made CONTRACT_INVALID the
+    one refusal in this file that says nothing: every sibling (CONTRACT_RELAXATION,
+    CONTRACT_MISSING_BASE, CONTRACT_DUPLICATE_ATOM_ID, CONTRACT_UNKNOWN_DEPENDS_ON,
+    CONTRACT_CYCLIC_DEPENDS_ON) embeds the specific id, field and values with no flag needed --
+    and it is the code an ordinary authoring typo lands on, which is the most common one.
+
+    MEASURED: pydantic was never the limit. A contract with two independently-invalid fields
+    returns BOTH from ``err.errors()``, and --debug already printed pydantic's own
+    "2 validation errors for Contract" block naming both. The default path was discarding it.
+    So this reports the COUNT plus every location, not just the first -- capped, because a
+    console line is not a report, and the full list stays one --debug away.
+
+    Only ``loc`` and ``msg`` are used. The offending ``input`` value is deliberately left out:
+    it is arbitrary text from a file we did not write, and this string is printed to a console
+    whose codepage we do not control (F-fd21bd37).
+    """
+    errors = err.errors()
+    shown = errors[:_MAX_REPORTED_ERRORS]
+    parts = [f"{'.'.join(str(p) for p in e['loc']) or '<root>'}: {e['msg']}" for e in shown]
+    summary = "; ".join(parts)
+    remaining = len(errors) - len(shown)
+    if remaining > 0:
+        summary += f"; (+{remaining} more, see --debug)"
+    return f"{len(errors)} error(s); {summary}"
+
+
+_MAX_EXTENDS_DEPTH = 64
+"""How many ``extends`` hops one walk may take before it is refused (F-ca6f8509).
+
+Not the cycle guard -- the visited set below is. This is the backstop for a ``lookup`` that
+MANUFACTURES contracts rather than reading a finite store: a real ``ContractStore`` bounds any
+chain by its own id count, but ``lookup`` is an arbitrary callable (``optimize/compile.py``
+assembles contracts programmatically), and an unbounded walk with no repeat to detect would
+spin instead of refusing. 64 is far past any authored inheritance depth -- the shipped example
+is 2 -- so it can only be reached by that pathological shape."""
 
 
 def resolve(contract: Contract, lookup) -> ResolvedContract:
     """Merge a contract with its faction base. ``lookup(id) -> Contract | None``.
 
     A faction resolves to itself. A character merges its faction base then its own atoms,
-    enforcing the no-relaxation rule."""
-    if contract.level == "faction" or contract.extends is None:
-        # depends_on referential integrity + acyclicity are enforced by ResolvedContract's own
-        # @model_validator (schema.py), so they hold for EVERY construction path rather than
-        # only this one. See _reject_unknown_depends_on's F-877a8d9b note for what moved and why.
-        return ResolvedContract(
-            id=contract.id,
-            level=contract.level,
-            lineage=[contract.id],
-            must_have=list(contract.must_have),
-            must_not=list(contract.must_not),
-            identity_refs=[contract.identity_ref] if contract.identity_ref else [],
-        )
+    enforcing the no-relaxation rule. Multi-level chains (character extends character extends
+    faction) are supported; CYCLIC ones are refused -- see ``_walk_extends``.
 
-    base_contract = lookup(contract.extends)
-    if base_contract is None:
-        raise PromptCraftError(
-            "CONTRACT_MISSING_BASE",
-            f"{contract.id!r} extends {contract.extends!r} but that faction is not in the store",
-        )
-    base = resolve(base_contract, lookup)  # recurse: support multi-level chains
+    [!] ITERATIVE, not recursive (F-ca6f8509). This function used to call itself on
+    ``contract.extends``, which made a self-extending contract -- a one-line typo,
+    ``"extends": "<its own id>"``, indistinguishable from copy-pasting a template contract and
+    forgetting to retarget it -- die as a raw ``RecursionError``: an exception from outside
+    the ``PromptCraftError`` hierarchy crossing this module's documented boundary, reported by
+    the CLI backstop as RUNTIME_UNEXPECTED (exit 2, "prompt-craft crashed") for what is
+    exit-1 user input. That is the same defect class already closed three times in this
+    package (F-45c39f7d, F-84788251, F-2b317b56), landing a fourth time on the sibling
+    mechanism the ``depends_on`` cycle fix never touched.
 
-    merged_must_have = _merge_atoms_fail_closed(base.must_have, contract.must_have, child_id=contract.id)
-    merged_must_not = _merge_must_not(base.must_not, contract.must_not, child_id=contract.id)
-    identity_refs = _merge_identity_refs(
-        base.identity_refs, contract.identity_ref, child_id=contract.id
+    Detecting the cycle would have been enough to stop the typo; walking iteratively is what
+    makes ``RecursionError`` IMPOSSIBLE on this path rather than merely unlikely, because a
+    long-enough LEGITIMATE chain would otherwise exhaust the stack by the same road. The walk
+    now costs one Python frame regardless of chain length.
+    """
+    chain = _walk_extends(contract, lookup)  # [root, ..., contract]; root first
+    # depends_on referential integrity + acyclicity are enforced by ResolvedContract's own
+    # @model_validator (schema.py), so they hold for EVERY construction path rather than
+    # only this one. See _reject_unknown_depends_on's F-877a8d9b note for what moved and why.
+    root = chain[0]
+    resolved = ResolvedContract(
+        id=root.id,
+        level=root.level,
+        lineage=[root.id],
+        must_have=list(root.must_have),
+        must_not=list(root.must_not),
+        identity_refs=[root.identity_ref] if root.identity_ref else [],
     )
-    # The depends_on checks run POST-merge -- a character legitimately depends on an atom it
-    # inherits rather than declares, so checking the raw child would refuse valid contracts.
-    # They now run inside ResolvedContract's validator below, which IS post-merge by
-    # construction, so the merged lists are still what gets checked.
-    return ResolvedContract(
-        id=contract.id,
-        level=contract.level,
-        lineage=[*base.lineage, contract.id],
-        must_have=merged_must_have,
-        must_not=merged_must_not,
-        identity_refs=identity_refs,
-    )
+    for child in chain[1:]:
+        merged_must_have = _merge_atoms_fail_closed(
+            resolved.must_have, child.must_have, child_id=child.id
+        )
+        merged_must_not = _merge_must_not(resolved.must_not, child.must_not, child_id=child.id)
+        identity_refs = _merge_identity_refs(
+            resolved.identity_refs, child.identity_ref, child_id=child.id
+        )
+        # The depends_on checks run POST-merge -- a character legitimately depends on an atom it
+        # inherits rather than declares, so checking the raw child would refuse valid contracts.
+        # They run inside ResolvedContract's validator below, which IS post-merge by
+        # construction, so the merged lists are still what gets checked -- once per level, exactly
+        # as the recursive form checked every intermediate resolution.
+        resolved = ResolvedContract(
+            id=child.id,
+            level=child.level,
+            lineage=[*resolved.lineage, child.id],
+            must_have=merged_must_have,
+            must_not=merged_must_not,
+            identity_refs=identity_refs,
+        )
+    return resolved
+
+
+def _walk_extends(contract: Contract, lookup) -> list[Contract]:
+    """Follow ``extends`` up to the base, ROOT FIRST. Refuses a cycle; never recurses.
+
+    A ``faction``, and any contract with no ``extends``, terminates the walk -- so the walk
+    stops exactly where the old base case returned. Mirrors ``schema._reject_cyclic_depends_on``:
+    each contract has at most one parent, so the graph is functional and a plain chain-walk
+    from the starting node finds any cycle it can reach, with the first repeated id
+    necessarily ON the cycle.
+    """
+    chain: list[Contract] = [contract]
+    seen: set[str] = {contract.id}
+    current = contract
+    while current.level != "faction" and current.extends is not None:
+        if current.extends in seen:
+            ids = [c.id for c in chain]
+            if current.extends in ids:
+                cycle = ids[ids.index(current.extends) :]
+                path = " -> ".join([*cycle, cycle[0]])
+            else:
+                # Defensive, and deliberately not an `index()` away from a crash: `lookup` is
+                # an arbitrary callable, so one that returns a contract whose id differs from
+                # the key it was ASKED for can leave a key in `seen` that never entered the
+                # chain. Trace what was actually walked rather than raising a bare ValueError
+                # out of the refusal itself -- which would be this finding's own defect class,
+                # committed inside its fix.
+                path = " -> ".join([*ids, current.extends])
+            raise PromptCraftError(
+                "CONTRACT_CYCLIC_EXTENDS",
+                f"{contract.id!r} has an extends cycle: {path}",
+                hint=(
+                    "extends is an inheritance edge: a contract's base is resolved first so "
+                    "the child can add to it. A cycle has no base, so there is nothing to "
+                    "inherit from. Point extends at the faction this contract belongs to -- "
+                    "a contract may not extend itself, directly or through its ancestors."
+                ),
+            )
+        base_contract = lookup(current.extends)
+        if base_contract is None:
+            raise PromptCraftError(
+                "CONTRACT_MISSING_BASE",
+                f"{current.id!r} extends {current.extends!r} but that faction is not in the store",
+            )
+        seen.add(current.extends)
+        seen.add(base_contract.id)
+        chain.append(base_contract)
+        current = base_contract
+        if len(chain) > _MAX_EXTENDS_DEPTH:
+            raise PromptCraftError(
+                "CONTRACT_EXTENDS_TOO_DEEP",
+                f"{contract.id!r} extends through more than {_MAX_EXTENDS_DEPTH} contracts",
+                hint=(
+                    "An inheritance chain this long is not an authored contract tree. Point "
+                    "the character at the faction it belongs to. This ceiling exists so a "
+                    "lookup that generates contracts on demand refuses instead of walking "
+                    "forever."
+                ),
+            )
+    chain.reverse()
+    return chain
 
 
 def _merge_identity_refs(

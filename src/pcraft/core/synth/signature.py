@@ -110,6 +110,28 @@ class DSPySynthesizer:
             rules = rules + "\nfront-load failed atoms: " + ", ".join(boost_ids)
         if self._predictor is not None:
             result = self._predictor(resolved, rules, self.compiled)
+            # [!] THE SAME GUARD THE REAL PATH RUNS (F-4d4b5b17). This branch used to return
+            # the predictor's result untouched, so assert_tokens_trace -- called by _run_dspy
+            # below, and the ONLY guard that inspects the prompt string itself -- was the one
+            # guard the injected path skipped. MEASURED: a predictor returning
+            # 'epic cinematic masterpiece, trending on artstation, 8k, hyperdetailed' (the
+            # exact prose-dump shape the guard exists to catch) plus a FABRICATED
+            # atom_coverage self-reporting full coverage of atoms the prompt never mentions
+            # was accepted with zero refusal. The sibling assert_coverage gives false
+            # confidence here: it only checks that the self-reported phrases are non-empty,
+            # never that they relate to the prompt, so a predictor satisfies it while ignoring
+            # the prompt entirely.
+            #
+            # The inventory is RECOMPUTED from the resolved contract rather than read off
+            # result.visual_inventory, for the same reason the coverage is not trusted: both
+            # are predictor-controlled and were measured diverging from the actual prompt text.
+            # Ground truth for "does this token trace to an atom" is the contract.
+            #
+            # predictor= is test infrastructure today, but this module's own docstring names an
+            # Ollama-Cloud / local-8B /v1 backend as the intended real integration point for
+            # this seam -- so "test-only" is a temporary property, not a structural one. The
+            # seam stays; the OUTPUT is guarded. Costs no GPU and no network.
+            assert_tokens_trace(result.prompt, build_inventory(resolved))
             return result.model_copy(
                 update={"backend": f"dspy:{self.compiled.artifact_id}", "degraded": False}
             )

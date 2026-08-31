@@ -4,7 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from pcraft.cli import app
-from pcraft.core.receipt.asset_record import load, replay
+from pcraft.core.receipt.asset_record import load, persist, replay
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example, run_mock_loop
 
@@ -86,3 +86,75 @@ def test_replay_detects_contract_drift(tmp_path):
     with pytest.raises(PromptCraftError) as exc:
         replay(res.record, resolved, thresholds_version=None)
     assert exc.value.code == "STATE_REPLAY_DRIFT"
+
+
+# --------------------------------------------------------------------------- F-a99ec99e
+# persist() wrote to a path derived from a non-unique record_id and silently destroyed whatever
+# receipt was already there -- including a bound one, on precisely the runs that matter
+# (base_seed defaults to 1000 and best-of-N early-exits on the first clean PASS).
+
+
+def _receipts(d):
+    return sorted(p for p in d.glob("*.json"))
+
+
+def test_a_second_run_cannot_destroy_the_first_bound_receipt(tmp_path):
+    """MEASURED as filed: run 1 bound, run 2 escalated, one file on disk reading 'escalated', and
+    the gate transcript that justified the bind unrecoverable."""
+    first = run_mock_loop(records_dir=str(tmp_path))
+    assert first.decision == "bound"
+    first_path = tmp_path / f"{first.record.record_id}.json"
+    assert first_path.exists()
+
+    second = run_mock_loop(records_dir=str(tmp_path), verifier_scores={"weapon": 0.05})
+    assert second.decision == "escalated"
+
+    assert first_path.exists(), "the bound receipt was destroyed by the next run"
+    assert load(first_path).decision == "bound"
+    assert second.record.record_id != first.record.record_id
+    assert len(_receipts(tmp_path)) == 2, "re-binds must accumulate, not replace"
+
+
+def test_persist_refuses_to_clobber_rather_than_deleting_a_receipt(tmp_path):
+    """Residual collisions have to be an ANSWER, not a deletion. compensators registers
+    'records-write' with post_state 'receipt deleted by id' and an owner; the deletion this
+    door used to perform happened unattended, with no owner and no notice."""
+    res = run_mock_loop(records_dir=str(tmp_path))
+    path = tmp_path / f"{res.record.record_id}.json"
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(PromptCraftError) as exc:
+        persist(res.record, tmp_path)
+    assert exc.value.code == "IO_RECORD_EXISTS"
+    assert exc.value.hint
+    assert str(path) in exc.value.message or path.name in exc.value.message
+    assert path.read_text(encoding="utf-8") == before, "the refusal must leave the file alone"
+
+
+# --------------------------------------------------------------------------- F-f99c78f8
+# The receipt could not identify the artifact it certifies.
+
+
+def test_the_receipt_names_the_pixels_it_bound(tmp_path):
+    from datetime import datetime
+
+    res = run_mock_loop(records_dir=str(tmp_path))
+    rec = load(tmp_path / f"{res.record.record_id}.json")
+
+    assert rec.image_path, "a 'bound' receipt that cannot say which file it scored is not provenance"
+    from pathlib import Path
+
+    assert Path(rec.image_path).exists()
+    assert rec.prompt, "PIN_PER_STEP is model + PROMPT + tool schema"
+    assert datetime.fromisoformat(rec.created_at), "an overwrite is undetectable without a time"
+    assert rec.created_at.endswith("Z") or "+00:00" in rec.created_at
+
+
+def test_compiled_synth_id_is_not_a_second_copy_of_the_backend(tmp_path):
+    """Both fields were assigned ``synth.backend`` at the only construction site, so the module
+    docstring credited a pinned field that carried no information the field beside it did not."""
+    res = run_mock_loop(records_dir=str(tmp_path))
+    rec = load(tmp_path / f"{res.record.record_id}.json")
+    assert rec.synth_backend == "template"
+    assert rec.compiled_synth_id != rec.synth_backend
+    assert rec.compiled_synth_id, "the id of the compiled artifact, not a duplicate label"

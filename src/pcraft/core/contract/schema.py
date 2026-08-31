@@ -90,6 +90,47 @@ duplicate guard, and every dict key in this domain currently treat as distinct, 
 much larger behaviour change than this gap justifies."""
 
 
+_BLANK_CLAIM_RATIONALE = """Why ``claim`` carries the same non-blank floor as ``id`` (F-588763b4).
+
+``Atom.claim`` and ``MustNot.claim`` were bare ``claim: str`` while ``id`` on the same two
+classes carried ``Field(min_length=1)`` PLUS ``_reject_blank_id`` -- and the two rationales
+above spend their length arguing that a blank id "is not a contract anyone means to write" and
+must be refused at construction rather than trusted to a downstream consumer. The identical
+argument applies with at least equal force to ``claim``: it is the field ``Atom``'s own
+docstring calls "a single visible claim, phrased as a checkable statement", i.e. the entire
+content of the atom.
+
+MEASURED before this guard: ``Atom(id='a1', claim='')`` and ``Atom(id='a2', claim='   ')``
+both constructed cleanly; ``TemplateSynthesizer.synthesize()`` then produced a prompt with a
+bare leading comma (the empty token contributes nothing between joins), and
+``compile_questions`` emitted ``Question.text="Does this image show ?"`` for the affirm probe
+-- a REQUIRED-severity question with no content, sent to whatever verifier tier handles it.
+
+``assert_tokens_trace`` does not flag this and does not need to: an empty normalized segment is
+correctly skipped by its own job. The one existing backstop is ``synth/assert_.py``'s
+``assert_coverage``, which WOULD catch it (an empty claim means an empty coverage phrase, so
+the required atom lands in ``missing`` -> SYNTH_COVERAGE_MISSING) -- but only for callers that
+remember to invoke it. That is the same "not the only way to obtain a ResolvedContract" gap
+F-877a8d9b named for ``depends_on`` before that check moved onto the type. On the type, the
+invariant holds for every construction path.
+
+Only BLANK is refused, exactly as for ``id``: a claim carrying incidental leading or trailing
+whitespace is stored as authored. Normalizing it would silently rewrite contract text that the
+prompt, the coverage map, and the compiled question all quote verbatim."""
+
+
+def _reject_blank_claim(value: str) -> str:
+    """Refuse a claim that is empty once stripped. See ``_BLANK_CLAIM_RATIONALE``.
+
+    Raises ``ValueError`` for the same reason ``_reject_blank_id`` does: pydantic folds it into
+    the ValidationError that ``loader._read_contract`` already turns into CONTRACT_INVALID
+    (exit 1) for an on-disk file.
+    """
+    if not value.strip():
+        raise ValueError(f"claim must not be blank; {value!r} is empty once stripped")
+    return value
+
+
 def _reject_blank_id(value: str) -> str:
     """Refuse an id that is empty once stripped. See ``_BLANK_ID_RATIONALE``.
 
@@ -109,7 +150,8 @@ class Atom(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE + _BLANK_ID_RATIONALE
-    claim: str  # a single visible claim, phrased as a checkable statement
+    # a single visible claim, phrased as a checkable statement. See _BLANK_CLAIM_RATIONALE.
+    claim: str = Field(min_length=1)
     check_type: CheckType
     severity: Severity = Severity.required
     depends_on: str | None = None  # DAG edge: this atom is only meaningful if the parent passes
@@ -120,6 +162,11 @@ class Atom(BaseModel):
     @classmethod
     def _id_is_not_blank(cls, value: str) -> str:
         return _reject_blank_id(value)
+
+    @field_validator("claim")
+    @classmethod
+    def _claim_is_not_blank(cls, value: str) -> str:
+        return _reject_blank_claim(value)
 
 
 class MustNot(BaseModel):
@@ -146,7 +193,7 @@ class MustNot(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE + _BLANK_ID_RATIONALE
-    claim: str
+    claim: str = Field(min_length=1)  # see _BLANK_CLAIM_RATIONALE
     check_type: CheckType = CheckType.vqa
     severity: Severity = Severity.required
     spatial: Spatial | None = None
@@ -156,6 +203,11 @@ class MustNot(BaseModel):
     @classmethod
     def _id_is_not_blank(cls, value: str) -> str:
         return _reject_blank_id(value)
+
+    @field_validator("claim")
+    @classmethod
+    def _claim_is_not_blank(cls, value: str) -> str:
+        return _reject_blank_claim(value)
 
 
 class IdentityRef(BaseModel):

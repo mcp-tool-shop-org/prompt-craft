@@ -426,7 +426,12 @@ def test_an_empty_report_is_not_mistaken_for_a_finding():
         ("dspy-ai>=2.5", "dspy-ai"),
         ("ruff>=0.6,<0.17", "ruff"),
         ("torch>=2.4", "torch"),
-        ("pillow>=10.0", "pillow"),
+        # Mirrors what the [image] extra actually declares, comma and all. It was
+        # `pillow>=10.0` here because that is what pyproject said at the time; the extra
+        # has since gained an upper bound, and `_installed_extras()` feeds this parser the
+        # real string. A row that quietly stops matching the declaration it was copied from
+        # is coverage of a requirement nobody writes.
+        ("pillow>=10.0,<14", "pillow"),
         ("numpy", "numpy"),
     ],
 )

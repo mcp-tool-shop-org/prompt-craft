@@ -164,6 +164,17 @@ def test_bind_json_dumps_the_orchestration_result(tmp_path):
 
 
 def test_replay_json_dumps_the_record(tmp_path):
+    """EXPECTED RED IN THIS WORKTREE until the wave-6 fold (F-70ea9458).
+
+    `pcraft replay` now hands the loaded threshold TABLE to `do_replay`, not just its
+    version string, so band values retuned under an unchanged version stop replaying as
+    clean. `do_replay`'s matching `thresholds=` parameter lands in the sibling
+    core-gate-loop worktree; until both halves are folded, this success path raises
+    TypeError, which the command's backstop reports as RUNTIME_UNEXPECTED / exit 2. The
+    assertion is unchanged and correct -- do not relax it to force green locally. See the
+    F-70ea9458 block in tests/test_amend_cli.py for the two tests that pin the new
+    behaviour itself.
+    """
     bind = runner.invoke(app, ["bind", "--records-dir", str(tmp_path)])
     assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
     receipts = list(tmp_path.glob("*.json"))

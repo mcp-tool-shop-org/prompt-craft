@@ -106,8 +106,25 @@ class DSGVerifier:
         if answerer is None:
             return None
         expansion = self.expand(question)
+        # F-f5cc9257: this call was unguarded, in deliberate contrast to ``_ask`` directly above,
+        # which classifies everything the answerer can throw. A cyclic injected expansion raised a
+        # raw RecursionError straight through score(), and harness._safe_score's bare
+        # ``except Exception`` turned it into a SKIPPED verdict blaming this instrument for the
+        # caller's malformed expansion. Guarded the way harness.evaluate guards its own sibling
+        # walker (harness.py:159-169): a coded refusal passes through, and the two non-PromptCraft
+        # exception types a recursive walk can produce become that same code rather than a crash.
+        try:
+            ordered = expansion.topological()
+        except PromptCraftError:
+            raise
+        except (ValueError, RecursionError) as err:
+            raise PromptCraftError(
+                "CONTRACT_CYCLIC_DEPENDS_ON",
+                f"DSG expansion for atom {question.atom_id!r} has no parent-first probe order: {err}",
+                cause=err,
+            ) from err
         scores: dict[str, float | None] = {}
-        for probe in expansion.topological():
+        for probe in ordered:
             parent = probe.depends_on
             if parent is not None:
                 parent_score = scores.get(parent)

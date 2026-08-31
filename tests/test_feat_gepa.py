@@ -16,7 +16,7 @@ from pcraft.core.optimize.artifact import load_pinned
 from pcraft.core.optimize.compile import OptimizedPrompt, compile_synthesizer
 from pcraft.core.synth.signature import DSPySynthesizer, TemplateSynthesizer
 from pcraft.core.synth.synthesizer_iface import SynthResult
-from pcraft.core.synth.visual_inventory import build_inventory
+from pcraft.core.synth.visual_inventory import InventoryRow, build_inventory
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example
 
@@ -133,6 +133,95 @@ def test_dspy_synthesizer_runs_the_pinned_artifact(tmp_path):
     assert result.degraded is False
     assert "tabard" in result.prompt
     assert synth.synthesizer_id.startswith("dspy.v1+")
+
+
+# ---------------------------------------------------------------------------
+# F-4d4b5b17 -- the injected-predictor path runs the SAME anti-prose-dump guard
+#
+# synthesize() returned self._predictor(...)'s result via model_copy without ever calling
+# assert_tokens_trace -- only the real dspy.Predict path (_run_dspy) called it. MEASURED: a
+# predictor returning prompt='epic cinematic masterpiece, trending on artstation, 8k,
+# hyperdetailed' -- the exact prose-dump shape the guard exists to catch -- plus a FABRICATED
+# atom_coverage self-reporting full coverage of atoms the prompt never mentions was ACCEPTED
+# with zero refusal.
+#
+# The sibling guard assert_coverage gives false confidence here: it only checks that the
+# SELF-REPORTED coverage phrases are non-empty, never that they relate to the actual prompt
+# text. assert_tokens_trace is the only guard that inspects the prompt string itself, and it
+# was the one guard this path skipped. Defense in depth: predictor= is test infrastructure
+# today, but signature.py's own docstring names an Ollama-Cloud / local-8B backend as the
+# intended real integration point for this exact seam, so "test-only" is temporary, not
+# structural. The guard is on the OUTPUT; the injection seam itself stays.
+# ---------------------------------------------------------------------------
+
+
+def _prose_dump_predictor(prompt: str, *, honest_inventory: bool = True):
+    """A predictor with the failure shape the finding measured: prose the contract never
+    asked for, plus coverage that claims every atom is covered anyway."""
+
+    def predictor(res, _rules, _prog):
+        inventory = build_inventory(res)
+        return SynthResult(
+            prompt=prompt,
+            negative_prompt="",
+            atom_coverage={a.id: a.claim for a in res.must_have},  # fabricated
+            visual_inventory=inventory if honest_inventory else [],
+            backend="inject",
+            degraded=True,
+        )
+
+    return predictor
+
+
+def test_an_injected_predictor_cannot_return_a_prose_dump():
+    _s, resolved, _t, compiled = load_sprite_example()
+    synth = DSPySynthesizer(
+        compiled,
+        predictor=_prose_dump_predictor(
+            "epic cinematic masterpiece, trending on artstation, 8k, hyperdetailed"
+        ),
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        synth.synthesize(resolved, "")
+    assert exc.value.code == "SYNTH_PROSE_DUMP"
+
+
+def test_the_guard_reads_the_contract_not_the_predictors_self_report():
+    """The reason the fix recomputes build_inventory(resolved) rather than trusting
+    result.visual_inventory: both the inventory and the coverage are predictor-controlled, and
+    the finding measured them diverging from the actual prompt text. A predictor that declares
+    its prose depictable must be refused on the same evidence as one that does not."""
+    _s, resolved, _t, compiled = load_sprite_example()
+
+    def lying_predictor(res, _rules, _prog):
+        prose = "epic cinematic masterpiece, trending on artstation"
+        return SynthResult(
+            prompt=prose,
+            negative_prompt="",
+            atom_coverage={a.id: a.claim for a in res.must_have},
+            # the lie: an inventory row that would make the prose trace to an "atom"
+            visual_inventory=[
+                InventoryRow(atom_id="ghost", depictable=True, front_load_rank=0, token=prose)
+            ],
+            backend="inject",
+            degraded=True,
+        )
+
+    synth = DSPySynthesizer(compiled, predictor=lying_predictor)
+    with pytest.raises(PromptCraftError) as exc:
+        synth.synthesize(resolved, "")
+    assert exc.value.code == "SYNTH_PROSE_DUMP"
+
+
+def test_an_injected_predictor_returning_real_atom_tokens_still_passes():
+    """The collateral guard, and why this costs no GPU and no network: a predictor whose
+    prompt is built from the contract's own claims traces by construction."""
+    _s, resolved, _t, compiled = load_sprite_example()
+    tokens = ", ".join(a.claim for a in resolved.must_have)
+    synth = DSPySynthesizer(compiled, predictor=_prose_dump_predictor(tokens))
+    result = synth.synthesize(resolved, "")
+    assert result.prompt == tokens
+    assert result.backend == f"dspy:{compiled.artifact_id}"
 
 
 def test_dspy_synthesizer_without_dspy_or_predictor_refuses(monkeypatch):

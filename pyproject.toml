@@ -48,7 +48,26 @@ classifiers = [
 # Everything that touches a GPU, an LLM backend, or a diffusion model is an OPTIONAL extra,
 # so `pip install -e .` + the core test suite run on any machine without CUDA.
 dependencies = [
-    "pydantic>=2.6",
+    # Upper-bounded on the same doctrine as ruff and mypy below, and for a heavier reason
+    # than either: every typed thing this package has is a pydantic model -- the contract,
+    # its atoms, the resolved contract, the compiled program, the synth results, the
+    # question DAG -- and they lean on surface that has moved across pydantic majors before
+    # (`@model_validator(mode="after")`, `ConfigDict(extra=...)`, `Field(alias=...)`,
+    # `.model_copy(update=...)`, `.model_dump(mode="json", by_alias=...)`).
+    #
+    # The precedent is this repo's own rather than a general worry: `typer` below is the
+    # same unbounded shape and it has killed this package at import TWICE, on the same
+    # private import, on a conforming fresh install. Nothing in this tree backstops that --
+    # there is no lockfile anywhere in it. And per ruff's comment, the sharp edge is not a
+    # uniform loud break; it is CI resolving a different pydantic than a contributor's venv
+    # and the two disagreeing about which code is valid.
+    #
+    # `<3` rather than tighter: 2.x has held this surface across the series, and 2.13.4 is
+    # what the current environment resolves -- read from installed dist metadata, since
+    # there is no lockfile to read it from. Raise the ceiling deliberately, like ruff's, in
+    # the commit that verifies the model_validator / ConfigDict / model_copy call sites
+    # across contract/, synth/ and optimize/ still behave.
+    "pydantic>=2.6,<3",
     "typer>=0.12",
 ]
 
@@ -61,7 +80,23 @@ image = [
     "diffusers>=0.30",
     "transformers>=4.44",
     "accelerate>=0.33",
-    "pillow>=10.0",
+    # Bounded because this removal has a DATE on it. Pillow's own deprecation call for the
+    # API this extra's palette verifier depends on reads
+    # `deprecate("Image.Image.getdata", 14, "get_flattened_data")` -- 14 is the removal
+    # major, and the warning it raises names 2027-10-15. Unbounded, a fresh
+    # `pip install prompt-crafter[image]` resolved after that day gets Pillow 14, `getdata`
+    # is gone, and AttributeError is not ImportError -- so it walks straight past
+    # `load_rgb`'s guarded import and lands as RUNTIME_VERIFIER_CALL_FAILED on every
+    # palette atom. The only deterministic verifier in the domain, failing on a calendar
+    # rather than on a change anyone here made. The bound turns that into a resolver
+    # refusal at install time, which is where a dated break should surface.
+    #
+    # This is deliberately HALF a fix. The other half is the call site
+    # (src/pcraft/domains/image/verifier/palette_verifier.py) migrating behind a capability
+    # check rather than a rename -- `get_flattened_data` does not exist on the declared
+    # 10.x floor either, so a straight swap would break the floor instead. The floor stays
+    # `>=10.0`; raising it to `>=12` is a floor change and belongs in CHANGELOG.
+    "pillow>=10.0,<14",
     "numpy>=1.26",
 ]
 dev = [

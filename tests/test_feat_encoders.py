@@ -65,6 +65,13 @@ class _FakePipe:
         self.adapter_names = None
         self.adapter_weights = None
         self.controlnet = kwargs.get("controlnet")
+        # F-cfb2f360: the previous double recorded load_lora_weights into a flat append-only list,
+        # so a SECOND generate() on the same cached pipeline looked identical to a first one. The
+        # live adapter set is the state a real diffusers pipeline actually keeps (PeftAdapterMixin
+        # holds peft_config keyed by adapter_name), and it is what the defect is about.
+        self.live_adapters: list[str] = []
+        self.deleted_adapters: list[list[str]] = []
+        self.unload_calls = 0
 
     def to(self, device):
         self.to_calls.append(device)
@@ -79,6 +86,17 @@ class _FakePipe:
 
     def load_lora_weights(self, path, adapter_name=None, **kwargs):
         self.loras.append({"path": path, "adapter_name": adapter_name, "kwargs": kwargs})
+        self.live_adapters.append(adapter_name)
+
+    def delete_adapters(self, names):
+        self.deleted_adapters.append(list(names))
+        for name in names:
+            while name in self.live_adapters:
+                self.live_adapters.remove(name)
+
+    def unload_lora_weights(self):
+        self.unload_calls += 1
+        self.live_adapters.clear()
 
     def set_adapters(self, names, adapter_weights=None):
         self.adapter_names = names
@@ -604,3 +622,155 @@ def test_no_fake_modules_leak_past_this_files_tests():
         if mod is None:
             continue
         assert getattr(mod, "__file__", None), f"{name} leaked as a fake ModuleType"
+
+
+# ========== F-cfb2f360 (LoRA weights re-bound under the SAME adapter_name on the SAME cached pipe)
+# _load() short-circuits on a matching kind (lines 86-87) and generate() called
+# pipe.load_lora_weights(ref['plate'], adapter_name=f'lora_{i}') unconditionally, so the second and
+# later generates ran the load against a pipeline that already had 'lora_0' bound. The reuse is not
+# incidental: orchestrate._repair_ladder drives generator.generate() up to
+# budget.inpaints+reprompts+rerolls times on ONE generator instance, and STRENGTHEN_IDENTITY /
+# REROLL_NEW_SEED / RESYNTH_REWEIGHT all leave the conditioning SHAPE unchanged, so
+# cond.pipeline_kind() returns the same 'lora' string and the cache hits.
+#
+# MEASURED with a fake torch and a stub pipe recording its calls (no GPU, no diffusers, no weights):
+# three generates with identity_weight_bump 0.0 / 0.15 / 0.30 -- exactly the ladder's bump += 0.15
+# sequence -- produced kind='lora' every time, ONE pipe build, and load_lora_weights called three
+# times as [('ashen-reaver-front.png','lora_0')] x3, with set_adapters(['lora_0'], [0.6]) then [0.75]
+# then [0.9]. Grep across src/ for unload_lora_weights / delete_adapters / disable_lora /
+# unload_ip_adapter returned ZERO hits. diffusers is not installed here so which way it breaks was
+# unverified, and both outcomes are defects: a refused duplicate adapter_name fails every LoRA
+# contract on its FIRST repair attempt (the amend loop, i.e. the feature, cannot run at all on the
+# lora path), and a stacking one accumulates adapters with no way back to a clean state.
+
+
+def _lora_conditioning(weights, bump: float) -> dict:
+    return {
+        "identity_refs": [{"plate": str(weights), "method": "lora", "weight": 0.6}],
+        "identity_weight_bump": bump,
+    }
+
+
+def test_a_second_generate_leaves_exactly_one_lora_adapter_bound(monkeypatch, tmp_path):
+    """The double-generate path had no test at all: nothing in the suite called generate() twice on
+    one generator, so neither outcome could surface."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    gen.generate("p", "n", _lora_conditioning(weights, 0.0), seed=1)
+    gen.generate("p", "n", _lora_conditioning(weights, 0.15), seed=2)
+    pipes = captured["pipes"]
+    assert len(pipes) == 1, "the ladder reuses one cached pipeline; that is the premise"
+    pipe = pipes[0]
+    assert pipe.live_adapters == ["lora_0"], (
+        f"the second generate left {pipe.live_adapters!r} bound -- a re-bind under the same "
+        "adapter_name must not stack"
+    )
+    assert pipe.deleted_adapters == [["lora_0"]], "the previous adapter must be dropped by name"
+    assert pipe.adapter_weights == [pytest.approx(0.75)], "the bumped weight still applies"
+
+
+def test_the_full_repair_ladder_bump_sequence_stays_at_one_adapter(monkeypatch, tmp_path):
+    """The measured shape: three generates at bump 0.0 / 0.15 / 0.30, the ladder's own sequence."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    for i, bump in enumerate((0.0, 0.15, 0.30)):
+        gen.generate("p", "n", _lora_conditioning(weights, bump), seed=i)
+    pipe = captured["pipes"][0]
+    assert len(captured["pipes"]) == 1
+    assert pipe.live_adapters == ["lora_0"]
+    assert pipe.adapter_weights == [pytest.approx(0.9)]
+    assert len(pipe.loras) == 3, "each generate still binds its own weights"
+
+
+def test_two_plates_leave_both_adapters_and_no_leftovers(monkeypatch, tmp_path):
+    """A second generate with a DIFFERENT plate count must not leave the first run's extra adapter
+    behind -- that is the accumulate-forever half of the defect."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    a = tmp_path / "a.safetensors"
+    b = tmp_path / "b.safetensors"
+    a.write_bytes(b"lora-a")
+    b.write_bytes(b"lora-b")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    gen.generate(
+        "p",
+        "n",
+        {
+            "identity_refs": [
+                {"plate": str(a), "method": "lora", "weight": 0.6},
+                {"plate": str(b), "method": "lora", "weight": 0.6},
+            ]
+        },
+        seed=1,
+    )
+    pipe = captured["pipes"][0]
+    assert pipe.live_adapters == ["lora_0", "lora_1"]
+    gen.generate("p", "n", _lora_conditioning(a, 0.0), seed=2)
+    assert pipe.live_adapters == ["lora_0"], (
+        f"lora_1 from the previous generate is still bound: {pipe.live_adapters!r}"
+    )
+
+
+def test_a_pipeline_that_cannot_be_cleaned_refuses_rather_than_stacking(monkeypatch, tmp_path):
+    """If the pipeline exposes neither delete_adapters() nor unload_lora_weights(), there is no way
+    back to a clean adapter state -- and silently re-binding anyway is the defect. Refuse by name."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    gen.generate("p", "n", _lora_conditioning(weights, 0.0), seed=1)
+    pipe = captured["pipes"][0]
+    monkeypatch.setattr(pipe, "delete_adapters", None, raising=False)
+    monkeypatch.setattr(pipe, "unload_lora_weights", None, raising=False)
+    with pytest.raises(PromptCraftError) as exc:
+        gen.generate("p", "n", _lora_conditioning(weights, 0.15), seed=2)
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "lora_0" in exc.value.message
+    assert pipe.live_adapters == ["lora_0"], "and it did not stack on the way out"
+
+
+def test_unload_lora_weights_is_the_fallback_when_delete_adapters_is_absent(monkeypatch, tmp_path):
+    """Older diffusers exposes unload_lora_weights() without delete_adapters(); either one returns
+    the pipeline to a clean state, so either one is enough."""
+    _install_fake_torch(monkeypatch)
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    gen.generate("p", "n", _lora_conditioning(weights, 0.0), seed=1)
+    pipe = captured["pipes"][0]
+    monkeypatch.setattr(pipe, "delete_adapters", None, raising=False)
+    gen.generate("p", "n", _lora_conditioning(weights, 0.15), seed=2)
+    assert pipe.unload_calls == 1
+    assert pipe.live_adapters == ["lora_0"]
+
+
+def test_a_rebuilt_pipeline_starts_with_no_recorded_adapters(monkeypatch, tmp_path):
+    """The generator's record of what it bound must follow the pipe it bound them to. A kind change
+    builds a NEW pipeline, which carries no adapters -- clearing against it would be a phantom."""
+    _install_fake_torch(monkeypatch)
+    _install_fake_pil(monkeypatch)  # pose plate opens via PIL; the suite must pass on bare [dev]
+    captured = _install_fake_diffusers(monkeypatch)
+    weights = tmp_path / "costume.safetensors"
+    weights.write_bytes(b"lora-stub")
+    pose = write_solid_png(tmp_path / "p.openpose.png")
+    gen = SDXLGenerator(out_dir=tmp_path / "out")
+    gen.generate("p", "n", _lora_conditioning(weights, 0.0), seed=1)
+    # a pose ref changes cond.pipeline_kind(), so _load builds a different pipeline
+    gen.generate(
+        "p",
+        "n",
+        {**_lora_conditioning(weights, 0.0), "pose_refs": [str(pose)]},
+        seed=2,
+    )
+    assert len(captured["pipes"]) == 2, "a different kind must build a different pipeline"
+    fresh = captured["pipes"][1]
+    assert fresh.deleted_adapters == [], "nothing was bound to this pipeline yet"
+    assert fresh.live_adapters == ["lora_0"]

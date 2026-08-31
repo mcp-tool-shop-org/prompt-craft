@@ -81,6 +81,10 @@ class SDXLGenerator:
         self._face_analyzer = face_analyzer
         self._pipe = None
         self._pipe_kind: str | None = None
+        # F-cfb2f360: LoRA adapter names this generator bound onto the CURRENTLY cached pipeline.
+        # Tracked because the pipeline is reused across repair iterations and nothing in the repo
+        # ever unbound them -- see _clear_lora_adapters.
+        self._lora_adapters: list[str] = []
 
     def _load(self, kind: str = "base"):
         if self._pipe is not None and self._pipe_kind == kind:
@@ -115,6 +119,10 @@ class SDXLGenerator:
                 )
             self._pipe = pipe.to(device)
             self._pipe_kind = kind
+            # A freshly built pipeline carries no adapters. The record has to follow the pipe it
+            # describes, or the next generate() would try to delete adapters off a pipe that never
+            # had them (F-cfb2f360).
+            self._lora_adapters = []
         except PromptCraftError:
             raise
         except Exception as err:
@@ -125,6 +133,55 @@ class SDXLGenerator:
                 cause=err,
             ) from err
         return self._pipe
+
+    def _clear_lora_adapters(self, pipe) -> None:
+        """Return the cached pipeline to a clean adapter state before binding LoRA again.
+
+        F-cfb2f360: LoRA weights were re-loaded onto the SAME cached pipeline under the SAME fixed
+        ``adapter_name`` on every repair iteration, and nothing in the repo ever unloaded them.
+        ``_load()`` short-circuits on a matching kind, and ``generate()`` called
+        ``load_lora_weights(..., adapter_name=f'lora_{i}')`` unconditionally. The reuse is not
+        incidental: ``orchestrate._repair_ladder`` drives ``generate()`` up to
+        ``inpaints + reprompts + rerolls`` times on ONE generator instance, and STRENGTHEN_IDENTITY /
+        REROLL_NEW_SEED / RESYNTH_REWEIGHT all leave the conditioning SHAPE unchanged, so
+        ``cond.pipeline_kind()`` returns the same 'lora' string and the cache hits every time.
+
+        MEASURED with a fake torch and a stub pipe (no GPU, no diffusers, no weights): three
+        generates at identity_weight_bump 0.0 / 0.15 / 0.30 -- exactly the ladder's ``bump += 0.15``
+        sequence -- produced kind='lora' every time, ONE pipe build, and ``load_lora_weights`` called
+        three times with the same ('...front.png', 'lora_0') pair. A grep across src/ for
+        ``unload_lora_weights`` / ``delete_adapters`` / ``disable_lora`` / ``unload_ip_adapter``
+        returned ZERO hits. Both ways it can break are defects: if diffusers refuses a duplicate
+        adapter_name (its PeftAdapterMixin checks peft_config for the name) then every LoRA contract
+        fails on its FIRST repair attempt with RUNTIME_GENERATE_FAILED -- the amend loop, the
+        feature, cannot run at all on the lora path -- and if it stacks instead, the pipeline
+        accumulates adapters across iterations with no way back to a clean state.
+
+        Adapter state is explicit now rather than incidental. If the pipeline exposes no way to
+        unbind, that is refused BY NAME: silently re-binding anyway is the defect itself, and a
+        real diffusers pipeline exposes both of these.
+        """
+        if not self._lora_adapters:
+            return
+        names = list(self._lora_adapters)
+        delete = getattr(pipe, "delete_adapters", None)
+        if callable(delete):
+            delete(names)
+            self._lora_adapters = []
+            return
+        unload = getattr(pipe, "unload_lora_weights", None)
+        if callable(unload):
+            unload()
+            self._lora_adapters = []
+            return
+        raise PromptCraftError(
+            "GATE_CONDITIONING_UNSUPPORTED",
+            f"{self.generator_id} cannot re-bind LoRA on a cached pipeline that already carries "
+            f"adapters {names}: it exposes neither delete_adapters() nor unload_lora_weights()",
+            hint="Every repair iteration re-binds the identity LoRA onto the same cached pipeline. "
+            "Without an unbind the adapters either collide on the same name or stack forever, so "
+            "this refuses instead of guessing. A diffusers pipeline provides both methods.",
+        )
 
     def _controlnets(self, kind: str, dtype):
         from diffusers import ControlNetModel  # type: ignore
@@ -242,6 +299,10 @@ class SDXLGenerator:
 
             loras = cond.lora_refs(conditioning)
             if loras:
+                # F-cfb2f360: drop whatever a PREVIOUS generate() bound to this cached pipeline
+                # before binding again, so a re-bind under the same adapter_name is idempotent
+                # instead of a collision-or-stack.
+                self._clear_lora_adapters(pipe)
                 names: list[str] = []
                 weights: list[float] = []
                 bump = float(conditioning.get("identity_weight_bump") or 0.0)
@@ -249,6 +310,9 @@ class SDXLGenerator:
                     name = f"lora_{i}"
                     weight = min(1.0, max(0.0, float(ref.get("weight") or 0.6) + bump))
                     pipe.load_lora_weights(ref["plate"], adapter_name=name)
+                    # Recorded per successful bind, not once at the end: a failure part-way through
+                    # still leaves an accurate record of what is actually on the pipeline.
+                    self._lora_adapters.append(name)
                     names.append(name)
                     weights.append(weight)
                 pipe.set_adapters(names, adapter_weights=weights)

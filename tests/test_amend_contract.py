@@ -912,6 +912,368 @@ def test_an_unrankable_must_not_severity_is_also_structured():
 
 
 # ---------------------------------------------------------------------------
+# F-ca6f8509 -- `pcraft validate` must REFUSE an extends cycle, not crash at exit 2
+#
+# The sibling of the depends_on cycle above, on the mechanism that fix never touched.
+# MEASURED before this fix, through this exact CLI path: a single character contract with
+# "extends": "<its own id>" -- a one-line typo indistinguishable from copy-pasting a template
+# contract and forgetting to retarget extends -- exited 2 with
+# 'error[RUNTIME_UNEXPECTED]: maximum recursion depth exceeded', whose own hint calls that
+# code "the backstop, not a diagnosis". A two-file mutual cycle produced the identical raw
+# RecursionError. Exit 2 means "prompt-craft crashed"; this is exit-1 user input.
+# ---------------------------------------------------------------------------
+
+
+def _extends_payload(contract_id: str, extends: str, *, atom: str = "a") -> dict:
+    return {
+        "$schema": "prompt-craft/contract.v1",
+        "id": contract_id,
+        "level": "character",
+        "extends": extends,
+        "must_have": [{"id": atom, "claim": f"an {atom}", "check_type": "vqa"}],
+    }
+
+
+def test_validate_refuses_a_self_extending_contract_instead_of_crashing(tmp_path):
+    _write_contract(
+        tmp_path, "loop.contract.json", _extends_payload("char:self-loop", "char:self-loop")
+    )
+    result = runner.invoke(
+        app, ["validate", "--contract", "char:self-loop", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "CONTRACT_CYCLIC_EXTENDS" in text
+    assert "RUNTIME_UNEXPECTED" not in text
+    assert "recursion" not in text.lower()
+
+
+def test_validate_refuses_a_two_file_mutual_extends_cycle(tmp_path):
+    _write_contract(tmp_path, "a.contract.json", _extends_payload("char:a", "char:b", atom="ax"))
+    _write_contract(tmp_path, "b.contract.json", _extends_payload("char:b", "char:a", atom="bx"))
+    result = runner.invoke(
+        app, ["validate", "--contract", "char:a", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "CONTRACT_CYCLIC_EXTENDS" in text
+    assert "RUNTIME_UNEXPECTED" not in text
+
+
+def test_validate_still_reports_ok_for_a_legitimate_multi_level_extends_chain(tmp_path):
+    """The collateral guard, and the reason the fix is a cycle check rather than a ban on
+    character-extends-character: resolve()'s own comment calls multi-level chains supported,
+    and the finding MEASURED a 3-level chain resolving cleanly. A loop is the defect; depth
+    is not."""
+    _write_contract(
+        tmp_path,
+        "root.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:root",
+            "level": "faction",
+            "must_have": [{"id": "tabard", "claim": "a tabard", "check_type": "vqa"}],
+        },
+    )
+    _write_contract(tmp_path, "mid.contract.json", _extends_payload("char:mid", "faction:root", atom="mid"))
+    _write_contract(tmp_path, "leaf.contract.json", _extends_payload("char:leaf", "char:mid", atom="leaf"))
+    result = runner.invoke(
+        app, ["validate", "--contract", "char:leaf", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert "ok  char:leaf" in text
+    assert "faction:root -> char:mid -> char:leaf" in text  # the lineage survives the walk
+
+
+def test_the_extends_cycle_refusal_renders_on_a_cp437_console(tmp_path):
+    _write_contract(
+        tmp_path, "loop.contract.json", _extends_payload("char:self-loop", "char:self-loop")
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path]).resolve("char:self-loop")
+    exc.value.to_safe_text().encode("cp437", errors="strict")
+
+
+# ---------------------------------------------------------------------------
+# F-588763b4 -- a blank `claim` is refused at construction, exactly as a blank `id` is
+#
+# schema.py spends two long docstrings (_NON_EMPTY_ID_RATIONALE, _BLANK_ID_RATIONALE) arguing
+# that an empty-or-whitespace id "is not a contract anyone means to write" and must be refused
+# at construction rather than trusted to a downstream consumer -- then left `claim: str` bare
+# on the same two classes. MEASURED: Atom(id='a1', claim='') and Atom(id='a2', claim='   ')
+# both constructed cleanly, the template synthesizer emitted a prompt with a bare leading
+# comma, and compile_questions emitted a REQUIRED probe reading "Does this image show ?".
+#
+# assert_coverage would catch it downstream -- but only for callers that remember to call it,
+# which is the same "not the only way to obtain a ResolvedContract" gap F-877a8d9b named for
+# depends_on before that check moved onto the type.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n"], ids=["empty", "spaces", "tab-newline"])
+def test_an_atom_claim_that_is_blank_once_stripped_is_refused(blank):
+    with pytest.raises(ValidationError):
+        Atom(id="a1", claim=blank, check_type=CheckType.vqa)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n"], ids=["empty", "spaces", "tab-newline"])
+def test_a_must_not_claim_that_is_blank_once_stripped_is_refused(blank):
+    with pytest.raises(ValidationError):
+        MustNot(id="m1", claim=blank)
+
+
+def test_a_blank_claim_on_disk_is_a_structured_contract_refusal(tmp_path):
+    """The authoring path, end to end: pydantic folds the field validator's ValueError into
+    the same ValidationError _read_contract already turns into CONTRACT_INVALID -- so this is
+    exit 1 with a CONTRACT_ code, never the RUNTIME_UNEXPECTED backstop."""
+    _write_contract(
+        tmp_path,
+        "blank.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:blank",
+            "level": "faction",
+            "must_have": [{"id": "tabard", "claim": "   ", "check_type": "vqa"}],
+        },
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert exc.value.code == "CONTRACT_INVALID"
+    assert exc.value.exit_code == 1
+
+
+def test_a_blank_claim_never_reaches_the_question_dag():
+    """The defect the guard exists to stop, stated as the finding measured it: a required
+    probe with no content -- "Does this image show ?" -- sent to a live verifier tier."""
+    with pytest.raises(ValidationError):
+        compile_questions(
+            ResolvedContract(
+                id="char:blank",
+                level="character",
+                lineage=["char:blank"],
+                identity_refs=[],
+                must_not=[],
+                must_have=[Atom(id="tabard", claim="", check_type=CheckType.vqa)],
+            )
+        )
+
+
+def test_a_claim_carrying_incidental_whitespace_is_stored_as_authored():
+    """Only BLANK is refused -- the same line the id rule draws. Normalizing would silently
+    rewrite authored contract text, which is a far larger change than this gap justifies."""
+    atom = Atom(id="tabard", claim="  a grey-ash tabard  ", check_type=CheckType.vqa)
+    assert atom.claim == "  a grey-ash tabard  "
+
+
+def test_the_shipped_example_contracts_still_construct_under_the_claim_guard(sprite_example):
+    """The collateral guard: every shipped atom and negation carries a real claim."""
+    _store, resolved, _t, _c = sprite_example
+    for item in (*resolved.must_have, *resolved.must_not):
+        assert item.claim.strip()
+
+
+# ---------------------------------------------------------------------------
+# F-40a4956f -- CONTRACT_INVALID must carry a diagnosis without --debug
+#
+# The one refusal in loader.py that said nothing: "contract <path> does not match the contract
+# schema" -- no field name, no count, no location -- forcing --debug for ANY diagnostic
+# content at all, even to learn how many things were wrong. Every sibling CONTRACT_ code in
+# the same file (RELAXATION, MISSING_BASE, DUPLICATE_ATOM_ID, UNKNOWN_DEPENDS_ON,
+# CYCLIC_DEPENDS_ON) embeds the specific id, field, and values in the message with no flag.
+#
+# MEASURED: pydantic itself was never the limit -- a contract with two independently-invalid
+# fields returns BOTH from err.errors(). The default path was throwing that away.
+# ---------------------------------------------------------------------------
+
+
+def _two_error_payload() -> dict:
+    """Two independently-invalid fields at once: a bad check_type enum on one atom, and an
+    extra_forbidden key on a second."""
+    return {
+        "$schema": "prompt-craft/contract.v1",
+        "id": "faction:two",
+        "level": "faction",
+        "must_have": [
+            {"id": "tabard", "claim": "a tabard", "check_type": "not_a_real_check_type"},
+            {"id": "sigil", "claim": "a sigil", "check_type": "vqa", "colour": "grey"},
+        ],
+    }
+
+
+def test_the_schema_refusal_names_the_failing_field_without_debug(tmp_path):
+    _write_contract(tmp_path, "typo.contract.json", _bad_check_type_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert exc.value.code == "CONTRACT_INVALID"
+    assert "check_type" in exc.value.to_safe_text()
+
+
+def test_the_schema_refusal_reports_every_error_not_just_the_first(tmp_path):
+    """The Stage B lens the finding was written to answer. --debug already showed both (it
+    prints pydantic's own '2 validation errors for Contract' block); the DEFAULT path showed
+    neither."""
+    _write_contract(tmp_path, "two.contract.json", _two_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    safe = exc.value.to_safe_text()
+    assert "2 " in safe  # the count, so a reader knows how many things are wrong
+    assert "check_type" in safe  # the first error's location
+    assert "colour" in safe  # ...and the second's, which first-error-only would have dropped
+
+
+def test_the_schema_refusal_still_names_the_file_and_keeps_the_cause(tmp_path):
+    """The enrichment must not cost what the wave-2 fix bought: the path and the pydantic
+    cause both survive, so --debug still reaches the full traceback."""
+    path = _write_contract(tmp_path, "two.contract.json", _two_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    assert path.name in exc.value.message
+    assert exc.value.cause is not None
+    assert "2 validation errors for Contract" in exc.value.to_debug_text()
+
+
+def test_the_enriched_schema_refusal_renders_on_a_cp437_console(tmp_path):
+    _write_contract(tmp_path, "two.contract.json", _two_error_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    exc.value.to_safe_text().encode("cp437", errors="strict")
+
+
+def test_the_schema_refusal_stays_bounded_on_a_contract_full_of_errors(tmp_path):
+    """A diagnosis, not a dump. Twenty bad atoms must not paste twenty locations into a
+    console line -- the count still tells the reader the scale, and --debug still has all of
+    them."""
+    _write_contract(
+        tmp_path,
+        "many.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:many",
+            "level": "faction",
+            "must_have": [
+                {"id": f"a{i}", "claim": f"an a{i}", "check_type": "nope"} for i in range(20)
+            ],
+        },
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path])
+    safe = exc.value.to_safe_text()
+    assert "20" in safe
+    assert len(safe.splitlines()) <= 8
+
+
+def test_a_valid_contract_is_still_not_refused_by_the_enriched_message(tmp_path):
+    _write_contract(
+        tmp_path,
+        "ok.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:ok2",
+            "level": "faction",
+            "must_have": [{"id": "tabard", "claim": "a tabard", "check_type": "vqa"}],
+        },
+    )
+    assert ContractStore([tmp_path]).ids() == ["faction:ok2"]
+
+
+# ---------------------------------------------------------------------------
+# F-d1d2833f -- register() must fail closed on a duplicate domain name
+#
+# `_REGISTRY[plugin.name] = plugin` let a second registration under an existing name SILENTLY
+# overwrite the first -- no warning, no log, no error -- against strong precedent in this
+# exact package: ContractStore raises INPUT_DUPLICATE_CONTRACT_ID and schema._reject_duplicate_ids
+# raises CONTRACT_DUPLICATE_ATOM_ID, both fail-closed on "two things claiming the same
+# identity". The registry is the higher-stakes of the three: cli/__init__.py's get(name) is
+# what selects the Generator that gets bound (real GPU/Cloud spend), so a clobbered
+# registration misroutes generation with no signal anywhere.
+#
+# Not reachable today (one register call ships, in domains/image/__init__.py), but plugin.py's
+# own docstring names the intended near-future shape -- "Adding video or workflow is one
+# register call" -- and _REGISTRY is unscoped module-global state with no reset hook.
+# ---------------------------------------------------------------------------
+
+
+class _StubPlugin:
+    """A structurally valid DomainPlugin that touches no GPU and loads no model."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def generator(self):  # pragma: no cover - never called; registration is the subject
+        raise AssertionError("the stub plugin is not runnable")
+
+    def verifiers(self) -> dict:  # pragma: no cover - same
+        raise AssertionError("the stub plugin is not runnable")
+
+    def encoder_rules_path(self) -> Path:  # pragma: no cover - same
+        raise AssertionError("the stub plugin is not runnable")
+
+
+@pytest.fixture
+def isolated_registry(monkeypatch):
+    """A private copy of the module-global registry, reverted after the test.
+
+    _REGISTRY has no reset hook, so a test that registered into the real one would leak into
+    every later test in the session -- which is the same unscoped-global hazard this finding
+    names."""
+    from pcraft.core import plugin as plugin_mod
+
+    monkeypatch.setattr(plugin_mod, "_REGISTRY", dict(plugin_mod._REGISTRY))
+    return plugin_mod
+
+
+def test_registering_a_second_plugin_under_an_existing_name_is_refused(isolated_registry):
+    isolated_registry.register(_StubPlugin("video"))
+    with pytest.raises(PromptCraftError) as exc:
+        isolated_registry.register(_StubPlugin("video"))
+    assert exc.value.code == "INPUT_DUPLICATE_DOMAIN"
+    assert exc.value.exit_code == 1
+    assert "video" in exc.value.message
+
+
+def test_the_first_registration_survives_a_refused_duplicate(isolated_registry):
+    """Fail CLOSED: the refusal must not be a warning that leaves the clobber in place."""
+    first = _StubPlugin("video")
+    isolated_registry.register(first)
+    with pytest.raises(PromptCraftError):
+        isolated_registry.register(_StubPlugin("video"))
+    assert isolated_registry.get("video") is first
+
+
+def test_registering_a_malformed_plugin_is_refused_at_registration(isolated_registry):
+    """Before: a malformed plugin registered cleanly and failed later as a raw AttributeError
+    at whatever call site first touched the missing method."""
+
+    class Malformed:
+        name = "workflow"
+
+        def generator(self):  # pragma: no cover - never reached
+            raise AssertionError
+
+    with pytest.raises(PromptCraftError) as exc:
+        isolated_registry.register(Malformed())
+    assert exc.value.code == "INPUT_INVALID_DOMAIN_PLUGIN"
+    assert "workflow" not in isolated_registry.registered()
+
+
+def test_distinct_domain_names_still_register(isolated_registry):
+    """The collateral guard -- and the shape plugin.py's docstring promises."""
+    isolated_registry.register(_StubPlugin("video"))
+    isolated_registry.register(_StubPlugin("workflow"))
+    assert {"video", "workflow"} <= set(isolated_registry.registered())
+
+
+def test_the_shipped_image_plugin_is_still_registered_exactly_once():
+    """The live path, unmocked: importing the one shipped domain must not now refuse itself."""
+    import pcraft.domains.image  # noqa: F401  - importing IS the registration
+    from pcraft.core.plugin import get, registered
+
+    assert registered().count("image") == 1
+    assert get("image").name == "image"
+
+
+# ---------------------------------------------------------------------------
 # F-fd21bd37 -- user-facing text in this domain must survive a cp437 console
 #
 # Family-of-call-sites sibling of the em-dash crash the cli-ux and core-gate-loop

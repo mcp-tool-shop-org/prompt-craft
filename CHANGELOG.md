@@ -11,8 +11,44 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
-Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 46 findings fixed across
-two amend rounds, suite 394 -> 607. The recurring shape, again: checks that read as live
+Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 72 findings fixed across
+three amend rounds (Stage A bug/security x2, Stage B proactive x1), suite 394 -> 724.
+
+Stage B round (proactive lens — defensive depth, observability, degradation,
+future-proofing; three findings the cross-family panel promoted to CRITICAL):
+
+- **Threshold drift is now detected by value, not by label**: every receipt stamps a content
+  hash of the band values alongside `thresholds_version`, and `pcraft replay` asserts both —
+  a retune under an unchanged version string flipped verdicts silently before (measured);
+  now it raises drift. Legacy receipts without the hash still replay. The CLI passes its
+  loaded table through so the check reaches `pcraft replay` users.
+- **Tier-0 verdicts are zoned under the instrument that scored**: the router's documented
+  SigLIP2 fall-through handed sigmoids to the palette band (a 0.30 strong-match measured
+  FAIL end to end); verifier ids now carry their band family and the harness zones by it.
+- **A palette enum member that cannot parse as a colour is a named refusal**, not a silent
+  drop that narrows the check (one hex typo took the atom off the deterministic verifier
+  with nothing recording it).
+- A `bound` receipt can no longer be silently clobbered by a later run reusing its
+  record id; the CLI's stdio is deliberately UTF-8 (non-ASCII paths crashed or corrupted
+  `--json` under locale-derived strict encodings — measured byte-level, fixed through the
+  npm launcher too, with an explicit `PYTHONIOENCODING` still winning); `--image-name`
+  splits on the LAST `=` so plate names containing `=` parse; a broken `PCRAFT_PYTHON` is
+  a loud error instead of a silent PATH fallback, and `pcraft doctor` names the
+  interpreter it ran under.
+- `extends` cycles and runaway depth are refused at validate with named codes (the fourth
+  appearance of the graph-integrity class, now closed on both mechanisms); `CONTRACT_INVALID`
+  aggregates every field error instead of the first; blank `claim`s are refused at
+  construction like blank ids; duplicate plugin registration is a named refusal.
+- The injected-predictor synth path runs the same anti-prose-dump guard as the default
+  path (a fabricated coverage map sailed through before).
+- Oversized images are measured in O(1) memory (587.8 MB -> 5.73 MB on the same input)
+  instead of capped in a way that would have reopened the padding hole.
+- Dependency schedule protection: `pillow<14` (Image.getdata removal, 2027-10) with a
+  `getattr` migration shim already in place, `pydantic<3` — both with evidence-carrying
+  comments; all eleven GitHub Action pins moved off the deprecated Node20 runtime with
+  each target major's runtime verified.
+
+Earlier rounds follow. The recurring shape, again: checks that read as live
 while checking less than they appear — this time including one on the bind door itself.
 
 Second-round fixes (composed-surface re-audit findings — seams between the first round's

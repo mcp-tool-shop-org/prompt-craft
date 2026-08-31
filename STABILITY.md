@@ -101,9 +101,13 @@ Named explicitly, because "not mentioned" is how a promise gets assumed.
 The bands in `sprite.calibration.json` (`sprite.cal.v1`) are **data, not interface**. They are
 defaults and they will be retuned. Retuning them is not a breaking change.
 
-What *is* covered: the table is versioned, that version is stamped into every receipt, and
-`pcraft replay` **asserts** it — so a decision made under one table cannot be silently replayed
-under another. You are protected from the drift being invisible, not from the drift.
+What *is* covered: the table is versioned, and every receipt now stamps **both** that version
+and a content hash of the band values themselves; `pcraft replay` **asserts both** — so a
+decision made under one table cannot be silently replayed under another, *including* when the
+values were retuned without touching the version string (that gap was real: measured, a value
+retune under an unchanged version flipped a verdict while replay stayed silent — closed in the
+first patch after v1.0.0). Receipts written before the hash existed replay under the version
+check alone. You are protected from the drift being invisible, not from the drift.
 
 ### The identity sub-gate — provisional, and out of scope
 

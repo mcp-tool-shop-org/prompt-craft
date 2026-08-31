@@ -13,8 +13,10 @@ a typo from a Ctrl-C. Pinned in tests/test_amend_cli.py by
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -91,6 +93,12 @@ class _ExitContractGroup(TyperGroup):
         windows_expand_args: bool = True,
         **extra: Any,
     ) -> Any:
+        # The single funnel for every invocation -- the console script (`pcraft.cli:app` ->
+        # Typer.__call__ -> get_command(...)(...) -> this), `python -m pcraft`, and
+        # `python -m pcraft.cli` all arrive here, and they arrive BEFORE Click renders help
+        # or dispatches a command body. That is the one place a stdio decision can be made
+        # early enough to cover both.
+        _configure_stdio()
         try:
             rv = super().main(
                 args=args,
@@ -153,18 +161,99 @@ def _root(
     """Contract-driven generative-asset production."""
 
 
+def _configure_stdio() -> None:
+    """Choose this CLI's output encoding instead of inheriting the console codepage.
+
+    Python derives stdout/stderr encoding from the locale or console codepage with
+    ``errors='strict'``, and this CLI used to just write through it. Every command echoes
+    back user-supplied path and id content -- a ``--contracts-dir`` under a non-English
+    directory or user name is ordinary input, not adversarial -- and that content broke the
+    output two ways, both measured against a real subprocess (F-90a9872f):
+
+    * a path representable in the ambient codepage but not in ASCII exited **0** with a
+      complete-looking ``--json`` document on stdout whose bytes were not valid UTF-8, so a
+      caller's ordinary ``json.loads(stdout.decode('utf-8'))`` failed on a success;
+    * a path outside the codepage raised ``UnicodeEncodeError`` from inside ``_say``, caught
+      only by the outer backstop, so a found contract exited 2 as ``RUNTIME_UNEXPECTED``
+      with **zero bytes** on stdout -- a representation failure read as a runtime one.
+
+    This is the same class the module already fixed four times for its own static help
+    strings; it survived on the one vector an ASCII sweep of the source cannot reach.
+
+    An explicit ``PYTHONIOENCODING`` is left ALONE. It is an operator override -- the
+    honest simulation of a legacy console, and what
+    ``test_every_rendered_help_page_encodes_on_a_cp437_console`` pins -- so silently
+    overruling it would delete a real signal and turn those tests vacuous. The two guards
+    that survive an override carry the rest: ``_encodable`` below degrades human text
+    instead of raising, and ``_emit_model`` escapes the ``--json`` document to pure ASCII,
+    which every codepage can represent.
+
+    ``backslashreplace`` rather than ``replace``: the escapes name the characters that could
+    not be written (``\\u6f22``), where ``?`` would silently destroy them.
+    """
+    if os.environ.get("PYTHONIOENCODING"):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a replaced stream that is not a TextIOWrapper
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (ValueError, OSError, LookupError):
+            # A stream that will not change encoding can still stop raising. Failing to
+            # improve the output is never a reason to take the command down.
+            with contextlib.suppress(ValueError, OSError, LookupError):
+                reconfigure(errors="backslashreplace")
+
+
+def _encodable(text: str, stream: Any) -> str:
+    """Text this stream can actually write, with anything it cannot represent escaped.
+
+    The fallback for the case ``_configure_stdio`` deliberately does not touch: an operator
+    who pinned ``PYTHONIOENCODING`` to a legacy codepage still gets output, degraded
+    readably, instead of a ``UnicodeEncodeError`` that takes the whole command down and
+    reports a successful lookup as an unclassified runtime failure.
+    """
+    errors = getattr(stream, "errors", None)
+    if errors and errors != "strict":
+        return text  # the stream already degrades on its own
+    encoding = getattr(stream, "encoding", None)
+    if not encoding:
+        return text
+    try:
+        text.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return text.encode(encoding, "backslashreplace").decode(encoding, "replace")
+    return text
+
+
 def _emit(err: PromptCraftError, debug: bool) -> None:
-    typer.echo(err.to_debug_text() if debug else err.to_safe_text(), err=True)
+    # Error text names paths too (INPUT_CONTRACTS_DIR quotes the directory it refused), so
+    # the refusal has to survive the same consoles the success path does.
+    typer.echo(_encodable(err.to_debug_text() if debug else err.to_safe_text(), sys.stderr), err=True)
     raise typer.Exit(code=err.exit_code)
 
 
 def _say(text: str, *, as_json: bool = False) -> None:
     """Human text. When ``--json``, the banner goes to stderr so stdout stays a document."""
-    typer.echo(text, err=as_json)
+    typer.echo(_encodable(text, sys.stderr if as_json else sys.stdout), err=as_json)
 
 
 def _emit_model(model: BaseModel) -> None:
-    typer.echo(model.model_dump_json(indent=2))
+    """The ``--json`` document, escaped to pure ASCII.
+
+    ``model_dump_json`` emits raw UTF-8, which is only writable when the console agrees.
+    Re-serialising the value pydantic produced with ``ensure_ascii`` makes the document
+    representable in every codepage -- ASCII is a subset of all of them -- so ``--json``
+    stays parseable even where ``_configure_stdio`` steps aside for an operator override.
+    ``json.loads`` turns the ``\\uXXXX`` escapes back into the original characters, so this
+    changes the document's bytes and not its value.
+
+    The round trip goes through ``model_dump_json`` rather than ``model_dump(mode="json")``
+    so pydantic's own serialisers stay the authority on what the value IS; only the encoding
+    of that value changes here.
+    """
+    typer.echo(json.dumps(json.loads(model.model_dump_json()), indent=2, ensure_ascii=True))
 
 
 class ListedContract(BaseModel):
@@ -210,6 +299,14 @@ class DoctorReport(BaseModel):
     # of this document are unaffected; nothing was renamed or removed.
     version_coherent: bool = True
     version_warning: str | None = None
+    # Also additive, also defaulted (F-5b655328). `python` above is a bare version string
+    # ('3.14.5'), which on a machine with more than one interpreter meeting the same floor
+    # -- pyenv, conda, a project venv beside a global install, or the npm launcher's own
+    # PCRAFT_PYTHON candidate list -- cannot say WHICH one answered. doctor is the one
+    # command whose whole job is answering that, and it could not. `pcraft_python` is the
+    # other half of the diagnosis: what the operator configured, beside what actually ran.
+    executable: str = ""
+    pcraft_python: str | None = None
 
 
 @app.command()
@@ -450,8 +547,15 @@ def replay(
         resolved = store.resolve(rec.contract_id)
         # The receipt has always stamped the table version; nothing compared it until v1.0.0, so a
         # replay under a retuned table re-decided in silence. Opting out is a flag you have to type.
-        table_version = None if skip_threshold_check else load_thresholds(thresholds or THRESHOLDS_PATH).version
-        do_replay(rec, resolved, thresholds_version=table_version)
+        #
+        # The TABLE now goes across too, not just its version string (F-70ea9458). A version
+        # comparison only catches a retune whose author remembered to bump the label; band
+        # VALUES edited under an unchanged version are the case that walked straight through,
+        # which is precisely the drift with no other signal. The loaded table was already in
+        # hand here and only `.version` was being read off it.
+        table = None if skip_threshold_check else load_thresholds(thresholds or THRESHOLDS_PATH)
+        table_version = table.version if table is not None else None
+        do_replay(rec, resolved, thresholds_version=table_version, thresholds=table)
         _say(
             f"replay OK: {rec.record_id} reproduces from {rec.contract_id} ({rec.contract_hash[:19]}...)"
             + (f"  thresholds={table_version}" if table_version else "  thresholds=NOT CHECKED"),
@@ -486,6 +590,16 @@ def doctor(
             _say(f"  VERSION MISMATCH: {report.version_warning}", as_json=as_json)
         py_mark = "ok" if report.python_ok else "FAIL"
         _say(f"python {report.python}  ({py_mark}; need >= 3.11)", as_json=as_json)
+        _say(f"  interpreter: {report.executable}", as_json=as_json)
+        if report.pcraft_python is not None:
+            # Named even when it matches: "what I configured is what answered" is the fact
+            # an operator came here for, and silence cannot carry it.
+            _say(
+                f"  PCRAFT_PYTHON: {report.pcraft_python}"
+                + ("" if _same_interpreter(report.pcraft_python, report.executable)
+                   else "  (NOT the interpreter that answered)"),
+                as_json=as_json,
+            )
         for extra in report.extras:
             mark = "present" if extra.present else "missing"
             missing = [name for name, ok in extra.modules.items() if not ok]
@@ -516,6 +630,22 @@ def _extra_status(name: str, modules: tuple[str, ...]) -> ExtraStatus:
     return ExtraStatus(name=name, present=all(found.values()), modules=found)
 
 
+def _same_interpreter(configured: str, running: str) -> bool:
+    """Whether PCRAFT_PYTHON and sys.executable name the same file.
+
+    A best-effort comparison, and deliberately so: a bare name like ``python`` resolves
+    through PATH and a bogus path does not resolve at all, so this must never raise. When it
+    cannot tell, it says "not the same" -- flagging a match that is really a mismatch is the
+    failure that sends an operator away satisfied.
+    """
+    try:
+        return os.path.normcase(os.path.realpath(configured)) == os.path.normcase(
+            os.path.realpath(running)
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> DoctorReport:
     from ..core.gate.thresholds import load_thresholds
     from ..domains.image.subdomains.sprite import THRESHOLDS_PATH
@@ -538,6 +668,8 @@ def _run_doctor(contracts_dirs: list[Path] | None, thresholds: Path | None) -> D
         store_ok=False,
         version_coherent=note is None,
         version_warning=note,
+        executable=sys.executable,
+        pcraft_python=os.environ.get("PCRAFT_PYTHON"),
     )
     try:
         store = load_store(contracts_dirs)
@@ -573,7 +705,28 @@ def schema_cmd(
 
 
 def _parse_image_names(pairs: list[str]) -> dict[str, str]:
-    """``local.png=cloud-hash.png`` pairs from --image-name."""
+    """``local.png=cloud-hash.png`` pairs from --image-name. Splits on the LAST ``=``.
+
+    The split direction is a decision, not a default (F-b795e5ca). ``=`` is a legal filename
+    character on Windows and POSIX alike, and the local side is a free-form plate filename --
+    ``kontext_fill`` builds it from ``Path(lock.identity[0]).name``, which is whatever the
+    contract's reference lock points at. The cloud side is a Comfy upload name and cannot
+    contain one. So the ambiguity in ``a=b=c`` has exactly one safe reading: the extra ``=``
+    belongs to the local filename.
+
+    Splitting on the FIRST ``=`` read it the other way and said nothing: measured,
+    ``['weird=name.png=cloud-upload.png']`` returned ``{'weird': 'name.png=cloud-upload.png'}``
+    -- a local key matching no ``LoadImage`` node and a cloud name Comfy never issued. Nothing
+    downstream refuses that: ``bind_cloud_names``'s documented behaviour for an unrecognised
+    key is "missing keys stay", so the graph is written, uploaded and submitted at real spend
+    with the remap silently not applied. Argument parsing is the layer positioned to catch it,
+    and it is the layer that has to.
+
+    Refusing multi-``=`` input instead would be fail-closed in form only: it leaves an operator
+    whose plate legitimately contains an ``=`` no way to use the flag at all, to protect
+    against an ambiguity that is not actually ambiguous. Empty sides are still refused below --
+    those have no correct reading.
+    """
     out: dict[str, str] = {}
     for raw in pairs:
         if "=" not in raw:
@@ -582,7 +735,7 @@ def _parse_image_names(pairs: list[str]) -> dict[str, str]:
                 f"--image-name {raw!r} is not local=cloud",
                 hint="Pass --image-name ashen-reaver-front.png=<cloud upload name>.",
             )
-        local, cloud = raw.split("=", 1)
+        local, cloud = raw.rsplit("=", 1)
         local, cloud = local.strip(), cloud.strip()
         if not local or not cloud:
             raise PromptCraftError(
@@ -605,7 +758,8 @@ def recipe(
     image_name: list[str] = typer.Option(
         [],
         "--image-name",
-        help="remap a LoadImage filename to a Cloud upload name (local=cloud, repeatable)",
+        help="remap a LoadImage filename to a Cloud upload name (local=cloud, repeatable; "
+        "split on the LAST '=', so a local filename may contain one)",
     ),
     as_json: bool = typer.Option(False, "--json", help="emit RecipeReport as JSON on stdout"),
     debug: bool = typer.Option(False),

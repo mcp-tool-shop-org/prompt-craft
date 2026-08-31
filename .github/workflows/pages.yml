@@ -21,9 +21,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Node24-native action majors; the reason is written out in ci.yml's step block.
+      # The action major and `node-version` are unrelated numbers: v7 is the setup-node
+      # release, 22 is still the Node this site builds on.
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -35,7 +38,10 @@ jobs:
         working-directory: site
         run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      # `using: composite`, so it carries no Node runtime of its own -- it delegates to a
+      # SHA-pinned actions/upload-artifact@v7, which is node24. Bumped with the rest so the
+      # delegation is to the current pair rather than to v3's node20 upload.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site/dist
 
@@ -46,5 +52,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # v5 still declares the `page_url` output that `environment.url` above reads; that
+      # was checked rather than assumed, because a dropped output would silently empty the
+      # deployment URL instead of failing.
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

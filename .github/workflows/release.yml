@@ -87,8 +87,13 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Node24-native action majors; the reason is written out in ci.yml's step block.
+      # It matters most here: this is the workflow that reaches PyPI and npm, it runs
+      # only on a tag, and it had not run recently enough to even log the deprecation
+      # warning the other two files were printing. A workflow nobody exercises is
+      # exactly the one that discovers a removed runtime during a release.
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -156,7 +161,12 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           [ "$TAG" = "$PKG" ] || { echo "::error::tag $TAG != pyproject $PKG"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      # upload@v7 here and download@v8 in the `pypi` job are a matched pair and must be
+      # bumped together -- the artifact this uploads is the one that gets published, so a
+      # mismatch is a bad publish, not a red step. Both defaults were read back rather than
+      # assumed: upload's `archive` still defaults true and download's `skip-decompress`
+      # still defaults false, so `dist/` arrives extracted exactly as it did under v4.
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -168,10 +178,15 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      # The other half of the pair uploaded by the `verify` job -- see the note there.
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
+      # Left at `release/v1` deliberately, and it is not an oversight in the sweep above.
+      # It is a moving tag PyPA maintains rather than a major this repo chose, and its
+      # action.yml is `using: composite` -- it carries no Node runtime of its own, so there
+      # is no node20 pin here to bump. Checked, not assumed.
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   npm:
@@ -181,8 +196,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      # v7 is the setup-node major; 22 is still the Node this publishes on, and the two
+      # numbers are unrelated. `registry-url` is still a declared input of v7 -- checked,
+      # because OIDC publishing depends on it.
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"

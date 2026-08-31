@@ -13,9 +13,13 @@ plus the Director-requested `pcraft gate` / --generator-family same-family regre
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import typer.main
@@ -691,3 +695,445 @@ def test_abort_is_a_runtimeerror_not_a_clickexception():
         "Abort became a ClickException subclass; the clause ordering in "
         "_ExitContractGroup.main is no longer sound"
     )
+
+
+# --------------------------------------------------------------------------- F-08baabcc
+# The `except ModuleNotFoundError` fallback under the private-typer import is DEAD on every
+# typer CI resolves today (measured: 0.27.2 on both legs, where `typer._click.exceptions`
+# resolves and the try succeeds). It executes locally only by the accident of a venv holding
+# a stale typer<0.26 -- an install-history artifact, not an assertion. A `pip install -e
+# ".[dev]"` in that venv would flip local coverage to the untested branch too, with nothing
+# red anywhere. The branch exists because this exact shape (a typer/click layout change
+# breaking the CLI at IMPORT, before any command runs) has already happened twice.
+#
+# So the branch is forced rather than waited for, using this repo's own established
+# convention -- `sys.modules[name] = None`, the same trick tests/test_feat_palette.py's
+# _hide_pillow uses for Pillow -- which makes `import typer._click.exceptions` raise
+# ModuleNotFoundError on a layout that has it. A real pinned-old-typer CI leg would prove
+# more, but it costs a permanent matrix slot for a two-version shim; this costs nothing.
+#
+# The fresh module is exec'd from its own spec and never installed into sys.modules: a
+# reload would leave `pcraft.cli._ClickException` bound to the fallback class for every
+# later test in the session, which on a >=0.26 layout is a DIFFERENT class from the one the
+# machinery raises. submodule_search_locations is load-bearing -- without it the spec's
+# parent is "pcraft" instead of "pcraft.cli" and every `from ..` in the module dies as
+# "attempted relative import beyond top-level package".
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("click") is None,
+    reason="typer >= 0.27 ships no standalone click, so the pre-0.26 fallback cannot bind there",
+)
+def test_the_pre_026_click_exception_fallback_still_binds_when_forced(monkeypatch):
+    import click.exceptions
+
+    import pcraft.cli as cli_mod
+
+    monkeypatch.setitem(sys.modules, "typer._click", None)
+    monkeypatch.setitem(sys.modules, "typer._click.exceptions", None)
+
+    source = Path(cli_mod.__file__)
+    spec = importlib.util.spec_from_file_location(
+        "pcraft.cli", source, submodule_search_locations=[str(source.parent)]
+    )
+    fresh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fresh)
+
+    assert fresh._ClickException is click.exceptions.ClickException, (
+        "the typer<0.26 fallback did not bind click.exceptions.ClickException; on that "
+        "layout the CLI would fail at import, before any command runs"
+    )
+    assert fresh._ClickAbort is typer.Abort, (
+        "Abort must come from the public name on every layout -- that is the whole point of "
+        "it not being in the two-branch import"
+    )
+
+
+# --------------------------------------------------------------------------- F-90a9872f
+# `_say` writes through whatever encoding the interpreter derived from the locale/console
+# codepage, with errors='strict' -- this CLI never reconfigured it. So a --contracts-dir
+# path containing perfectly ordinary non-English characters broke `--json` two different
+# ways, both MEASURED against a real subprocess before the fix:
+#
+#   1. SILENT. A path representable in the ambient codepage but not ASCII (cp1252 on the rig
+#      this was written on) exits 0 with a complete-looking document on stdout whose bytes
+#      are NOT valid UTF-8 ("'utf-8' codec can't decode byte 0xdc"). A caller doing the
+#      ordinary json.loads(stdout.decode('utf-8')) gets a decode error from a command that
+#      reported success.
+#   2. LOUD BUT MISCLASSIFIED. A path outside the codepage entirely raises UnicodeEncodeError
+#      inside _say, caught only by the outer `except Exception` backstop -- exit 2,
+#      RUNTIME_UNEXPECTED, stdout completely empty (0 bytes), even though the contract was
+#      found and would have listed fine. A purely representational failure read by the
+#      exit-code contract as a runtime error.
+#
+# This is the same defect CLASS the file already fixed four times for its OWN static strings
+# (F-fd21bd37, F-a6acaab1, F-df1c6b0a, F-de08ba2e), surviving on the one vector an ASCII
+# sweep of the source structurally cannot reach: user-supplied path content.
+#
+# The cp437-pinned leg is deliberate and is NOT redundant with the ambient one. An explicit
+# PYTHONIOENCODING is an operator override and keeps winning -- the help-page tests above
+# depend on exactly that -- so on that leg the fix may not simply reconfigure the stream to
+# UTF-8. It has to hold anyway, which is what pins the two halves of the fix that survive an
+# override: the human banner degrades readably instead of raising, and the --json document
+# is escaped to pure ASCII, so it parses out of any console codepage at all.
+
+_LATIN1_STORE = "store-\u00dc\u00ef\u00f8\u00e9"  # cp1252 has all four; cp437 does not have o-slash
+_OUTSIDE_STORE = "store-\u6f22\u5b57"  # in neither legacy codepage
+
+
+def _non_ascii_store(tmp_path, name: str) -> Path:
+    from pcraft.domains.image.subdomains.sprite import CONTRACTS_DIR
+
+    dest = tmp_path / name
+    shutil.copytree(CONTRACTS_DIR, dest)
+    return dest
+
+
+def _list_json_under(store: Path, *, pythonioencoding: str | None):
+    """Run the real CLI in a subprocess with the console codepage pinned like an operator's.
+
+    A subprocess, not CliRunner: the defect lives in the encoding the INTERPRETER picks for
+    its own stdout, which CliRunner replaces with a UTF-8 buffer of its own and therefore
+    cannot see.
+    """
+    env = {**os.environ, "PYTHONUTF8": "0"}
+    env.pop("PYTHONIOENCODING", None)
+    if pythonioencoding is not None:
+        env["PYTHONIOENCODING"] = pythonioencoding
+    return subprocess.run(
+        [sys.executable, "-m", "pcraft", "list", "--contracts-dir", str(store), "--json"],
+        capture_output=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "pythonioencoding", [None, "cp437:strict"], ids=["ambient-console", "cp437-pinned"]
+)
+@pytest.mark.parametrize(
+    "dirname", [_LATIN1_STORE, _OUTSIDE_STORE], ids=["in-legacy-codepage", "outside-codepage"]
+)
+def test_json_stdout_parses_whatever_codepage_the_console_reports(tmp_path, dirname, pythonioencoding):
+    store = _non_ascii_store(tmp_path, dirname)
+    proc = _list_json_under(store, pythonioencoding=pythonioencoding)
+    tail = proc.stderr.decode("utf-8", "backslashreplace")[-400:]
+    assert proc.returncode == 0, (
+        f"`pcraft list --json` under a non-ASCII --contracts-dir exited {proc.returncode}; "
+        "the contract was found and only its NAME could not be represented, so this is not "
+        f"a runtime error: {tail}"
+    )
+    try:
+        text = proc.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AssertionError(
+            "`--json` wrote a document that is not valid UTF-8, on a command that exited 0 "
+            f"-- an ordinary json.loads(stdout.decode('utf-8')) caller sees: {exc}"
+        ) from None
+    doc = json.loads(text)
+    sources = [c["source"] for c in doc["contracts"]]
+    assert sources, "the store listed no contracts"
+    assert all(dirname in s for s in sources), (
+        f"the --json document lost the directory name it was given: {sources!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "pythonioencoding", [None, "cp437:strict"], ids=["ambient-console", "cp437-pinned"]
+)
+def test_the_human_banner_degrades_readably_instead_of_taking_the_command_down(tmp_path, pythonioencoding):
+    """The other half: stderr must still say something, and say it without raising.
+
+    Under `--json` the banner is the only human-readable output there is. Losing it to a
+    UnicodeEncodeError takes stdout with it (measured: 0 bytes), so "the banner survives" is
+    what keeps the document from being collateral damage on a legacy console.
+    """
+    store = _non_ascii_store(tmp_path, _OUTSIDE_STORE)
+    proc = _list_json_under(store, pythonioencoding=pythonioencoding)
+    banner = proc.stderr.decode("utf-8", "backslashreplace")
+    assert "char:ashen-reaver" in banner, (
+        f"the --json banner did not survive an unrepresentable path: {banner[-400:]!r}"
+    )
+    assert "RUNTIME_UNEXPECTED" not in banner, (
+        "a path that cannot be printed is not an unclassified runtime failure"
+    )
+
+
+# --------------------------------------------------------------------------- F-b795e5ca
+# `--image-name local=cloud` split on the FIRST '=', so a local plate filename containing an
+# '=' (a legal Windows/POSIX filename character) silently folded its own tail into the CLOUD
+# name: measured, _parse_image_names(['weird=name.png=cloud-upload.png']) returned
+# {'weird': 'name.png=cloud-upload.png'} with no refusal. `recipe` writes the graph that gets
+# uploaded and submitted to Comfy Cloud at real spend, and bind_cloud_names' documented
+# behaviour for a key it does not recognise is "missing keys stay" -- so a wrong split is
+# invisible all the way to the money.
+#
+# The split moves to the LAST '=', not to a refusal: the local side is a free-form plate
+# filename (kontext_fill builds it from Path(lock.identity[0]).name -- arbitrary user
+# content), while the cloud side is a Comfy upload name, which cannot contain '='. Refusing
+# would leave an operator whose plate legitimately contains an '=' with no way to use the
+# flag at all. Both directions are pinned below so the choice is a decision, not a guess.
+
+
+def test_image_name_splits_on_the_last_equals_so_a_local_plate_may_contain_one():
+    from pcraft.cli import _parse_image_names
+
+    names = _parse_image_names(["weird=name.png=cloud-upload.png"])
+    assert names == {"weird=name.png": "cloud-upload.png"}, (
+        "the extra '=' belongs to the local filename; folding it into the cloud name "
+        "produces an upload name Comfy never issued"
+    )
+    assert "weird" not in names, "the first-'=' split is back"
+
+
+def test_image_name_leaves_an_ordinary_pair_exactly_as_it_was():
+    from pcraft.cli import _parse_image_names
+
+    assert _parse_image_names(["ashen-reaver-front.png=cloud-face.png"]) == {
+        "ashen-reaver-front.png": "cloud-face.png"
+    }
+
+
+@pytest.mark.parametrize("raw", ["=cloud.png", "local.png=", "="], ids=["no-local", "no-cloud", "bare"])
+def test_image_name_still_refuses_an_empty_side(raw):
+    from pcraft.cli import _parse_image_names
+    from pcraft.errors import PromptCraftError
+
+    with pytest.raises(PromptCraftError) as excinfo:
+        _parse_image_names([raw])
+    assert excinfo.value.code == "INPUT_IMAGE_NAME"
+
+
+def test_image_name_still_refuses_a_pair_with_no_equals():
+    from pcraft.cli import _parse_image_names
+    from pcraft.errors import PromptCraftError
+
+    with pytest.raises(PromptCraftError) as excinfo:
+        _parse_image_names(["ashen-reaver-front.png"])
+    assert excinfo.value.code == "INPUT_IMAGE_NAME"
+
+
+# --------------------------------------------------------------------------- F-5b655328
+# doctor reported `python` as a bare version string ('3.14.5') and never sys.executable. On a
+# machine with more than one interpreter satisfying the same floor -- pyenv, conda, a project
+# venv beside a global install, or the npm launcher's own PCRAFT_PYTHON candidate list -- the
+# version number alone cannot say WHICH one answered. doctor is the one command whose entire
+# job is answering that for an operator debugging a confusing environment.
+
+
+def test_doctor_names_the_interpreter_it_actually_ran_under():
+    result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    data = json.loads(result.stdout)
+    assert data["executable"] == sys.executable, (
+        "doctor's report does not name the interpreter that produced it, so a version "
+        "number is the only clue about which of several Pythons answered"
+    )
+    assert sys.executable in ((result.stderr or "") + (result.stdout or "")), (
+        "the human banner must name it too; --json is not the only way people run doctor"
+    )
+
+
+def test_doctor_shows_the_configured_pcraft_python_beside_the_one_that_answered(monkeypatch):
+    """'What I configured' next to 'what is actually running' is the whole diagnosis.
+
+    This is the companion half of the npm launcher finding: once a broken PCRAFT_PYTHON has
+    been rejected, `pcraft doctor` is the natural next step, and it has to be able to show
+    the mismatch rather than report a version and leave the operator guessing.
+    """
+    monkeypatch.setenv("PCRAFT_PYTHON", "C:/definitely/not/a/real/path/python.exe")
+    result = runner.invoke(app, ["doctor", "--json"])
+    data = json.loads(result.stdout)
+    assert data["pcraft_python"] == "C:/definitely/not/a/real/path/python.exe"
+    assert data["executable"] == sys.executable
+
+
+def test_doctor_reports_no_configured_interpreter_when_the_env_var_is_unset(monkeypatch):
+    monkeypatch.delenv("PCRAFT_PYTHON", raising=False)
+    result = runner.invoke(app, ["doctor", "--json"])
+    data = json.loads(result.stdout)
+    assert data["pcraft_python"] is None
+
+
+# --------------------------------------------------------------------------- F-d7c0c054 / F-32b0166f
+# The npm launcher. Two findings, one file.
+#
+# F-d7c0c054: locate() tried PCRAFT_PYTHON first, then took the SAME silent `continue` for
+# every reason it could fail -- not on PATH, real interpreter without the toolkit, wrong
+# permissions -- and quietly fell through to the next PATH candidate. MEASURED end to end:
+# `PCRAFT_PYTHON=C:/definitely/not/a/real/path/python.exe node npm/bin/pcraft.mjs --version`
+# exited 0 and printed an ordinary version banner, with nothing anywhere saying the
+# configured interpreter had been rejected or that a different one answered. The population
+# npm/README.md aims that variable at ("if you keep several") is exactly the population most
+# likely to have another pcraft on PATH to absorb the mistake -- a different version, with
+# different pins, quite possibly not the code the operator meant to exercise. `bind --no-mock`
+# spends real GPU/Cloud money on that assumption.
+#
+# F-32b0166f: the launcher goes out of its way to guarantee one clean, actionable stderr
+# message for every missing-dependency case -- and then imported `node:child_process` at the
+# top level, so on a Node too old to resolve the `node:` protocol the process died in module
+# resolution before locate(), fail(), or any of that machinery could run.
+
+_LAUNCHER = Path("npm") / "bin" / "pcraft.mjs"
+_NODE = shutil.which("node")
+requires_node = pytest.mark.skipif(_NODE is None, reason="the npm launcher needs node on PATH")
+
+
+def _launch(args: list[str], env: dict[str, str]):
+    return subprocess.run(
+        [_NODE, str(_LAUNCHER), *args], capture_output=True, env=env, timeout=120, check=False
+    )
+
+
+@requires_node
+def test_a_broken_pcraft_python_is_refused_by_name_never_silently_replaced():
+    bogus = "C:/definitely/not/a/real/path/python.exe"
+    proc = _launch(["--version"], {**os.environ, "PCRAFT_PYTHON": bogus})
+    out = proc.stdout.decode("utf-8", "replace")
+    err = proc.stderr.decode("utf-8", "replace")
+    assert proc.returncode != 0, (
+        f"a broken PCRAFT_PYTHON produced a successful run: {out!r}. Some other interpreter "
+        "answered, and nothing said so"
+    )
+    assert "PCRAFT_PYTHON" in err, f"the rejection does not name the variable: {err!r}"
+    assert bogus in err, f"the rejection does not name the path it rejected: {err!r}"
+    assert "pcraft " not in out, "a version banner was printed by a fallback interpreter"
+
+
+@requires_node
+def test_a_pcraft_python_that_cannot_import_the_toolkit_says_which_of_the_two_it_is(tmp_path):
+    """The module's own doctrine: "no interpreter" and "interpreter, no package" are
+    different problems and telling them apart is the whole value of the check. That
+    distinction existed for the PATH candidates and not for the configured one."""
+    shadow = tmp_path / "shadow"
+    (shadow / "pcraft").mkdir(parents=True)
+    (shadow / "pcraft" / "__init__.py").write_text(
+        "raise ImportError('no toolkit in this interpreter')\n", encoding="utf-8"
+    )
+    env = {**os.environ, "PCRAFT_PYTHON": sys.executable, "PYTHONPATH": str(shadow)}
+    proc = _launch(["--version"], env)
+    err = proc.stderr.decode("utf-8", "replace")
+    assert proc.returncode != 0
+    # Naming the PATH is the assertion, not naming the variable: the pre-fix message already
+    # ended with the generic advice line "Point at a specific interpreter with PCRAFT_PYTHON
+    # if you use one", so a substring check on the variable name alone passes vacuously
+    # against the very defect this pins.
+    assert sys.executable in err, (
+        f"the configured interpreter was rejected without being named: {err!r}"
+    )
+    assert "prompt-crafter" in err, "the actionable install line is missing"
+
+
+@requires_node
+def test_the_launcher_checks_its_node_floor_before_any_node_protocol_import():
+    source = _LAUNCHER.read_text(encoding="utf-8")
+    # STATIC declarations only. `import(...)` -- no space, an opening paren -- is the dynamic
+    # form, which is evaluated where it is written and is the fix here, not the defect.
+    offenders = re.findall(r'^\s*import\s+(?!\()[^\n]*"node:[^\n]*$', source, re.MULTILINE)
+    assert not offenders, (
+        "a top-level `node:` import is resolved before any statement in the file runs, so on "
+        "a Node too old to support the protocol the process dies with a raw module-resolution "
+        f"error instead of this launcher's own clean message: {offenders!r}"
+    )
+    proc = _launch(["--node-selftest"], dict(os.environ))
+    out = proc.stdout.decode("utf-8", "replace")
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "node >=" in out, f"the selftest does not report the floor it enforces: {out!r}"
+
+
+def test_the_launchers_hard_floor_is_calibrated_to_the_code_not_to_engines():
+    """A guard that mirrors `engines` would reject installs that work fine today.
+
+    npm/package.json declares `>=18` -- the supported-and-tested range. The launcher's own
+    hard floor is a different question: the oldest Node on which this FILE can run at all,
+    which is set by the `node:` protocol (unflagged from 14.18), not by the support policy.
+    """
+    engines = json.loads(Path("npm/package.json").read_text(encoding="utf-8"))["engines"]["node"]
+    declared_major = int(re.search(r">=\s*(\d+)", engines).group(1))
+    source = _LAUNCHER.read_text(encoding="utf-8")
+    match = re.search(r"MIN_NODE\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]", source)
+    assert match, "the launcher declares no explicit Node floor to check against"
+    floor = tuple(int(g) for g in match.groups())
+    assert floor <= (declared_major, 0, 0), (
+        f"the runtime guard's floor {floor} is above the engines range {engines!r}; it would "
+        "refuse Node versions this package currently supports"
+    )
+    assert floor >= (14, 18, 0), (
+        f"floor {floor} is below 14.18, where `node:` protocol imports became unflagged -- "
+        "the guard would pass a Node that cannot resolve this file's own imports"
+    )
+
+
+# --------------------------------------------------------------------------- F-70ea9458
+# The CLI half of the threshold VALUE-drift check. `pcraft replay` already LOADED the
+# threshold table and then read only `.version` off it, so the comparison it performed was
+# label against label. That catches a retune whose author remembered to bump the version and
+# misses the one that has no other signal at all: band values edited under an unchanged
+# version string. The receipt then replays "clean" against a table that would have decided
+# it differently -- the same "looks like a live check while checking less than it appears
+# to" shape the version comparison itself was added to close.
+#
+# EXPECTED RED IN THIS WORKTREE. `do_replay`'s new `thresholds=` parameter lands in the
+# SIBLING core-gate-loop worktree; here `replay()` still has the pre-fold signature and
+# raises TypeError on the keyword, which the command's blanket backstop wraps into
+# RUNTIME_UNEXPECTED. Both that and the real refusal exit 2, by coincidence of errors.py's
+# prefix table (STATE_ -> 2), so the assertions below check the ERROR CODE STRING rather than
+# the exit code alone -- otherwise the pre-fold TypeError would read as a pass. This goes
+# green on the fold. Do not weaken, skip, or xfail it to force green locally.
+
+
+def _retuned_table_keeping_the_same_version(tmp_path) -> Path:
+    """A different table wearing the same label -- the case a version match cannot see."""
+    from pcraft.domains.image.subdomains.sprite import THRESHOLDS_PATH
+
+    data = json.loads(THRESHOLDS_PATH.read_text(encoding="utf-8"))
+    assert data["version"] == "sprite.cal.v1", "fixture assumes the shipped sprite table"
+    for band in [*data["bands"].values(), data["default"]]:
+        band["high"], band["low"] = 0.99, 0.98  # every PASS the receipt recorded now misses
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    out = tables / "retuned.calibration.json"
+    out.write_text(json.dumps(data), encoding="utf-8")
+    return out
+
+
+def test_cli_replay_refuses_a_receipt_whose_band_values_moved_under_the_same_version(tmp_path):
+    bind = runner.invoke(app, ["bind", "--records-dir", str(tmp_path)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+    receipts = list(tmp_path.glob("*.json"))
+    assert receipts, "bind wrote no receipt"
+
+    retuned = _retuned_table_keeping_the_same_version(tmp_path)
+    result = runner.invoke(app, ["replay", str(receipts[0]), "--thresholds", str(retuned)])
+    text = (result.stdout or "") + (result.stderr or "")
+
+    assert "RUNTIME_UNEXPECTED" not in text, (
+        f"got the unclassified backstop instead of a drift refusal: {text!r}. If this says "
+        "'unexpected keyword argument thresholds', that is the documented "
+        "expected-red-until-fold state -- the sibling core-gate-loop worktree has not landed "
+        "the new do_replay signature yet."
+    )
+    assert "STATE_REPLAY_DRIFT" in text, (
+        f"a receipt decided under different band values replayed as clean: {text!r}. The "
+        "version label matched, so only the VALUES could have caught this."
+    )
+    assert result.exit_code == 2
+
+
+def test_cli_replay_still_accepts_the_table_the_receipt_was_actually_decided_under(tmp_path):
+    """The other direction: the value check must not refuse an honest replay.
+
+    A drift check that fires on the unchanged table would make `pcraft replay` useless, and
+    it would fail in the direction nobody notices until a real receipt is rejected. Also
+    EXPECTED RED until the fold, for the same reason as its sibling above.
+    """
+    bind = runner.invoke(app, ["bind", "--records-dir", str(tmp_path)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+    receipts = list(tmp_path.glob("*.json"))
+    assert receipts
+
+    result = runner.invoke(app, ["replay", str(receipts[0])])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "STATE_REPLAY_DRIFT" not in text, f"the shipped table refused its own receipt: {text!r}"
+    assert result.exit_code == 0, text
