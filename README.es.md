@@ -59,12 +59,14 @@ pip install -e ".[dev]"
 
 El núcleo es **independiente de la GPU y funciona en cualquier lugar**: toda la suite de pruebas se ejecuta contra un generador y verificador simulados, lo que demuestra que el límite del complemento realmente se mantiene. El paquete adicional `[image]` (torch/diffusers) y el paquete adicional `[synth]` (DSPy + un modelo de lenguaje alojado) conectan el generador, los verificadores y el sintetizador reales. **Ninguno es necesario para ejecutar, probar o evaluar el núcleo.**
 
+**Los niveles de modelo son del tipo «trae tu propio [software/biblioteca]».** El verificador determinista de paletas funciona a partir de una instalación base (incluye su propio lector de PNG de la biblioteca estándar, por lo que no se requiere Pillow). Los verificadores de nivel de modelo necesitan dos paquetes, **sin declaraciones adicionales**: `t2v-metrics` (PyPI) para la familia VQA y `ai-eyes-mcp` (un paquete independiente de mcp-tool-shop, que no está en PyPI) para la pantalla SigLIP. No se especifican versiones en `pyproject.toml` porque ninguna versión ha sido probada en cuanto a su integración con esta versión; especificar una versión implicaría una compatibilidad que nadie ha medido. `pcraft doctor` informa sobre ambos en la sección «nivel de modelo», y una puerta de enlace cuyos átomos de modelo son SKIPPED los menciona en su rechazo; SKIPPED nunca se considera silenciosamente como un resultado positivo.
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
+pcraft recipe            # Cloud Kontext + Fill graph (char:ashen-reaver-cloud); non-reference methods refuse
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -100,7 +102,7 @@ Esa última fila es la que importa. "No pude verificar" y "Verifiqué y está ma
 
 ## Estado honesto
 
-**v1.0.0: las INTERFACES son estables. Las imágenes aún no están terminadas, y este documento no pretende afirmar lo contrario.**
+**v1.0.1: las INTERFACES son estables. Las imágenes aún no están terminadas, y este documento no pretende lo contrario.**
 
 `1.0.0` aquí es una declaración sobre la CLI, las rutas de importación, los códigos de salida y los dos formatos en disco; todo ello se enumera en [STABILITY.md](STABILITY.md), junto con lo que se excluye deliberadamente. No es una afirmación de que la imagen se proyecte perfectamente en los píxeles. Los espacios que se muestran a continuación son reales y mejoran en las versiones posteriores; lo que deja de moverse es la superficie sobre la que se construye.
 

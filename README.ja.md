@@ -59,12 +59,15 @@ pip install -e ".[dev]"
 
 コアは**GPUを使用せず、どこでも実行できます。** 完全にテストスイートを実行すると、モックジェネレーターと検証器に対して実行され、プラグインの境界が実際に機能することが証明されます。追加のパッケージ（torch/diffusers）`[image]`と（DSPy + ホストされたLM）`[synth]`は、実際のジェネレーター、検証器、および合成器に接続します。**コアを実行、テスト、または評価するには、これらは必要ありません。**
 
+**モデルのティアは、各自で必要なものを準備してください。** 決定的なパレット検証ツールは、基本的なインストールから動作します（独自の標準ライブラリPNGリーダーを搭載しており、Pillowは必要ありません）。モデルのティア検証ツールには、次の2つのパッケージが必要です（追加の宣言は不要です）。VQAファミリー用には`t2v-metrics`（PyPI）、SigLIPスクリーン用には`ai-eyes-mcp`（PyPIにはない、別のmcp-tool-shopパッケージ）。
+これらは`pyproject.toml`でバージョン固定されていません。なぜなら、このビルドに対して統合テストされたバージョンがないからです。バージョンを固定することは、誰も測定していない互換性を主張することになります。`pcraft doctor`は、両方を「モデルティア」の下に表示し、モデルアトムがSKIPPEDと名付けられたゲートは、それを拒否します。SKIPPEDは、合格として無言でカウントされることはありません。
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
+pcraft recipe            # Cloud Kontext + Fill graph (char:ashen-reaver-cloud); non-reference methods refuse
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -100,7 +103,7 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## 正直なステータス
 
-**v1.0.0 — インターフェースは安定しています。画像はまだ完成しておらず、このドキュメントもそうであると主張するものではありません。**
+**v1.0.1 — インターフェースは安定しています。画像はまだ完成しておらず、このドキュメントもそれを主張するものではありません。**
 
 A `1.0.0` here is a claim about the CLI, the import paths, the exit codes and the two on-disk
 formats — enumerated in [STABILITY.md](STABILITY.md), along with what is deliberately excluded.

@@ -1,6 +1,6 @@
 {
   "name": "@mcptoolshop/prompt-crafter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Say what the picture must contain, check that it does, and refuse when it does not. Node launcher for the prompt-crafter Python toolkit.",
   "keywords": [
     "generative-ai",

@@ -9,7 +9,34 @@ A version here marks **a state of the gate** — what it can check, what it refu
 has never been able to prove. The `[image]` path has now executed once on the 5090
 (2026-08-18). The GPU-free core is still the suite.
 
-## [Unreleased]
+## [1.0.1] - 2026-08-31
+
+Phase 9 remediation (the final integration exam of the healed tree, 2026-08-31; suite
+1153 -> 1162):
+
+### Fixed
+
+- `pcraft calibrate` honours its promised default: no `--contracts-dir` now means the
+  shipped sprite store, through the same `load_store` door every other command uses and
+  with its empty-store guard -- not an empty store refusing `INPUT_UNKNOWN_CONTRACT`. The
+  handbook's first calibration command works exactly as published.
+- The model-tier truth gets told: the VQA-family and screen verifiers import
+  `t2v-metrics` and `ai-eyes-mcp`, which **no extra declares** -- deliberately, because no
+  version is integration-tested against this build and `ai-eyes-mcp` is not on PyPI.
+  `pcraft doctor` now censuses both under "model tier" (human report + additive JSON
+  field), the gate's refusal hints name them instead of pointing an `[image]`-complete
+  user back at `[image]`, a packaging test goes red if either quietly joins an extra, and
+  the README, PyPI page and handbook carry the bring-your-own note. The deterministic
+  palette verifier's no-Pillow property (stdlib PNG reader) is now advertised too.
+- Seven smaller honesty fixes from the same exam: receipt-path promises scoped to runs
+  whose loop scored (bind/resolve help, `IO_RECORD_READ` hint); `resolve` states only
+  what it guarantees ("resolve never edits receipts"); refused Windows paths render bare,
+  never repr-doubled; `calibrate --help` stops losing "[image]" to markup; both
+  `python -m` doors report `Usage: pcraft` (what the npm launcher's users actually
+  typed); the batch summary carries a skipped-atom census with a doctor pointer; stdout
+  flushes before a refusal so `2>&1` captures stay whole; mock stub images
+  (`_stub_images/`) and doctor's `--json` stderr copy are documented; the npm launcher
+  gains its lockfile.
 
 Feature tranche 2 (dogfood swarm, Director-approved slices S5-S7 + small items,
 2026-08-31; suite 984 -> 1153):

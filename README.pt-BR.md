@@ -59,12 +59,14 @@ pip install -e ".[dev]"
 
 O núcleo é **livre de GPU e funciona em qualquer lugar** — todo o conjunto de testes é executado contra um gerador e verificador simulados, o que prova que a fronteira do plugin realmente se mantém. O extra `[image]` (torch/diffusers) e o extra `[synth]` (DSPy + um LM hospedado) conectam o gerador, os verificadores e o sintetizador reais. **Nenhum deles é necessário para executar, testar ou avaliar o núcleo.**
 
+**Os níveis de modelo são do tipo «traga o seu próprio».** O verificador de paleta determinístico funciona a partir de uma instalação base (possui o seu próprio leitor PNG da biblioteca padrão — não é necessário o Pillow). Os verificadores de nível de modelo precisam de dois pacotes **sem declarações adicionais**: `t2v-metrics` (PyPI) para a família VQA e `ai-eyes-mcp` (um pacote separado mcp-tool-shop, não disponível no PyPI) para o SigLIP. Eles não estão fixados em `pyproject.toml` porque nenhuma versão foi testada em termos de integração com esta versão — declarar uma versão implicaria uma compatibilidade que ninguém mediu. O comando `pcraft doctor` relata ambos em «nível de modelo», e um filtro cujos átomos de modelo são SKIPPED os identifica na sua recusa; SKIPPED nunca é contabilizado silenciosamente como um sucesso.
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
+pcraft recipe            # Cloud Kontext + Fill graph (char:ashen-reaver-cloud); non-reference methods refuse
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -100,7 +102,7 @@ Essa última linha é a que importa. "Eu não pude verificar" e "Eu verifiquei e
 
 ## Status honesto
 
-**v1.0.0 — as INTERFACES estão estáveis. As imagens ainda não estão finalizadas, e este documento não pretende sugerir o contrário.**
+**v1.0.1 — as INTERFACES estão estáveis. As imagens não estão finalizadas, e este documento não pretende o contrário.**
 
 A `1.0.0` aqui é uma afirmação sobre a CLI, os caminhos de importação, os códigos de saída e os dois formatos no disco — listados em [STABILITY.md](STABILITY.md), juntamente com o que foi deliberadamente excluído. Não se trata de uma afirmação de que a imagem será perfeitamente renderizada nos pixels. As lacunas abaixo são reais e melhoram nas versões menores; o que deixa de mudar é a superfície sobre a qual você constrói.
 

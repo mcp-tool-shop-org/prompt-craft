@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
 </p>
 
-#请提供您需要翻译的英文文本
+#
 
 **说明图片必须包含什么。检查它是否确实包含了这些内容。如果未包含，则拒绝。**
 
@@ -59,12 +59,14 @@ pip install -e ".[dev]"
 
 核心是**无需 GPU 即可运行，并且可以在任何地方运行**——整个测试套件都针对一个模拟生成器和验证器执行，这证明了插件边界确实有效。额外的 `[image]`（torch/diffusers）和 `[synth]` 额外组件（DSPy + 一个托管的 LM）连接到真实的生成器、验证器和合成器。**运行、测试或评估核心时不需要这两个组件。**
 
+**模型层级采用自备模式。** 确定性调色板验证器基于一个基本安装（它自带自己的标准库 PNG 读取器——无需 Pillow）。模型层级验证器需要两个软件包，**无需额外声明**：`t2v-metrics`（PyPI），用于 VQA 系列；以及 `ai-eyes-mcp`（一个独立的 mcp-tool-shop 软件包，不在 PyPI 上），用于 SigLIP 屏幕。它们没有在 `pyproject.toml` 中进行版本锁定，因为没有对任何版本进行集成测试，以验证其与此构建的兼容性——声明一个版本会声称存在尚未经过验证的兼容性。`pcraft doctor` 会在“模型层级”下报告这两个软件包，并且一个门控，其模型原子为 SKIPPED，会在拒绝时列出它们；SKIPPED 绝不会被默默地算作通过。
+
 ```bash
 pcraft demo              # the whole loop end-to-end, no GPU, deterministic stubs
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
+pcraft recipe            # Cloud Kontext + Fill graph (char:ashen-reaver-cloud); non-reference methods refuse
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -100,10 +102,9 @@ pcraft replay <record>   # re-read a bound asset's provenance receipt
 
 ## 诚实的状态
 
-**v1.0.0 — 接口已稳定。图片尚未完成，本文档也未声称已经完成。**
+**v1.0.1——接口已稳定。图片尚未完成，本文档也未声称已完成。**
 
-此处`1.0.0`是对 CLI、导入路径、退出代码以及两种磁盘格式的声明——详见 [STABILITY.md](STABILITY.md)，其中还列出了故意排除的内容。
-这不是指图像完美地呈现在像素中。以下差距是真实存在的，并且会在小版本发布中得到改进；停止移动的是您构建的基础。
+这里的 `1.0.0` 是对 CLI、导入路径、退出代码以及两种磁盘格式的声明——详见 [STABILITY.md](STABILITY.md)，其中还列出了故意排除的内容。它不是声明图像会完美地呈现在像素中。以下差距是真实存在的，并且会在小版本发布中得到改善；停止移动的是你构建的基础。
 
 | | |
 |---|---|

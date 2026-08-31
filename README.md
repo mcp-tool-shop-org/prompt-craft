@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="README.ja.md">日本語</a> | <a href="README.zh.md">中文</a> | <a href="README.es.md">Español</a> | <a href="README.fr.md">Français</a> | <a href="README.hi.md">हिन्दी</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português (BR)</a>
+  <a href="README.md">English</a> | <a href="README.ja.md">日本語</a> | <a href="README.zh.md">中文</a> | <a href="README.es.md">Español</a> | <a href="README.fr.md">Français</a> | <a href="README.hi.md">हिन्दी</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português (BR)</a>
 </p>
 
 <p align="center">
@@ -139,7 +139,7 @@ in the verifier interface so nobody reintroduces it.
 
 ## Honest status
 
-**v1.0.0 — the INTERFACES are stable. The pictures are not finished, and this document does not pretend otherwise.**
+**v1.0.1 — the INTERFACES are stable. The pictures are not finished, and this document does not pretend otherwise.**
 
 A `1.0.0` here is a claim about the CLI, the import paths, the exit codes and the two on-disk
 formats — enumerated in [STABILITY.md](STABILITY.md), along with what is deliberately excluded.
@@ -148,7 +148,7 @@ better in minor releases; what stops moving is the surface you build against.
 
 | | |
 |---|---|
-| Core | **516 tests passing** (counted 2026-08-31), GPU-free, deterministic. `verify` runs version coherence, lint, typecheck, the suite, the suite again under `-O`, and a package build — then **names what it did not check**. It lints and typechecks itself, pinned by a test so the targets cannot narrow back |
+| Core | **1162 tests passing** (counted 2026-08-31), GPU-free, deterministic. `verify` runs version coherence, lint, typecheck, the suite, the suite again under `-O`, and a package build — then **names what it did not check**. It lints and typechecks itself, pinned by a test so the targets cannot narrow back |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
 | SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Two IP-Adapter plates stay on one adapter (all images; scale is the strongest lock). Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |
