@@ -1448,7 +1448,11 @@ def _stdout_at(argv, columns="100"):
     proc = subprocess.run(
         [sys.executable, "-m", "pcraft", *argv],
         capture_output=True,
-        env={**os.environ, "COLUMNS": columns, "PYTHONIOENCODING": "utf-8"},
+        # NO_COLOR: the GitHub runner makes Rich force ANSI even when piped, so every
+        # rendered line starts with an escape sequence instead of its indent and the
+        # layout regexes match nothing -- same class as the width cache, third axis
+        # (color). Pin all three: width, encoding, color.
+        env={**os.environ, "COLUMNS": columns, "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"},
         timeout=60,
         check=False,
         text=True,
