@@ -55,10 +55,11 @@ dependencies = [
     # (`@model_validator(mode="after")`, `ConfigDict(extra=...)`, `Field(alias=...)`,
     # `.model_copy(update=...)`, `.model_dump(mode="json", by_alias=...)`).
     #
-    # The precedent is this repo's own rather than a general worry: `typer` below is the
-    # same unbounded shape and it has killed this package at import TWICE, on the same
-    # private import, on a conforming fresh install. Nothing in this tree backstops that --
-    # there is no lockfile anywhere in it. And per ruff's comment, the sharp edge is not a
+    # The precedent is this repo's own rather than a general worry: `typer` below carried
+    # the same unbounded shape, and it has killed this package at import TWICE, on the same
+    # private import, on a conforming fresh install. It is bounded now, for that reason --
+    # the two breaks are named against it. Nothing else in this tree backstops either of
+    # them; there is no lockfile anywhere in it. And per ruff's comment, the sharp edge is not a
     # uniform loud break; it is CI resolving a different pydantic than a contributor's venv
     # and the two disagreeing about which code is valid.
     #
@@ -68,7 +69,31 @@ dependencies = [
     # the commit that verifies the model_validator / ConfigDict / model_copy call sites
     # across contract/, synth/ and optimize/ still behave.
     "pydantic>=2.6,<3",
-    "typer>=0.12",
+    # The dependency the doctrine four lines above was WRITTEN about, and the one it had not
+    # been applied to. Both breaks were at IMPORT, before any command runs, so none of the
+    # CLI's own error handling ever got a chance to report them:
+    #
+    #   0.26  vendored Click as `typer._click`, moving `ClickException` and `Abort` out of a
+    #         standalone `click` this package never declared. Fixed in 74a809b: import from
+    #         `typer._click.exceptions`, falling back to real click on ModuleNotFoundError.
+    #   0.27  moved `Abort` OUT of that vendored module into `typer.exceptions` and ships no
+    #         `click` at all. It broke as an ImportError from a module that still EXISTS,
+    #         which `except ModuleNotFoundError` does not catch -- so 74a809b's fallback was
+    #         unreachable exactly when it was needed, and the `click` it reached for was gone
+    #         anyway. Fixed in afb391c by preferring the public `typer.Abort`.
+    #
+    # Both fixes stay, and tests/test_amend_cli.py forces the pre-0.26 branch and pins
+    # Abort's identity. But a shim only defends against layouts someone already thought to
+    # simulate, and each of these two was found by a break rather than by a test. A ceiling
+    # is enforced by the resolver on EVERY install -- every contributor, both CI legs -- the
+    # first time a future typer crosses it.
+    #
+    # `<0.28` admits 0.27.2, which is what both CI legs resolve today and what the identity
+    # behaviour above was measured against. Ratchet it forward deliberately, exactly like
+    # ruff's and mypy's: confirm the CLI still imports and the fallback/identity tests still
+    # pass under the new version, THEN raise the ceiling. Never widen it to unblock a
+    # resolve.
+    "typer>=0.12,<0.28",
 ]
 
 [project.optional-dependencies]

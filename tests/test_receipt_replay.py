@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from pcraft.cli import app
 from pcraft.core.contract.hash import contract_hash
+from pcraft.core.gate.thresholds import Zone
 from pcraft.core.receipt.asset_record import load, persist, replay
 from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example, run_mock_loop
@@ -270,3 +271,174 @@ def test_all_four_arms_still_answer_with_one_parseable_code_and_four_hints(tmp_p
         exc.value.to_safe_text().encode("ascii")
         hints.append(exc.value.hint)
     assert len(set(hints)) == 4, f"one hint serving four refusals: {sorted(set(hints))}"
+
+
+# --------------------------------------------------------------------------- F-dec37d4e
+# Offline re-grade. The four refusals above are the ONLY feedback the product gave about a
+# retune: STATE_REPLAY_DRIFT says the table moved and names neither an atom nor a direction.
+# Every input needed to answer the question is already on the receipt -- per-atom score,
+# band_key, polarity and severity on each AtomVerdict -- and ThresholdTable.zone() is the
+# exact function that graded it the first time. These pin the read that turns the refusal
+# into an answer, and pin that it stays a READ: replay still refuses, nothing is re-stamped.
+
+
+def _regraded(tmp_path, **bands):
+    """A bound receipt re-graded under a candidate table. Returns (report, record, candidate)."""
+    from pcraft.core.gate.regrade import regrade
+
+    record, _resolved, table = _bound(tmp_path)
+    candidate = _retuned(table, **bands)
+    return regrade(record, candidate), record, candidate
+
+
+def test_a_candidate_table_names_the_atoms_that_flip_and_the_direction(tmp_path):
+    """MEASURED as filed: moving vqa from 0.80/0.40 to 0.96/0.40 takes five required atoms of an
+    asset already in canon from PASS to UNCERTAIN. The shipped product answered that question
+    with STATE_REPLAY_DRIFT, which names neither an atom nor a direction."""
+    report, record, _candidate = _regraded(tmp_path, vqa=(0.96, 0.40))
+
+    flipped = {a.atom_id: (a.was.value, a.now.value) for a in report.flips}
+    assert flipped == {
+        "tabard": ("PASS", "UNCERTAIN"),
+        "sigil": ("PASS", "UNCERTAIN"),
+        "skin": ("PASS", "UNCERTAIN"),
+        "weapon": ("PASS", "UNCERTAIN"),
+        "face": ("PASS", "UNCERTAIN"),
+    }
+    assert len(report.blocking_flips) == 5, "every one of them is severity=required"
+    assert report.record_id == record.record_id
+    assert report.contract_id == record.contract_id
+    text = report.summary()
+    assert "tabard" in text and "PASS -> UNCERTAIN" in text and "5 blocking" in text
+
+
+def test_the_regraded_overall_reuses_the_gate_own_rollup_and_exit_contract(tmp_path):
+    """MUST NOT BREAK (4): a second roll-up implementation would drift from the gate it claims
+    to predict. The new overall comes from harness's own _rollup over the re-zoned verdicts, and
+    the code from exit_contract -- the same two functions the live gate uses."""
+    from pcraft.core.gate.exit_contract import error_from_transcript
+    from pcraft.core.gate.harness import _rollup
+    from pcraft.core.gate.regrade import regrade_transcript
+
+    report, record, candidate = _regraded(tmp_path, vqa=(0.96, 0.40))
+    rebuilt = regrade_transcript(record.gate_transcript, candidate, dag=record.question_dag)
+
+    assert report.was_overall is Zone.PASS and report.now_overall is Zone.UNCERTAIN
+    assert rebuilt.overall is _rollup(rebuilt.verdicts), "not a second roll-up"
+    err = error_from_transcript(rebuilt)
+    assert err is not None and err.code == "PARTIAL_UNCONFIRMED"
+    assert report.now_code == "PARTIAL_UNCONFIRMED"
+    assert report.was_code == "", "the receipt as decided was a clean pass; '' is that answer"
+
+
+def test_the_re_derived_census_matches_the_one_the_gate_recorded(tmp_path):
+    """A table cannot change which tiers executed. Re-deriving it from the stored DAG rather
+    than copying the stored census is what PROVES that, instead of asserting it."""
+    from pcraft.core.gate.regrade import regrade_transcript
+
+    record, _resolved, table = _bound(tmp_path)
+    rebuilt = regrade_transcript(
+        record.gate_transcript, _retuned(table, vqa=(0.96, 0.40)), dag=record.question_dag
+    )
+    assert rebuilt.tier_census == record.gate_transcript.tier_census
+    assert rebuilt.thresholds_version == table.version
+
+
+def test_a_regrade_is_a_read_and_leaves_the_receipt_exactly_as_it_found_it(tmp_path):
+    """MUST NOT BREAK (3): schema_version '1' is a covered reader, and this path must not write,
+    re-stamp or migrate. Bytes on disk and the in-memory record are both pinned."""
+    from pcraft.core.gate.regrade import regrade, regrade_dir
+
+    res = run_mock_loop(records_dir=str(tmp_path))
+    path = tmp_path / f"{res.record.record_id}.json"
+    before = path.read_bytes()
+    _s, _r, table, _c = load_sprite_example()
+
+    report = regrade(res.record, _retuned(table, vqa=(0.96, 0.40)))
+    regrade_dir(tmp_path, _retuned(table, vqa=(0.96, 0.40)))
+
+    assert path.read_bytes() == before, "a re-grade that rewrites the receipt is not a read"
+    assert res.record.thresholds_version == table.version, "the record was not re-stamped"
+    assert all(v.zone is Zone.PASS for v in res.record.gate_transcript.verdicts if v.score)
+    assert report.now_overall is Zone.UNCERTAIN, "the answer lives in the report, not the receipt"
+
+
+def test_the_regrade_answers_the_question_replay_still_refuses(tmp_path):
+    """MUST NOT BREAK (2): STATE_REPLAY_DRIFT does not become a warning. The new verb reports;
+    replay keeps refusing the same way, on the same table, in the same run."""
+    from pcraft.core.gate.regrade import regrade
+
+    record, resolved, table = _bound(tmp_path)
+    candidate = _retuned(table, vqa=(0.96, 0.40))
+
+    with pytest.raises(PromptCraftError) as exc:
+        replay(record, resolved, thresholds_version=None, thresholds=candidate)
+    assert exc.value.code == "STATE_REPLAY_DRIFT"
+
+    report = regrade(record, candidate)
+    assert report.from_fingerprint == record.thresholds_fingerprint
+    assert report.to_fingerprint == candidate.fingerprint()
+    assert report.from_fingerprint != report.to_fingerprint
+
+
+def test_a_table_whose_values_did_not_move_reports_no_flips(tmp_path):
+    """The other direction: a candidate that changes nothing must say so, not manufacture noise."""
+    from pcraft.core.gate.regrade import regrade
+
+    record, _resolved, table = _bound(tmp_path)
+    report = regrade(record, table)
+    assert report.flips == []
+    assert report.blocking_flips == []
+    assert report.was_overall is report.now_overall is Zone.PASS
+    assert report.was_code == report.now_code == ""
+    assert "no verdict moves" in report.summary()
+
+
+def test_an_atom_that_never_scored_is_carried_not_guessed(tmp_path):
+    """A re-grade cannot resurrect a score the gate never took. An atom whose parent blocked it
+    carries no number, so no table can move it -- and saying that out loud is the difference
+    between a report and a confident invention."""
+    from pcraft.core.gate.regrade import regrade
+
+    res = run_mock_loop(records_dir=str(tmp_path), verifier_scores={"tabard": 0.05})
+    _s, _r, table, _c = load_sprite_example()
+    record = res.record
+    unscored = [v.atom_id for v in record.gate_transcript.verdicts if v.score is None]
+    assert unscored, "premise: a failed parent forces at least one atom to NA"
+
+    report = regrade(record, _retuned(table, vqa=(0.96, 0.40)))
+    assert report.carried == unscored
+    assert all(a.atom_id not in unscored for a in report.atoms)
+    assert "carried" in report.summary()
+
+
+def test_a_receipt_written_before_the_fingerprint_existed_still_regrades(tmp_path):
+    """Absent means legacy, the same back-compat rule the receipt reader established. A re-grade
+    is a read of scores; it needs no fingerprint to do its job."""
+    import json as _json
+
+    from pcraft.core.gate.regrade import regrade
+
+    res = run_mock_loop(records_dir=str(tmp_path))
+    path = tmp_path / f"{res.record.record_id}.json"
+    data = _json.loads(path.read_text(encoding="utf-8"))
+    del data["thresholds_fingerprint"]
+    path.write_text(_json.dumps(data), encoding="utf-8")
+
+    _s, _r, table, _c = load_sprite_example()
+    report = regrade(load(path), _retuned(table, vqa=(0.96, 0.40)))
+    assert report.from_fingerprint == ""
+    assert len(report.blocking_flips) == 5
+
+
+def test_a_records_dir_is_swept_in_one_read(tmp_path):
+    """The retune question is asked about a CORPUS, not about one asset."""
+    from pcraft.core.gate.regrade import regrade_dir
+
+    first = run_mock_loop(records_dir=str(tmp_path))
+    second = run_mock_loop(records_dir=str(tmp_path), verifier_scores={"weapon": 0.05})
+    _s, _r, table, _c = load_sprite_example()
+
+    reports = regrade_dir(tmp_path, _retuned(table, vqa=(0.96, 0.40)))
+    assert {r.record_id for r in reports} == {first.record.record_id, second.record.record_id}
+    assert sum(len(r.blocking_flips) for r in reports) > 0

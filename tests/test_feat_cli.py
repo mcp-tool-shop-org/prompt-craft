@@ -328,3 +328,434 @@ def test_doctor_custom_store_does_not_require_ashen(tmp_path):
     text = (result.stdout or "") + (result.stderr or "")
     assert "store ok" in text
     assert "2 contracts" in text
+
+
+# =========================================================================== F-69661dda
+# `--image-name local=cloud` is matched against the LoadImage nodes the emitted graph
+# ACTUALLY carries, and an unmatched local side is refused before anything is written.
+#
+# MEASURED red on the shipped tree (containment IN WORKTREE: True, no GPU, no submit),
+# against the method=reference tree `_reference_store` builds below:
+#
+#     pcraft recipe --image-name ashen-reaver-frnt.png=cloud-abc.png   (one letter dropped)
+#     -> exit 0, graph written, LoadImage nodes still read
+#        ['ashen-reaver-front.png', 'two-hand-weapon.openpose.png']
+#
+# The remap was not applied and nothing said so. `kontext_fill.bind_cloud_names`'s
+# documented behaviour for an unrecognised key is "missing keys stay", and that is right
+# for what it is -- a pure graph rewrite with no opinion about what the caller meant. The
+# layer that CAN tell is this one, the only place holding the pairs and the graph at the
+# same time. The receipt made it worse than silent: `cloud_names` recorded the pair as
+# though it had been applied, so the artifact asserts a remap the graph does not carry,
+# and the next step is a Comfy Cloud submit at real spend naming a file Comfy never
+# issued. `_parse_image_names` already owns the SHAPE half of this refusal (a=b, empty
+# sides); this is the half that needs a graph to answer.
+
+
+def _reference_store(root):
+    """A method=reference contract pair -- the identity method `pcraft recipe` can apply.
+
+    Twinned on BOTH levels on purpose: `loader._merge_identity_refs` puts the inherited
+    faction plate first and `reference_lock.assemble` refuses the whole merged list on a
+    wrong-family method, so a character-only twin over an ip_adapter faction still refuses.
+    The plate/pose refs resolve against the PACKAGED sprite tree, so this fixture needs no
+    image bytes of its own -- only the two contract files.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "factions").mkdir()
+    (root / "characters").mkdir()
+    (root / "factions" / "f.contract.json").write_text(
+        json.dumps(
+            {
+                "$schema": "prompt-craft/contract.v1",
+                "id": "faction:ref-example",
+                "level": "faction",
+                "must_have": [
+                    {"id": "tabard", "claim": "a tabard", "check_type": "vqa",
+                     "severity": "required"}
+                ],
+                "identity_ref": {"plate": "plates/ashen-pact-costume.png",
+                                 "method": "reference", "weight": 0.6, "scope": "costume"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "characters" / "c.contract.json").write_text(
+        json.dumps(
+            {
+                "$schema": "prompt-craft/contract.v1",
+                "id": "char:ref-example",
+                "level": "character",
+                "extends": "faction:ref-example",
+                "must_have": [
+                    {"id": "face", "claim": "a face", "check_type": "vqa",
+                     "severity": "required"},
+                    {"id": "weapon", "claim": "an axe", "check_type": "vqa",
+                     "severity": "required",
+                     "spatial": {"kind": "pose",
+                                 "ref": "poses/two-hand-weapon.openpose.png"}},
+                ],
+                "identity_ref": {"plate": "plates/ashen-reaver-front.png",
+                                 "method": "reference", "weight": 0.6, "scope": "face"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _reference_recipe(tmp_path, *args):
+    store = _reference_store(tmp_path / "store")
+    return runner.invoke(
+        app,
+        ["recipe", "--contracts-dir", str(store), "--contract", "char:ref-example", *args],
+    )
+
+
+def _loadimage_names(path):
+    graph = json.loads(path.read_text(encoding="utf-8"))
+    return [n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"]
+
+
+def test_recipe_refuses_an_image_name_whose_local_side_no_loadimage_node_carries(tmp_path):
+    out = tmp_path / "typo.recipe.json"
+    result = _reference_recipe(
+        tmp_path, "--out", str(out), "--image-name", "ashen-reaver-frnt.png=cloud-abc.png"
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, f"INPUT_ is exit 1; got {result.exit_code}: {text!r}"
+    assert "INPUT_IMAGE_NAME" in text, text
+    assert "ashen-reaver-frnt.png" in text, "the refusal must name the key that missed"
+    # The whole point: the operator is told what the graph DOES carry, so the typo is
+    # fixable from the message alone without opening the graph JSON.
+    assert "ashen-reaver-front.png" in text, text
+    assert "two-hand-weapon.openpose.png" in text, text
+    assert not out.exists(), "a refused --image-name must not leave a graph behind"
+
+
+def test_recipe_names_every_unmatched_key_not_just_the_first(tmp_path):
+    result = _reference_recipe(
+        tmp_path,
+        "--out", str(tmp_path / "x.json"),
+        "--image-name", "ashen-reaver-front.png=cloud-ok.png",   # this one is real
+        "--image-name", "nope-a.png=cloud-a.png",
+        "--image-name", "nope-b.png=cloud-b.png",
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "nope-a.png" in text and "nope-b.png" in text, (
+        f"a second bad pair would survive a first-wins refusal: {text!r}"
+    )
+
+
+def test_recipe_still_applies_an_image_name_that_matches_a_loadimage_node(tmp_path):
+    """The flag keeps working exactly as today for the case it was built for.
+
+    This is the regression guard on the refusal above: the check is additive pre-flight,
+    not a change to `bind_cloud_names`, whose "missing keys stay" behaviour is untouched.
+    """
+    out = tmp_path / "ok.recipe.json"
+    result = _reference_recipe(
+        tmp_path,
+        "--out", str(out),
+        "--json",
+        "--image-name", "ashen-reaver-front.png=cloud-upload-1.png",
+        "--image-name", "two-hand-weapon.openpose.png=cloud-upload-2.png",
+    )
+    assert result.exit_code == 0, (result.stdout or "") + (result.stderr or "")
+    assert sorted(_loadimage_names(out)) == ["cloud-upload-1.png", "cloud-upload-2.png"]
+    data = json.loads(result.stdout)
+    assert data["cloud_names"] == {
+        "ashen-reaver-front.png": "cloud-upload-1.png",
+        "two-hand-weapon.openpose.png": "cloud-upload-2.png",
+    }
+
+
+def test_recipe_echoes_the_whole_local_side_a_last_equals_split_produced(tmp_path):
+    """`_parse_image_names` splits on the LAST `=` so a plate may contain one (F-b795e5ca).
+
+    The new check must not undo that decision by reporting a prefix: here the local side
+    is a name no node carries, and the refusal has to echo it whole.
+    """
+    result = _reference_recipe(
+        tmp_path, "--out", str(tmp_path / "x.json"),
+        "--image-name", "weird=name.png=cloud-upload.png",
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "weird=name.png" in text, (
+        f"the refusal must echo the local side the LAST-= split produced: {text!r}"
+    )
+
+
+def test_recipe_without_image_name_is_untouched_by_the_new_check(tmp_path):
+    out = tmp_path / "plain.recipe.json"
+    result = _reference_recipe(tmp_path, "--out", str(out))
+    assert result.exit_code == 0, (result.stdout or "") + (result.stderr or "")
+    assert _loadimage_names(out) == ["ashen-reaver-front.png", "two-hand-weapon.openpose.png"]
+
+
+# =========================================================================== F-763b6107
+# `pcraft recipe`'s reason to exist is the Kontext reference-lock stitch, and
+# `method=reference` is the only identity method that path can apply. MEASURED on the
+# shipped tree: a zero-argument `pcraft recipe` exits 2 with GATE_CONDITIONING_UNSUPPORTED
+# ("cannot apply method=ip_adapter. That is the SDXL encoder"), because the default
+# contract is the SDXL example -- so the command's own quick-start demonstrates only that
+# the command refuses, and neither `--contract`'s help nor the docstring said which
+# contracts it CAN run.
+#
+# Two moves, tested separately because they land differently:
+#   (a) the help/docstring name the identity method the command needs -- green here;
+#   (b) the default `--contract` points at the method=reference example pair, which lands
+#       in the SIBLING image-domain worktree (F-85852fb7: faction:ashen-pact-cloud +
+#       char:ashen-reaver-cloud). EXPECTED RED IN THIS WORKTREE and green on the fold --
+#       do not weaken, skip, or xfail it to force green locally.
+#
+# STABILITY.md covers `pcraft recipe`'s "flags and the emitted recipe graph". (b) renames
+# no flag, but a bare invocation's OUTPUT changes for existing callers, so the refusal it
+# used to produce is pinned below under an explicit `--contract` instead of being lost.
+
+
+def _recipe_contract_option():
+    import typer
+
+    cmd = typer.main.get_command(app).commands["recipe"]
+    return next(p for p in cmd.params if p.name == "contract")
+
+
+def test_recipe_contract_help_names_the_identity_method_the_command_needs():
+    help_text = (_recipe_contract_option().help or "").lower()
+    assert "reference" in help_text, (
+        "--contract's help must say which identity method this command can apply; "
+        f"got: {help_text!r}"
+    )
+
+
+def test_recipe_default_contract_is_a_method_reference_example(tmp_path):
+    """A zero-argument `pcraft recipe` must demonstrate the path the command exists for.
+
+    EXPECTED RED UNTIL FOLD: the contract this default names ships in the sibling
+    image-domain worktree. Pre-fold this exits on a store-resolution refusal naming
+    char:ashen-reaver-cloud, which is the documented waiting state -- NOT a reason to
+    weaken the assertion.
+    """
+    out = tmp_path / "default.recipe.json"
+    result = runner.invoke(app, ["recipe", "--out", str(out), "--json"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, (
+        f"bare `pcraft recipe` did not run: {text!r}. If this names "
+        "char:ashen-reaver-cloud as unresolvable, that is the documented "
+        "expected-red-until-fold state -- the sibling image-domain worktree has not "
+        "landed the method=reference example pair yet."
+    )
+    data = json.loads(result.stdout)
+    assert data["identity_method"] == "reference", data
+    assert out.is_file()
+
+
+def test_recipe_still_refuses_the_shipped_sdxl_contract_when_it_is_named(tmp_path):
+    """The refusal a bare `recipe` used to produce, pinned where it now lives.
+
+    Repointing the default must not soften the door: an ip_adapter contract handed to the
+    Kontext recipe is still GATE_CONDITIONING_UNSUPPORTED, exit 2, with no graph written.
+    """
+    out = tmp_path / "sdxl.recipe.json"
+    result = runner.invoke(
+        app, ["recipe", "--contract", "char:ashen-reaver", "--out", str(out)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 2, text
+    assert "GATE_CONDITIONING_UNSUPPORTED" in text, text
+    assert "ip_adapter" in text, text
+    assert not out.exists(), "a refused recipe must not leave a graph behind"
+
+
+# ====================================================== S1 CLI surface: regrade + calibrate
+# Two thin verbs over libraries that land in SIBLING worktrees. Both are arg parsing, an
+# emit and the existing error machinery -- no logic here, per the coordinator's shape.
+#
+# The tests split three ways on purpose:
+#   * the argument contract this file OWNS (mutual exclusion, registration, help) -- green
+#     now, because those refusals are decided before either library is reached;
+#   * the SEAM (the entry points and keyword names the command bodies call) -- expected red
+#     until fold, and the first thing to go green when the sibling lands;
+#   * one real run-through for regrade, which is GPU-free because `pcraft bind` writes a
+#     receipt with the deterministic stubs. Calibrate has no equivalent: scoring a holdout
+#     runs the real verifiers, which is GPU work this suite does not do, so its fold proof
+#     is the seam plus a coded-refusal check.
+#
+# EXPECTED RED IN THIS WORKTREE for the fold tests -- do not weaken, skip, or xfail them to
+# force green locally.
+
+
+def test_regrade_and_calibrate_are_registered():
+    import typer as _typer
+
+    commands = _typer.main.get_command(app).commands
+    assert "regrade" in commands, sorted(commands)
+    assert "calibrate" in commands, sorted(commands)
+
+
+def test_regrade_refuses_when_neither_records_dir_nor_record_is_given(tmp_path):
+    """Decided before the table is read, so the refusal names the operator's mistake."""
+    result = runner.invoke(app, ["regrade", "--table", str(tmp_path / "nope.json")])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_REGRADE_TARGET" in text, text
+    assert "--records-dir" in text and "--record" in text, text
+
+
+def test_regrade_refuses_when_both_records_dir_and_record_are_given(tmp_path):
+    result = runner.invoke(
+        app,
+        ["regrade", "--table", str(tmp_path / "nope.json"),
+         "--records-dir", str(tmp_path), "--record", str(tmp_path / "r.json")],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_REGRADE_TARGET" in text, text
+
+
+def test_regrade_help_says_it_reports_rather_than_gates():
+    import typer as _typer
+
+    body = (_typer.main.get_command(app).commands["regrade"].help or "").lower()
+    assert "never gates" in body or "reports, never" in body, body
+    assert "exit" in body, "a scripted verb must name its exit codes in --help"
+
+
+def test_calibrate_help_says_it_emits_and_does_not_adopt():
+    import typer as _typer
+
+    body = (_typer.main.get_command(app).commands["calibrate"].help or "").lower()
+    assert "adopt" in body, (
+        "the whole discipline of this verb is emit-never-adopt; --help has to say so: "
+        f"{body!r}"
+    )
+    assert "exit" in body, "a scripted verb must name its exit codes in --help"
+
+
+def _retuned_candidate(tmp_path):
+    """A table whose band values moved -- the input a re-grade exists to ask about."""
+    from pcraft.domains.image.subdomains.sprite import THRESHOLDS_PATH
+
+    data = json.loads(THRESHOLDS_PATH.read_text(encoding="utf-8"))
+    data["version"] = "sprite.cal.candidate"
+    for band in [*data["bands"].values(), data["default"]]:
+        band["high"] = 0.96
+    out = tmp_path / "candidate.calibration.json"
+    out.write_text(json.dumps(data), encoding="utf-8")
+    return out
+
+
+def test_regrade_reports_what_a_candidate_table_would_have_decided(tmp_path):
+    """The corpus question, end to end and GPU-free: `bind` writes the receipt with stubs.
+
+    EXPECTED RED UNTIL FOLD -- pcraft.core.gate.regrade lands in the sibling core-gate-loop
+    worktree, and until it does the command body's import fails and the blanket backstop
+    reports RUNTIME_UNEXPECTED. That is the documented waiting state; the assertions check
+    the ERROR CODE STRING and the report line rather than the exit code alone, so the
+    pre-fold ImportError cannot read as a pass.
+    """
+    records = tmp_path / "records"
+    bind = runner.invoke(app, ["bind", "--records-dir", str(records)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+    before = sorted(p.read_bytes() for p in records.glob("*.json"))
+    assert before, "bind wrote no receipt"
+
+    result = runner.invoke(
+        app,
+        ["regrade", "--table", str(_retuned_candidate(tmp_path)),
+         "--records-dir", str(records)],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, (
+        f"got the unclassified backstop instead of a re-grade: {text!r}. If this names "
+        "pcraft.core.gate.regrade, that is the documented expected-red-until-fold state "
+        "-- the sibling core-gate-loop worktree has not landed the module yet."
+    )
+    assert result.exit_code == 0, f"a re-grade reports and must not gate: {text!r}"
+    assert "blocking flips total" in text, f"no corpus total line: {text!r}"
+    assert sorted(p.read_bytes() for p in records.glob("*.json")) == before, (
+        "a re-grade is a pure read; it re-stamped a receipt"
+    )
+
+
+def test_regrade_json_carries_the_corpus_totals_beside_the_reports(tmp_path):
+    """EXPECTED RED UNTIL FOLD, same reason as above."""
+    records = tmp_path / "records"
+    bind = runner.invoke(app, ["bind", "--records-dir", str(records)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+
+    result = runner.invoke(
+        app,
+        ["regrade", "--table", str(_retuned_candidate(tmp_path)),
+         "--records-dir", str(records), "--json"],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, f"expected-red-until-fold: {text!r}"
+    data = json.loads(result.stdout)
+    assert data["receipts_total"] == len(data["receipts"])
+    assert "blocking_flips_total" in data and "with_blocking_flips" in data
+    assert data["table"] == "sprite.cal.candidate", data
+
+
+def test_regrade_wraps_the_library_entry_points_the_command_calls():
+    """The seam, restated here rather than imported, so a rename goes red in MY file.
+
+    EXPECTED RED UNTIL FOLD (ModuleNotFoundError on the sibling module).
+    """
+    import inspect
+
+    from pcraft.core.gate import regrade as lib
+
+    assert callable(lib.regrade) and callable(lib.regrade_dir)
+    assert list(inspect.signature(lib.regrade_dir).parameters) == ["records_dir", "candidate"]
+    # The three the command body calls, split by what they ARE: `summary` is a method and
+    # `flips`/`blocking_flips` are properties (so they live on the class), while `record_id`
+    # is a model field (so it lives in model_fields). Asserting all four through `dir()`
+    # measured green for the wrong reason on the properties and red on the field.
+    for name in ("summary", "flips", "blocking_flips"):
+        assert hasattr(lib.RegradeReport, name), f"RegradeReport lost {name!r}, the CLI prints it"
+    assert "record_id" in lib.RegradeReport.model_fields, "the CLI labels each line with it"
+
+
+def test_calibrate_wraps_the_harness_entry_points_the_command_calls():
+    """EXPECTED RED UNTIL FOLD -- the harness lands in the sibling image-domain worktree.
+
+    The seam and not a scoring run: `calibrate_from_manifest` runs the real verifiers over
+    the holdout, which needs the [image] extra and GPU work this suite does not do. What
+    the CLI actually depends on is the entry points and the KEYWORD NAMES it passes, so a
+    rename on the sibling side goes red here instead of at an operator's first run.
+    """
+    import inspect
+
+    from pcraft.domains.image.subdomains.sprite import calibrate as harness
+
+    params = set(inspect.signature(harness.calibrate_from_manifest).parameters)
+    assert {"contracts_dirs", "verifiers", "base_table"} <= params, sorted(params)
+    assert callable(harness.write_table) and callable(harness.write_scored)
+    for field in ("manifest", "rows", "scored", "bands", "table"):
+        assert field in harness.CalibrationResult.model_fields, field
+
+
+def test_calibrate_refuses_an_unreadable_manifest_without_a_traceback(tmp_path):
+    """A missing holdout is a coded refusal, never a raw traceback.
+
+    EXPECTED RED UNTIL FOLD: pre-fold the harness import fails and the backstop says
+    RUNTIME_UNEXPECTED, which exits 2 exactly as the real IO_HOLDOUT_READ refusal does --
+    so this checks the CODE STRING, not the exit code.
+    """
+    result = runner.invoke(
+        app,
+        ["calibrate", str(tmp_path / "absent.jsonl"), "--out", str(tmp_path / "v2.json")],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "Traceback" not in text, f"calibrate leaked a raw traceback: {text!r}"
+    assert "RUNTIME_UNEXPECTED" not in text, (
+        f"got the unclassified backstop: {text!r}. If this names "
+        "pcraft.domains.image.subdomains.sprite.calibrate, that is the documented "
+        "expected-red-until-fold state."
+    )
+    assert "IO_HOLDOUT_READ" in text, text
+    assert not (tmp_path / "v2.json").exists(), "a refused calibrate must write no table"

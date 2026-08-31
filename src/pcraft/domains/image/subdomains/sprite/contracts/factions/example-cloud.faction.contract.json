@@ -1,0 +1,64 @@
+{
+  "$schema": "prompt-craft/contract.v1",
+  "id": "faction:ashen-pact-cloud",
+  "level": "faction",
+  "_note": "GENERIC EXAMPLE -- NOT real canon. The method=reference TWIN of faction:ashen-pact: same atoms, same plate, same weights, differing ONLY in identity_ref.method. It exists so the Cloud recipe path (`pcraft recipe`, the Kontext stitch + left crop + fist-only Fill) has a packaged contract an operator can actually run; the ip_adapter pair stays the SDXL example and is not retargeted. WHY THIS IS A PAIR AND NOT ONE FILE: a character-only twin still refuses. loader._merge_identity_refs places the inherited faction plate FIRST in the merged identity_refs, and reference_lock.assemble calls refuse_unmeasured_identity_family over the WHOLE merged list -- so an inherited method=ip_adapter costume plate refuses the run before the character's own method=reference plate is ever reached. Both halves have to declare method=reference. That refusal is correct and stays: a mixed-family lock must never reach a Cloud submit at real spend. Its must_not atoms are `optional` for the same reason as the SDXL pair: the checks run and report, and gain blocking power when absence-verification is measured.",
+  "must_have": [
+    {
+      "id": "tabard",
+      "claim": "a grey-ash tabard worn over the torso",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": {
+        "kind": "region",
+        "ref": "torso"
+      }
+    },
+    {
+      "id": "sigil",
+      "claim": "a white triple-bar sigil on the tabard",
+      "check_type": "vqa",
+      "severity": "required",
+      "depends_on": "tabard",
+      "spatial": {
+        "kind": "region",
+        "ref": "chest-center"
+      }
+    },
+    {
+      "id": "palette",
+      "claim": "an ash-grey, bone-white and blood-red colour scheme",
+      "check_type": "palette",
+      "severity": "required",
+      "enum": [
+        "#3a3a3a",
+        "#d9d4c8",
+        "#7a1f1f"
+      ]
+    }
+  ],
+  "must_not": [
+    {
+      "id": "no_rival_colours",
+      "claim": "gold or royal-blue heraldry",
+      "check_type": "siglip2",
+      "enum": [
+        "gold heraldry",
+        "royal-blue heraldry"
+      ],
+      "severity": "optional"
+    },
+    {
+      "id": "no_modern_gear",
+      "claim": "a firearm or any modern technology",
+      "check_type": "vqa",
+      "severity": "optional"
+    }
+  ],
+  "identity_ref": {
+    "plate": "plates/ashen-pact-costume.png",
+    "method": "reference",
+    "weight": 0.8,
+    "scope": "costume"
+  }
+}

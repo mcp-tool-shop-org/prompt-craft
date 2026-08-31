@@ -145,6 +145,93 @@ def resolve_mask_plan(fill_region: str = "fist", fill_mask: str | Path | None = 
     )
 
 
+ROLE_IDENTITY = "identity"
+ROLE_POSE = "pose"
+ROLE_FILL_MASK = "fill-mask"
+
+
+class UploadItem(BaseModel):
+    """One LoadImage node's two halves: the name the graph carries and the file it came from.
+
+    F-0caa740d: ``build_graph`` writes ``Path(x).name`` into every LoadImage node, so the emitted
+    graph says ``ashen-reaver-front.png`` and nothing anywhere said WHICH local file that was.
+    ``RecipeReport`` named the local path of two of the three (``identity`` and ``pose``); a
+    supplied mask's local path appeared nowhere in the full ``model_dump``, with ``mask_source``
+    saying only 'supplied-mask'. So the handoff from "graph written" to "graph submitted" was
+    unassisted: open the graph JSON, read the basenames, work out which local file each came from,
+    upload them, then hand-build the ``--image-name local=cloud`` pairs -- a flag whose documented
+    behaviour for an unrecognised key is "missing keys stay", i.e. the graph is written, uploaded
+    and submitted at real spend with the remap silently not applied.
+
+    This module is the only place that still knows both halves, so it is where the manifest is
+    built. It is DATA: no uploader, no network call, no credential, no claim about any model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str  # the basename exactly as written into the LoadImage node
+    role: str  # ROLE_IDENTITY | ROLE_POSE | ROLE_FILL_MASK
+    # The path the lock holds. Through ``from_conditioning`` that is already absolute and resolved,
+    # because ``cond.bind_refs`` resolved it. A hand-built lock is reported AS GIVEN: resolving a
+    # relative path against the cwd would invent a location nobody stated.
+    local_path: str
+    exists: bool  # a live check, not a restatement of what bind_refs already refused
+    # True when local_path sits inside the INSTALLED sprite tree (see cond.is_packaged_ref). The
+    # shipped example's plates do, so its manifest points into site-packages -- which a reader must
+    # be told, rather than left to read an absolute path as copyable from their own project.
+    packaged: bool
+
+
+def _upload_row(raw: str | Path, role: str) -> UploadItem:
+    path = Path(raw)
+    return UploadItem(
+        name=path.name,
+        role=role,
+        local_path=str(path),
+        exists=path.is_file(),
+        packaged=cond.is_packaged_ref(path),
+    )
+
+
+def upload_manifest(lock: ReferenceLock, *, fill_mask: str | Path | None = None) -> list[UploadItem]:
+    """One row per LoadImage node the graph carries, in graph order. GPU-free, network-free.
+
+    Built from the same two inputs ``build_graph`` reads, and then USED by ``build_graph`` to name
+    the nodes -- so a disagreement between the manifest and the graph is not expressible, the same
+    discipline ``MaskPlan`` established for the bracer question (F-90667b30).
+
+    Rows are the nodes that EXIST, not the roles that could. ``lock.costume`` and ``lock.extras``
+    are deliberately absent: this recipe's stitch takes identity + pose, and a manifest row for a
+    file no node reads would tell an operator to upload something the graph never loads.
+
+    An empty ``identity`` or ``pose`` yields no row rather than a blank one. ``build_graph`` refuses
+    both cases outright; ``report_for`` is public and does not, so the manifest matches whichever
+    door the caller came through.
+    """
+    rows: list[UploadItem] = []
+    if lock.identity:
+        rows.append(_upload_row(lock.identity[0], ROLE_IDENTITY))
+    if lock.pose:
+        rows.append(_upload_row(lock.pose[0], ROLE_POSE))
+    if fill_mask is not None:
+        # Already existence-checked by resolve_mask_plan on both callers; resolving again here
+        # keeps this function correct when called on its own.
+        rows.append(_upload_row(_resolved_mask(fill_mask), ROLE_FILL_MASK))
+    return rows
+
+
+def unknown_image_names(manifest: list[UploadItem], names: dict[str, str]) -> list[str]:
+    """Keys in an ``--image-name`` map that no LoadImage node in this graph carries.
+
+    ``bind_cloud_names``'s "missing keys stay" is unchanged and stays unchanged: a graph rewriter
+    that dropped unknown nodes would be a worse failure than one that ignores an unknown key. The
+    right place to refuse a mistyped pair is the ARGUMENT layer, before anything is written -- and
+    this is the predicate that layer needs, exported from the module that named the nodes. The
+    refusal itself (INPUT_IMAGE_NAME) belongs to the CLI.
+    """
+    known = {row.name for row in manifest}
+    return sorted(key for key in names if key not in known)
+
+
 class RecipeReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     recipe_id: str = RECIPE_ID
@@ -168,6 +255,11 @@ class RecipeReport(BaseModel):
     measured_graph: str = MEASURED_GRAPH
     graph_path: str = ""
     cloud_names: dict[str, str] = Field(default_factory=dict)
+    # F-0caa740d. ADDITIVE: this model is extra='forbid' and a `--json` surface, so the field is
+    # added and nothing existing is reshaped -- `identity` and `pose` keep meaning exactly what they
+    # meant. What they never covered is the third node (a supplied mask) and the basename<->local
+    # path correspondence for any of them, which is what a Cloud upload needs.
+    upload: list[UploadItem] = Field(default_factory=list)
 
 
 class _Graph:
@@ -238,16 +330,19 @@ def build_graph(
     # from the graph (F-90667b30).
     resolve_mask_plan(fill_region, fill_mask)
 
-    # F-0e41e735: read the identity bucket directly. This used to be ``as_generate_refs(lock)[0]``,
-    # which happens to be the same plate but says "whatever sorted first" rather than "the identity
-    # lock" -- and that indirection is precisely how a costume/pose ordering change could have
-    # silently re-pointed the stitch.
-    identity = str(lock.identity[0])
-    pose = lock.pose[0]
+    # F-0e41e735: the identity bucket is read DIRECTLY (see upload_manifest), never via
+    # ``as_generate_refs(lock)[0]`` -- that indirection says "whatever sorted first" rather than
+    # "the identity lock", and is precisely how a costume/pose ordering change could have silently
+    # re-pointed the stitch.
+    #
+    # F-0caa740d: the manifest is what NAMES the LoadImage nodes below, rather than a second pass
+    # describing them afterwards. The basename and the local path it came from are decided once, so
+    # the graph and the receipt cannot disagree about which file an operator has to upload.
+    by_role = {row.role: row for row in upload_manifest(lock, fill_mask=fill_mask)}
     graph = _Graph()
 
-    graph.add("identity", "LoadImage", image=Path(identity).name)
-    graph.add("pose", "LoadImage", image=Path(pose).name)
+    graph.add("identity", "LoadImage", image=by_role[ROLE_IDENTITY].name)
+    graph.add("pose", "LoadImage", image=by_role[ROLE_POSE].name)
     graph.add(
         "stitch",
         "ImageStitch",
@@ -319,7 +414,7 @@ def build_graph(
 
     graph.add("crop_size", "GetImageSize", image=graph.link("crop"))
     if fill_mask is not None:
-        graph.add("mask_img", "LoadImage", image=Path(fill_mask).name)
+        graph.add("mask_img", "LoadImage", image=by_role[ROLE_FILL_MASK].name)
         graph.add("fist_mask", "ImageToMask", image=graph.link("mask_img"), channel="red")
     else:
         _math(graph, "fist_x", f"a * {FIST_X0}", a=graph.link("crop_size", 0))
@@ -418,6 +513,7 @@ def report_for(
         fill_prompt=fill_prompt,
         seed=seed,
         graph_path=graph_path,
+        upload=upload_manifest(lock, fill_mask=fill_mask),
     )
 
 

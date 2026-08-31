@@ -15,14 +15,15 @@ gate must be wired to something that runs.
 So this reads verify.py's own call graph rather than matching strings, and generalizes --
 add ``[tool.bandit]`` to pyproject without a leg and this fails.
 
-The file has since grown two more sections, and they belong here for one reason: this is
+The file has since grown three more sections, and they belong here for one reason: this is
 where the repo pins the behaviour of its OWN gate tooling, as opposed to the behaviour of
-the package. The gate is not only verify.py. It is also release.yml's refusals (the last
-thing an operator reads before an irreversible publish) and scripts/mutate_predicates.py
-(which rewrites tracked source files in place, and until it grew a consent flag did so on
-any invocation, ``--help`` included). Both sections say in their own docstrings exactly how
-much they prove, because two of them read the file as text and text is easy to over-claim
-from.
+the package. The gate is not only verify.py. It is also scripts/wheel_smoke.py (the only
+check in this repo that runs against a NON-editable install, and therefore the only one that
+sees the packaging rule at all), release.yml's refusals (the last thing an operator reads
+before an irreversible publish) and scripts/mutate_predicates.py (which rewrites tracked
+source files in place, and until it grew a consent flag did so on any invocation, ``--help``
+included). Each section says in its own docstring exactly how much it proves, because
+several of them read a file as text and text is easy to over-claim from.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ VERIFY = ROOT / "verify.py"
 PYPROJECT = ROOT / "pyproject.toml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 MUTATE = ROOT / "scripts" / "mutate_predicates.py"
+WHEEL_SMOKE = ROOT / "scripts" / "wheel_smoke.py"
 
 # `[tool.X]` tables that are quality GATES (a tool that can fail a build), mapped to the
 # module verify.py runs. Config-only tables (tool.pytest.ini_options, tool.hatch,
@@ -602,6 +604,228 @@ def test_the_gate_checks_the_file_that_defines_the_gate():
     )
 
 
+# --- the wheel smoke: the one leg that runs against a non-editable install ---------------
+#
+# The ``build`` leg built a wheel into a scratch directory and then deleted that directory,
+# artifact included, before ``VERIFY OK`` printed. Nothing installed it, imported from it, or
+# ran the console script it declares -- while every other install path in this repo is
+# ``pip install -e``, which resolves pcraft out of ``src/`` and never exercises
+# ``[tool.hatch.build.targets.wheel]``. 18 tracked non-Python files that the runtime opens
+# ride on that rule, and a rule that dropped one would still build, still install and still
+# import cleanly.
+#
+# HONESTY NOTE, because these tests are cheap and the leg they pin is not: nothing below
+# builds a wheel, creates a venv, or installs anything. They pin that the leg is WIRED --
+# read from verify.py's call graph, the same reachability argument as everything above -- and
+# that the smoke script's own decision functions behave. Whether the leg passes end to end is
+# settled by running verify.py, not by this file.
+
+
+def _load_wheel_smoke():
+    """Import scripts/wheel_smoke.py by path, under a private name.
+
+    Same reason as ``_load_verify``: the ``__main__`` guard must not fire. That the import is
+    side-effect-free at all is part of what these tests hold -- the script does nothing at
+    module scope, unlike the sibling in scripts/ that used to sweep the tree on import.
+    """
+    spec = importlib.util.spec_from_file_location("_wheel_smoke_under_test", WHEEL_SMOKE)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _names_bound_to(func: str) -> set[str]:
+    """Variable names assigned the result of ``func(...)`` in verify.py.
+
+    The call-graph counterpart to ``_leg_env_var``: that one says WHICH mapping a leg is
+    handed, this one says where that mapping came from. Neither is enough alone -- a leg
+    handed a correctly-named variable that was never built by the right function would
+    satisfy the first and mean nothing.
+    """
+    out: set[str] = set()
+    for node in ast.walk(ast.parse(VERIFY.read_text(encoding="utf-8"))):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        target, value = node.targets[0], node.value
+        if not (isinstance(target, ast.Name) and isinstance(value, ast.Call)):
+            continue
+        if isinstance(value.func, ast.Name) and value.func.id == func:
+            out.add(target.id)
+    return out
+
+
+def test_the_built_wheel_is_installed_and_exercised_somewhere():
+    """A wheel nobody installs is a wheel nobody has checked."""
+    labels = list(_verify_legs())
+    assert "wheel smoke" in labels, (
+        "verify.py has no 'wheel smoke' leg -- the build leg produces a wheel and deletes it "
+        "unopened, so no gate in this repo installs the artifact it publishes, imports from "
+        "it, or runs the console script it declares"
+    )
+    assert "build" in labels, "verify.py has no 'build' leg"
+    assert labels.index("build") < labels.index("wheel smoke"), (
+        "the wheel smoke runs before the build leg that produces the wheel it smokes"
+    )
+
+
+def test_the_wheel_smoke_legs_do_not_inherit_pythonpath():
+    """The one line the whole leg rests on.
+
+    Without ``--installed``, main() puts ``<root>/src`` on PYTHONPATH for every other leg,
+    and PYTHONPATH is searched BEFORE a venv's own site-packages. Inherited here, the smoke
+    would import pcraft from the source tree, pass every check, and prove nothing about the
+    wheel it had just installed -- a leg reporting more scope than it has, inside the leg
+    written to stop exactly that.
+    """
+    verify = _load_verify()
+    stripped = verify._wheel_smoke_env({"PYTHONPATH": "src", "PATH": "/usr/bin", "CI": "1"})
+    assert "PYTHONPATH" not in stripped, "the smoke env still carries PYTHONPATH"
+    assert stripped == {"PATH": "/usr/bin", "CI": "1"}, (
+        f"the smoke env dropped more than PYTHONPATH: {stripped}. The child still needs PATH "
+        f"to find its own interpreter."
+    )
+    bound = _names_bound_to("_wheel_smoke_env")
+    assert bound, "nothing in verify.py is assigned the result of _wheel_smoke_env(...)"
+    for leg in ("wheel smoke venv", "wheel smoke install", "wheel smoke"):
+        assert _leg_env_var(leg) in bound, (
+            f"the {leg!r} leg is handed {_leg_env_var(leg)!r}, which is not the mapping "
+            f"_wheel_smoke_env built -- so it can still resolve pcraft out of src/"
+        )
+    assert _leg_env_var("suite") not in bound, (
+        "the suite leg is handed the PYTHONPATH-stripped mapping; it must keep PYTHONPATH or "
+        "it stops testing a checkout at all"
+    )
+
+
+def test_the_venv_interpreter_is_looked_up_inside_the_venv():
+    """Both layouts are real here: Scripts/ on the dev boxes, bin/ on both CI legs."""
+    verify = _load_verify()
+    got = verify._venv_python(Path("scratch") / "smoke-venv")
+    assert got.parent.parent.name == "smoke-venv", f"{got} is not inside the venv"
+    assert got.stem == "python"
+    assert got.parent.name == ("Scripts" if os.name == "nt" else "bin"), (
+        f"{got} is not where a stdlib venv puts its interpreter on this platform"
+    )
+
+
+def test_the_wheel_smoke_failures_send_the_fix_to_the_packaging_rule():
+    """These legs fail in a different KIND of way, and the shared template would not say so.
+
+    A dropped data file is not a code defect and not a test regression: it is one line of
+    ``[tool.hatch.build.targets.wheel]``. And an install leg that runs ``--no-index`` cannot
+    fail for network reasons, which is the first thing a reader assumes about a failing pip.
+    """
+    verify = _load_verify()
+    smoke = _fail_leg(verify, "wheel smoke")
+    assert "[tool.hatch.build.targets.wheel]" in smoke, (
+        "the wheel-smoke refusal does not name the packaging rule its failure implicates"
+    )
+    install = _fail_leg(verify, "wheel smoke install")
+    assert "--no-index" in install, (
+        "the install refusal does not say the leg is offline, so the first guess a reader "
+        "makes is a network failure it cannot be"
+    )
+
+
+def test_the_smoke_script_gates_with_refusals_not_bare_asserts():
+    """``assert`` is stripped under -O, and nothing runs this script under -O to notice.
+
+    verify.py devotes an entire leg to this shape inside the suite, and its refusal text
+    sends the fix to src/. A gate script that checked with ``assert`` would be the same
+    defect one directory over, with no leg watching it.
+    """
+    asserts = [
+        node.lineno
+        for node in ast.walk(ast.parse(WHEEL_SMOKE.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Assert)
+    ]
+    assert not asserts, (
+        f"scripts/wheel_smoke.py refuses with a bare assert at line(s) {asserts} -- stripped "
+        f"under -O, so the check disappears silently in an optimized interpreter"
+    )
+
+
+def test_only_tracked_non_python_files_are_expected_in_the_wheel():
+    """The manifest comes from git, and it is package-relative.
+
+    ``.py`` is the only extension dropped, deliberately: a ``.pyi`` or a ``.txt`` added inside
+    the package is covered the day it lands rather than the day someone remembers to list it.
+    """
+    smoke = _load_wheel_smoke()
+    listing = (
+        "src/pcraft/__init__.py\n"
+        "src/pcraft/py.typed\n"
+        "src/pcraft/domains/image/rules/encoder_craft.md\n"
+        "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/back.openpose.png\n"
+        "tests/test_verify_legs.py\n"
+        "README.md\n"
+    )
+    assert smoke._tracked_data_files(listing) == [
+        "domains/image/rules/encoder_craft.md",
+        "domains/image/subdomains/sprite/poses/turnaround/back.openpose.png",
+        "py.typed",
+    ]
+
+
+def test_this_tree_really_does_ship_data_the_manifest_check_would_notice():
+    """A check that matched nothing would pass forever while proving nothing.
+
+    Measured at 18 tracked non-Python files under src/pcraft when this was written; the floor
+    is deliberately far below that, because the assertion is "this package ships data", not a
+    file count nobody agreed to hold.
+    """
+    smoke = _load_wheel_smoke()
+    listing = smoke._git_tracked(ROOT)
+    if listing is None:
+        pytest.skip("git cannot list this tree -- the leg reports that rather than failing")
+    shipped = smoke._tracked_data_files(listing)
+    assert len(shipped) >= 10, (
+        f"only {len(shipped)} tracked non-Python files under src/pcraft: {shipped}. Either "
+        f"the package stopped shipping data, or this check is reading the wrong prefix and "
+        f"has been passing on an empty set."
+    )
+
+
+def test_a_data_file_missing_from_the_install_is_named(tmp_path):
+    """The exact failure the leg exists for: the wheel imports, and one data file is gone."""
+    smoke = _load_wheel_smoke()
+    package_dir = tmp_path / "pcraft"
+    (package_dir / "rules").mkdir(parents=True)
+    (package_dir / "rules" / "encoder_craft.md").write_text("x", encoding="utf-8")
+    expected = ["rules/encoder_craft.md", "thresholds/sprite.calibration.json"]
+    assert smoke._missing_from_install(expected, package_dir) == [
+        "thresholds/sprite.calibration.json"
+    ]
+    assert smoke._missing_from_install(["rules/encoder_craft.md"], package_dir) == []
+
+
+def test_git_being_unable_to_answer_is_not_read_as_an_empty_manifest(monkeypatch, tmp_path):
+    """None, not ``[]`` -- the same distinction mutate_predicates.py holds for a dirty tree.
+
+    ``""`` is a real answer meaning "nothing is tracked there". A missing git, or a tree that
+    is not a checkout (an unpacked sdist, a vendored copy), makes the question unanswerable,
+    and a manifest of zero files would then be "could not check" wearing "checked clean" --
+    with every shipped data file unexamined and the leg still green.
+    """
+    smoke = _load_wheel_smoke()
+
+    def no_git(*_args, **_kwargs):
+        raise OSError("git not found")
+
+    monkeypatch.setattr(smoke.subprocess, "run", no_git)
+    assert smoke._git_tracked(tmp_path) is None
+
+    monkeypatch.setattr(
+        smoke.subprocess,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess(
+            args=[], returncode=128, stdout="", stderr="fatal: not a git repository"
+        ),
+    )
+    assert smoke._git_tracked(tmp_path) is None
+
+
 # --- release.yml's refusals -------------------------------------------------------------
 #
 # HONESTY NOTE, because a test over a workflow file can read far stronger than it is.
@@ -615,6 +839,16 @@ def test_the_gate_checks_the_file_that_defines_the_gate():
 # version-check step were bare value dumps. That step fires inside the one workflow holding
 # live OIDC publish credentials, typically after a human approval has already been spent,
 # so the message an operator reads at that moment is the whole remedy they get.
+#
+# THE SAME NOTE APPLIES, DOUBLY, TO THE DRY-RUN TESTS AT THE END OF THIS SECTION. They read
+# the input's default, the two publish jobs' guards and the announcement step as text. No
+# dispatch has been run: nothing here shows that GitHub honours the guard, that a skipped job
+# really leaves the `release` environment un-entered, or that the step summary renders. The
+# first real `workflow_dispatch` is what settles those, and release.yml's own header block is
+# the recipe for firing it safely. What these tests do hold is that the safe default and the
+# two guards cannot be quietly deleted -- which matters because the failure they prevent is
+# invisible by construction: a run left `waiting` on an approval nobody is looking at, which
+# is the state this workflow actually sat in for 302 hours.
 
 _ERROR_LINE = re.compile(r'::error::(.+?)"')
 _REMEDY_MIN = 40
@@ -680,6 +914,93 @@ def test_the_manifest_mismatch_refusal_names_the_cheap_fix():
     lowered = npm_refusals[0].lower()
     assert "bump" in lowered, "the refusal does not name the fix (bump the lagging file)"
     assert "tag" in lowered, "the refusal does not say a new tag is needed after the bump"
+
+
+def _job_block(name: str) -> str:
+    """The text of one top-level job in release.yml.
+
+    Sliced on the two-space-indented job keys rather than parsed, for the reason the note at
+    the top of this section gives: no YAML parser ships in the [dev] extra. Job names are the
+    only keys at that indent -- everything inside a job sits at four or more.
+    """
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    start = source.index(f"\n  {name}:\n")
+    rest = source[start + 1:]
+    following = re.search(r"\n  [a-z][a-z0-9_-]*:\n", rest)
+    return rest[: following.start()] if following else rest
+
+
+def test_a_dispatch_defaults_to_the_run_that_cannot_publish():
+    """The harmless door is the one that opens by itself.
+
+    `workflow_dispatch` exists so a release whose publish step failed can be re-run without
+    cutting a new tag, and it is also the only way to exercise this workflow deliberately.
+    Those two uses want opposite defaults, and the safe one wins: a dispatch fired by someone
+    who did not read the header runs every gate and reaches no registry. Publishing from a
+    dispatch is then a deliberate act -- unchecking a box -- rather than the default.
+    """
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert "dry_run:" in source, (
+        "release.yml has no dry_run input, so there is no way to prove the gate without "
+        "arming the environment's approval and leaving a run waiting on a human"
+    )
+    block = source.split("dry_run:", 1)[1].split("\njobs:", 1)[0]
+    assert "type: boolean" in block, "the dry_run input is not declared as a boolean"
+    assert "default: true" in block, (
+        "dry_run does not default to true -- an unread dispatch would then arm the release "
+        "environment, which is the expensive direction to be wrong in"
+    )
+
+
+@pytest.mark.parametrize("job", ["pypi", "npm"])
+def test_a_dry_run_never_enters_the_release_environment(job: str):
+    """Skipping the job is what keeps a dry run from leaving an approval armed.
+
+    Not merely "does not publish": entering the environment CREATES a pending deployment and
+    asks a reviewer. That is the state a run sat in here for 302 hours, against a tag, built
+    from a workflow revision no longer on main.
+    """
+    block = _job_block(job)
+    assert "environment: release" in block, (
+        f"the {job} job no longer declares `environment: release` -- the reviewer rule and "
+        f"the `tag v*` branch policy hang off that declaration"
+    )
+    assert "inputs.dry_run" in block, (
+        f"the {job} job has no dry-run guard, so a dispatch meant only to prove the gate "
+        f"would arm the approval and leave a run waiting"
+    )
+
+
+@pytest.mark.parametrize("job", ["pypi", "npm"])
+def test_the_publish_path_does_not_hinge_on_how_an_absent_input_coerces(job: str):
+    """A `release: published` event carries no inputs at all.
+
+    Written as "not a dry-run dispatch" rather than as a bare `!inputs.dry_run`, so the
+    release path reads as unconditional instead of depending on a null evaluating falsy in a
+    context that is empty for that event. A publish path is the wrong place to be clever.
+    """
+    assert "github.event_name != 'workflow_dispatch'" in _job_block(job), (
+        f"the {job} job's guard tests only the input, so whether a real release publishes "
+        f"depends on how an absent input coerces"
+    )
+
+
+def test_the_dry_run_says_so_where_a_human_will_actually_see_it():
+    """A skipped job is quiet: GitHub greys it out and gives no reason.
+
+    The value of a dry run is an operator knowing the gate was proven AND that no registry
+    was reached. Silence there reads as "it published", which is the misreading that costs
+    the most.
+    """
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert "::notice::DRY RUN" in source, (
+        "a dry run leaves no annotation on the run, so the skipped publish jobs are the only "
+        "signal and they say nothing"
+    )
+    assert "GITHUB_STEP_SUMMARY" in source, (
+        "the dry run writes nothing to the step summary -- the page a human opens -- so the "
+        "outcome lives only in a log someone has to go find"
+    )
 
 
 # --- scripts/mutate_predicates.py, and consent ------------------------------------------

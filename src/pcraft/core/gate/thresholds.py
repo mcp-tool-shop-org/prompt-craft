@@ -204,7 +204,7 @@ _MAX_REPORTED_ERRORS = 4
 A diagnosis, not a dump: ``--debug`` still carries every one of them, via ``cause``."""
 
 
-def _describe(err: ValidationError) -> str:
+def _describe(err: ValidationError, what: str = "table") -> str:
     """Say what pydantic actually objected to.
 
     F-3637b97f: every ValidationError was collapsed into one literal -- "failed band invariants
@@ -232,18 +232,26 @@ def _describe(err: ValidationError) -> str:
     Only ``loc`` and ``msg`` are used. The offending ``input`` value is deliberately left out: it
     is arbitrary text from a file we did not write, and this string is printed to a console whose
     codepage we do not control -- the same rule ``loader._describe`` states.
+
+    ``what`` names the thing being validated (F-6f6fc50e). It defaults to ``"table"``, so every
+    message this function already produced is byte-for-byte unchanged; the labelled-holdout
+    loader next door passes ``"holdout row"``. That IS an import rather than a third copy of the
+    format, and the objection recorded above does not apply to it: ``holdout`` is in this same
+    subpackage, so no dependency edge between two subpackages is created. The rule stands as
+    written -- reach across a subpackage boundary for a string formatter, no; share one inside
+    a subpackage, yes.
     """
     entries = err.errors()
     shown = entries[:_MAX_REPORTED_ERRORS]
     parts = [
-        f"[{i}] {'.'.join(str(x) for x in entry.get('loc', ())) or '<table>'}: "
+        f"[{i}] {'.'.join(str(x) for x in entry.get('loc', ())) or f'<{what}>'}: "
         f"{entry.get('msg', 'is invalid')}"
         for i, entry in enumerate(shown, 1)
     ]
     if not parts:
-        return "is not a valid table"
+        return f"is not a valid {what}"
     summary = " | ".join(parts)
     remaining = len(entries) - len(shown)
     if remaining > 0:
         summary += f" | (+{remaining} more, see --debug)"
-    return f"is not a valid table -- {len(entries)} error(s): {summary}"
+    return f"is not a valid {what} -- {len(entries)} error(s): {summary}"

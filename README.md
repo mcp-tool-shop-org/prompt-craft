@@ -76,7 +76,7 @@ pcraft demo              # the whole loop end-to-end, no GPU, deterministic stub
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # Cloud Kontext + Fill graph — refuses unless identity method=reference
+pcraft recipe            # Cloud Kontext + Fill graph (char:ashen-reaver-cloud); non-reference methods refuse
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 

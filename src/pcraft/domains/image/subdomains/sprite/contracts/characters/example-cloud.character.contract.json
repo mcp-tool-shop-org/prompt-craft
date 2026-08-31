@@ -1,0 +1,55 @@
+{
+  "$schema": "prompt-craft/contract.v1",
+  "id": "char:ashen-reaver-cloud",
+  "level": "character",
+  "extends": "faction:ashen-pact-cloud",
+  "_note": "GENERIC EXAMPLE -- NOT real canon. The method=reference TWIN of char:ashen-reaver: same atoms, same plate, same weight, same scope, differing ONLY in identity_ref.method. Run it with `pcraft recipe --contract char:ashen-reaver-cloud`; the SDXL pair (char:ashen-reaver) stays the example for `pcraft synth/gate/bind` and is not retargeted. WHY IT EXTENDS THE CLOUD FACTION AND NOT THE SDXL ONE: reference_lock.assemble refuses the whole merged identity lock if ANY plate on it declares an SDXL-family method, and loader._merge_identity_refs puts the inherited faction plate first -- so extending faction:ashen-pact would refuse on the inherited ip_adapter costume plate no matter what this file declares. Overriding that inherited plate is not an option either: _merge_identity_refs refuses a same-plate method rewrite as CONTRACT_RELAXATION. Hence a separate id PAIR, never an override. Its must_not atoms are `optional`: absence-verification is not yet measured on this stack, so these checks run and report but do not block a bind. Raise them to `required` when the verifier is calibrated for absence.",
+  "must_have": [
+    {
+      "id": "skin",
+      "claim": "grey-green orcish skin",
+      "check_type": "vqa",
+      "severity": "required"
+    },
+    {
+      "id": "weapon",
+      "claim": "a two-handed battle-axe held in both hands",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": {
+        "kind": "pose",
+        "ref": "poses/two-hand-weapon.openpose.png"
+      }
+    },
+    {
+      "id": "face",
+      "claim": "a visible orcish face with tusks",
+      "check_type": "vqa",
+      "severity": "required",
+      "spatial": {
+        "kind": "region",
+        "ref": "head"
+      }
+    }
+  ],
+  "must_not": [
+    {
+      "id": "no_human_face",
+      "claim": "a smooth human face",
+      "check_type": "vqa",
+      "severity": "optional"
+    },
+    {
+      "id": "no_shield",
+      "claim": "a shield",
+      "check_type": "vqa",
+      "severity": "optional"
+    }
+  ],
+  "identity_ref": {
+    "plate": "plates/ashen-reaver-front.png",
+    "method": "reference",
+    "weight": 0.6,
+    "scope": "face"
+  }
+}

@@ -138,8 +138,12 @@ Two rules that will bite you:
 
 ## What is true (re-measure before quoting)
 
-- **v1.0.0 shipped** to PyPI + npm 2026-08-18 (tag `v1.0.0`, both registries
-  confirmed; `STABILITY.md` is the promise). Suite last counted **516** (2026-08-31,
+- **v1.0.0 was TAGGED 2026-08-18 and NEVER PUBLISHED** -- measured against the
+  registries 2026-08-31: PyPI and npm both stop at 0.4.0; the release run sat on its
+  approval gate 12 days and was cancelled on the Director's green. `STABILITY.md` is
+  the promise; v1.0.1 ships the healed tree. An earlier form of this line said "both
+  registries confirmed" -- the confirmation had never been measured, which is this
+  repo's own defect class in its own operating file. Suite last counted **516** (2026-08-31,
   post health-wave fold). Re-count before quoting -- a count pinned during an active
   amend wave is stale by construction; this line went 394 -> 516 within one sitting.
 - The gate **checks itself**: the lint and typecheck legs cover `verify.py`, pinned by

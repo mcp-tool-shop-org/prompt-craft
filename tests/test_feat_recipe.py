@@ -16,6 +16,7 @@ from pcraft.domains.image.generator import conditioning as cond
 from pcraft.domains.image.generator import kontext_fill
 from pcraft.domains.image.generator.flux_generator import FluxGenerator
 from pcraft.domains.image.generator.sdxl_generator import SDXLGenerator
+from pcraft.domains.image.subdomains import sprite
 from pcraft.errors import PromptCraftError
 from pcraft.testing import write_solid_png
 
@@ -553,8 +554,17 @@ def test_the_shipped_example_is_an_sdxl_contract_and_the_recipe_door_says_so():
 
 
 def test_cli_recipe_refuses_the_shipped_sdxl_contract_by_name(tmp_path):
-    """`pcraft recipe` with NO arguments used to exit 0 having written the graph."""
-    result = runner.invoke(app, ["recipe", "--out", str(tmp_path / "x.json")])
+    """`pcraft recipe` with NO arguments used to exit 0 having written the graph.
+
+    The SDXL contract is now NAMED rather than reached as the CLI default: F-85852fb7 ships a
+    method=reference twin and cli-ux repoints RECIPE_DEFAULT_CONTRACT at it, so a bare invocation
+    stops being this refusal's subject. The property under test is unchanged -- the recipe door
+    refuses the ip_adapter contract and leaves no graph behind -- and stating the id is what keeps
+    it measuring that rather than measuring whatever the default happens to be."""
+    result = runner.invoke(
+        app,
+        ["recipe", "--contract", "char:ashen-reaver", "--out", str(tmp_path / "x.json")],
+    )
     text = (result.stdout or "") + (result.stderr or "")
     assert result.exit_code == 2, text
     assert "GATE_CONDITIONING_UNSUPPORTED" in text
@@ -578,3 +588,249 @@ def test_cli_recipe_terminal_line_still_claims_the_builtin_fist_constraint(tmp_p
     result = _recipe_cli(tmp_path, "--out", str(tmp_path / "r.json"))
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert "bracer: not masked" in result.stdout
+
+
+# ================================ F-85852fb7 (the Cloud recipe path shipped with no runnable example)
+# `grep '"method"' contracts/` returned exactly two hits and BOTH said ip_adapter, so no contract in
+# the shipped tree declared method=reference -- the method this whole 582-line recipe surface exists
+# to serve. Every test above that wanted a graph had to MANUFACTURE a contract in tmp_path
+# (`_reference_contracts_dir`), which is the measurement: the product had no packaged demo for its
+# one path with a live Cloud submit receipt, while site-config.ts still presented
+# `pcraft recipe --out kontext-fill.recipe.json` as a copyable snippet that exits 2 on a fresh
+# install.
+#
+# MEASURED why the twin is a PAIR and not one file: a character-only twin with method=reference that
+# extends the SHIPPED faction still refuses. `loader._merge_identity_refs` places the inherited
+# ashen-pact-costume plate (method=ip_adapter, scope=costume) FIRST, and `reference_lock.assemble`
+# calls `refuse_unmeasured_identity_family` over the WHOLE merged list -- so the inherited SDXL-family
+# plate refuses the run before the character's own reference plate is ever considered. Both halves
+# have to declare method=reference. That refusal is the F-0e41e735 fix and stays exactly as it is;
+# this is the data half only.
+
+
+def _cloud_pair_conditioning():
+    from pcraft.core.loop.orchestrate import _assemble_conditioning
+    from pcraft.sample import load_workspace
+
+    _s, resolved, _t, _c = load_workspace(contract_id=sprite.CLOUD_EXAMPLE_CHARACTER_ID)
+    return resolved, _assemble_conditioning(resolved)
+
+
+def test_the_packaged_cloud_pair_is_a_reference_contract_on_both_halves():
+    """Both plates must declare method=reference -- the character alone is not enough (see above)."""
+    resolved, _conditioning = _cloud_pair_conditioning()
+    methods = {ref.method for ref in resolved.identity_refs}
+    assert methods == {"reference"}, (
+        "a single ip_adapter plate anywhere in the merged lock refuses the whole run"
+    )
+    assert resolved.lineage == [sprite.CLOUD_EXAMPLE_FACTION_ID, sprite.CLOUD_EXAMPLE_CHARACTER_ID]
+
+
+def test_the_packaged_cloud_pair_builds_the_measured_graph():
+    """The finding's measured end state: a 35-node graph off packaged plates, no tmp_path fixture."""
+    _resolved, conditioning = _cloud_pair_conditioning()
+    graph, report = kontext_fill.from_conditioning(conditioning)
+    assert report.identity_method == "reference"
+    assert report.identity_unchosen == []
+    assert "ashen-reaver-front.png" in report.identity
+    assert "two-hand-weapon.openpose.png" in report.pose
+    assert Path(report.identity).is_file()
+    assert Path(report.pose).is_file()
+    loaded = {n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"}
+    assert loaded == {"ashen-reaver-front.png", "two-hand-weapon.openpose.png"}
+    types = {n["class_type"] for n in graph.values()}
+    assert {"ImageStitch", "ImageCropV2", "InpaintModelConditioning"} <= types
+
+
+def test_cli_recipe_runs_end_to_end_against_the_packaged_cloud_pair(tmp_path):
+    """A bare `--contract char:ashen-reaver-cloud` is the runnable demo the landing page needs.
+
+    The CLI DEFAULT is deliberately not changed here: repointing it is the cli-ux half of this seam.
+    """
+    out = tmp_path / "kontext-fill.recipe.json"
+    result = runner.invoke(
+        app, ["recipe", "--contract", sprite.CLOUD_EXAMPLE_CHARACTER_ID, "--out", str(out)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert kontext_fill.RECIPE_ID in text
+    assert out.is_file()
+    graph = json.loads(out.read_text(encoding="utf-8"))
+    types = {n["class_type"] for n in graph.values()}
+    assert {"ImageStitch", "ImageCropV2", "InpaintModelConditioning"} <= types
+
+
+def test_the_sdxl_pair_is_untouched_and_still_refuses_the_recipe_door():
+    """MUST NOT BREAK (1): the ip_adapter pair stays the SDXL example verbatim. `pcraft synth/gate/
+    bind` and the SDXL generator demo all run off it, and the recipe door must keep refusing it."""
+    from pcraft.core.loop.orchestrate import _assemble_conditioning
+    from pcraft.sample import load_workspace
+
+    _s, resolved, _t, _c = load_workspace(contract_id=sprite.EXAMPLE_CHARACTER_ID)
+    assert {ref.method for ref in resolved.identity_refs} == {"ip_adapter"}
+    with pytest.raises(PromptCraftError) as exc:
+        kontext_fill.from_conditioning(_assemble_conditioning(resolved))
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "ip_adapter" in exc.value.message
+
+
+def test_the_twin_is_a_separate_id_pair_rather_than_an_override():
+    """MUST NOT BREAK (3): `_merge_identity_refs` refuses a same-plate method rewrite as
+    CONTRACT_RELAXATION, so the twin may never be expressed as a child overriding the shipped
+    faction. Four distinct ids, and the cloud character does NOT extend the SDXL faction."""
+    from pcraft.sample import load_store
+
+    store = load_store()
+    ids = set(store.ids())
+    assert {
+        sprite.EXAMPLE_CHARACTER_ID,
+        sprite.EXAMPLE_FACTION_ID,
+        sprite.CLOUD_EXAMPLE_CHARACTER_ID,
+        sprite.CLOUD_EXAMPLE_FACTION_ID,
+    } <= ids
+    assert store.get(sprite.CLOUD_EXAMPLE_CHARACTER_ID).extends == sprite.CLOUD_EXAMPLE_FACTION_ID
+
+
+# ============================ F-0caa740d (the graph names basenames; nothing said where they live)
+# `build_graph` writes `Path(x).name` into every LoadImage node, so the emitted graph carries
+# ['ashen-reaver-front.png', 'two-hand-weapon.openpose.png'] (+ the mask basename when one is
+# supplied) and NOTHING says which local file each came from. MEASURED: `RecipeReport` named the
+# local absolute path of exactly two of the three -- `identity` and `pose` -- and the mask's local
+# path appeared NOWHERE in the full model_dump, with `mask_source` saying only 'supplied-mask'. So
+# the operator had to open the graph JSON, read the basenames out of it, work out which local file
+# each came from, upload them, then hand-build the `--image-name local=cloud` pairs -- the flag whose
+# own documented behaviour for an unrecognised key is 'missing keys stay', i.e. the graph is written,
+# uploaded and submitted at real spend with the remap silently not applied.
+#
+# The module that BUILT the nodes is the only place that still knows both halves, so the manifest is
+# built there and hung off the report. It adds no claim about any model, pulls nothing, and spends
+# nothing: no uploader, no network call, no credential.
+
+
+def _manifest_by_role(report) -> dict[str, object]:
+    return {row.role: row for row in report.upload}
+
+
+def test_the_manifest_names_every_loadimage_node_and_its_local_path(tmp_path):
+    """Every basename the graph carries, with the local file it came from. No node unaccounted for."""
+    conditioning = _lock_conditioning(tmp_path)
+    graph, report = kontext_fill.from_conditioning(conditioning)
+    loaded = [n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"]
+    assert [row.name for row in report.upload] == loaded, (
+        "the manifest must cover exactly the LoadImage nodes the graph carries, in graph order"
+    )
+    by_role = _manifest_by_role(report)
+    assert set(by_role) == {kontext_fill.ROLE_IDENTITY, kontext_fill.ROLE_POSE}
+    for row in report.upload:
+        assert Path(row.local_path).is_absolute()
+        assert Path(row.local_path).name == row.name
+        assert row.exists is True
+
+
+def test_the_supplied_mask_gets_a_manifest_row_of_its_own(tmp_path):
+    """The measured gap: the mask's local path appeared NOWHERE in the report's full model_dump."""
+    mask = write_solid_png(tmp_path / "painted-mask.png")
+    graph, report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path), fill_mask=str(mask))
+    loaded = {n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"}
+    assert "painted-mask.png" in loaded
+    row = _manifest_by_role(report)[kontext_fill.ROLE_FILL_MASK]
+    assert row.name == "painted-mask.png"
+    assert Path(row.local_path) == mask.resolve()
+    dumped = json.dumps(report.model_dump())
+    assert "painted-mask.png" in dumped, "the mask's local path must survive --json"
+
+
+def test_the_manifest_says_a_packaged_plate_is_packaged():
+    """MUST NOT BREAK (4): resolve_ref reaches into the PACKAGED sprite tree, so the manifest for
+    the shipped example points inside site-packages. Say so rather than implying a working dir."""
+    _resolved, conditioning = _cloud_pair_conditioning()
+    _graph, report = kontext_fill.from_conditioning(conditioning)
+    assert [row.name for row in report.upload] == [
+        "ashen-reaver-front.png",
+        "two-hand-weapon.openpose.png",
+    ]
+    for row in report.upload:
+        assert row.packaged is True, "a plate resolved out of the installed sprite tree"
+        assert row.exists is True
+
+
+def test_a_hand_built_lock_pointing_at_a_vanished_file_reports_exists_false(tmp_path):
+    """`build_graph`/`report_for` are public and take a lock directly, so `exists` is a live check
+    rather than a restatement of what bind_refs already refused."""
+    from pcraft.domains.image.generator.reference_lock import ReferenceLock
+
+    lock = ReferenceLock(
+        pose=[str(write_solid_png(tmp_path / "pose.png"))],
+        identity=[str(tmp_path / "gone.png")],
+        costume=[],
+        methods={str(tmp_path / "gone.png"): "reference"},
+    )
+    report = kontext_fill.report_for(lock)
+    by_role = _manifest_by_role(report)
+    assert by_role[kontext_fill.ROLE_IDENTITY].exists is False
+    assert by_role[kontext_fill.ROLE_POSE].exists is True
+
+
+def test_the_manifest_and_the_graph_cannot_disagree_about_a_name(tmp_path):
+    """The manifest is what NAMES the nodes, so drift between the two is not expressible."""
+    conditioning = _lock_conditioning(tmp_path)
+    graph = kontext_fill.build_graph(
+        kontext_fill.assemble(kontext_fill.cond.bind_refs(conditioning))
+    )
+    report = kontext_fill.report_for(
+        kontext_fill.assemble(kontext_fill.cond.bind_refs(conditioning))
+    )
+    loaded = [n["inputs"]["image"] for n in graph.values() if n["class_type"] == "LoadImage"]
+    assert [row.name for row in report.upload] == loaded
+
+
+def test_unknown_image_names_is_the_check_the_silent_drop_needed(tmp_path):
+    """`bind_cloud_names` keeps its documented 'missing keys stay' behaviour (MUST NOT BREAK 2);
+    the manifest is what lets the ARGUMENT layer refuse a pair naming a basename no node carries.
+    cli-ux owns the refusal itself -- this is the predicate it reads."""
+    _graph, report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    assert kontext_fill.unknown_image_names(report.upload, {"face.png": "cloud-face.png"}) == []
+    assert kontext_fill.unknown_image_names(
+        report.upload, {"fase.png": "cloud-face.png", "face.png": "ok.png"}
+    ) == ["fase.png"]
+
+
+def test_bind_cloud_names_still_leaves_missing_keys_alone(tmp_path):
+    """MUST NOT BREAK (2): the graph rewriter's contract is unchanged by the manifest."""
+    graph, _report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    mapped = kontext_fill.bind_cloud_names(graph, {"not-in-this-graph.png": "x.png"})
+    assert {n["inputs"]["image"] for n in mapped.values() if n["class_type"] == "LoadImage"} == {
+        "face.png",
+        "two-hand.openpose.png",
+    }
+
+
+def test_the_manifest_acquires_no_uploader_and_no_credential():
+    """MUST NOT BREAK (3): this module does not submit and does not spend. The manifest is data.
+
+    Scans the module's IMPORT lines rather than its prose -- the docstrings below say the words
+    'upload' and 'credential' on purpose."""
+    import ast
+
+    tree = ast.parse(Path(kontext_fill.__file__).read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    assert not (imported & {"requests", "urllib", "http", "httpx", "socket", "ssl", "os", "netrc"})
+
+
+def test_the_report_keeps_every_field_it_already_had(tmp_path):
+    """MUST NOT BREAK (1): RecipeReport is extra='forbid' and a --json surface. ADD a field; do not
+    reshape the existing ones, and keep identity/pose meaning what they mean today."""
+    _graph, report = kontext_fill.from_conditioning(_lock_conditioning(tmp_path))
+    dumped = report.model_dump()
+    assert {
+        "recipe_id", "stages", "identity", "identity_method", "identity_unchosen", "pose", "crop",
+        "fill_region", "requested_fill_region", "mask_source", "do_not_mask_bracer",
+        "kontext_prompt", "fill_prompt", "seed", "measured_graph", "graph_path", "cloud_names",
+    } < set(dumped)
+    assert Path(dumped["identity"]).is_absolute() and dumped["identity"].endswith("face.png")
+    assert dumped["pose"].endswith("two-hand.openpose.png")

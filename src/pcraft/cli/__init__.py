@@ -1,4 +1,4 @@
-"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | sync-rules | demo | doctor | recipe | schema.
+"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | regrade | calibrate | sync-rules | demo | doctor | recipe | schema.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
@@ -30,8 +30,11 @@ from pydantic import BaseModel, ConfigDict
 
 # Typer 0.26 vendored Click as `typer._click`; 0.25 and earlier use the standalone
 # `click` package; 0.27 moved Abort OUT of the vendored module into typer's own
-# `typer.exceptions` and ships no `click` at all. pyproject declares `typer>=0.12`, so
-# all three layouts are inside the supported range. The private-module import below
+# `typer.exceptions` and ships no `click` at all. pyproject declares
+# `typer>=0.12,<0.28`, so all three layouts are inside the supported range and 0.27 is
+# the top of it -- the ceiling is what makes that claim checkable on every install
+# rather than a hope about future releases, and it ratchets forward deliberately (see
+# pyproject's note beside the pin). The private-module import below
 # broke twice, each time at import (before any command runs): once as
 # ModuleNotFoundError on <0.26, then on 0.27 as ImportError from a module that still
 # EXISTS -- which a `except ModuleNotFoundError` does not catch, so the "portable"
@@ -375,6 +378,20 @@ def _emit_model(model: BaseModel, **extra: Any) -> None:
     """
     doc = json.loads(model.model_dump_json())
     doc.update({key: value for key, value in extra.items() if value is not None})
+    _emit_json(doc)
+
+
+def _emit_json(doc: Any) -> None:
+    """The one ``--json`` serialisation, for the commands whose document is not one model.
+
+    ``_emit_model`` above is the single-model case and now routes through here, so the
+    encoding decision it documents at length (pure ASCII, so the document stays parseable
+    on every codepage) has ONE spelling rather than one per command. ``pcraft regrade``
+    reports on a corpus -- ``regrade_dir`` answers with a list -- and a list is not a
+    ``BaseModel``; copying the echo line into it would have made the second spelling free
+    to drift from the first, which is the defect the shared ``_DEBUG_HELP`` string and
+    ``harness.verdict_reason`` were both extracted to prevent.
+    """
     typer.echo(json.dumps(doc, indent=2, ensure_ascii=True))
 
 
@@ -748,6 +765,154 @@ def replay(
 
 
 @app.command()
+def regrade(
+    table: Path = typer.Option(..., "--table", help="CANDIDATE threshold table to re-grade against -- the file `pcraft calibrate` emitted, not the one the receipts were decided under"),
+    records_dir: Path | None = typer.Option(None, "--records-dir", help="directory of receipts to re-grade (every *.json directly under it)"),
+    record: Path | None = typer.Option(None, "--record", help="a single receipt to re-grade, instead of --records-dir"),
+    as_json: bool = typer.Option(False, "--json", help="emit the RegradeReport models as JSON on stdout"),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
+) -> None:
+    """Ask what a candidate threshold table WOULD have decided about receipts already bound.
+
+    This is the question `pcraft replay` refuses: replay's job is to assert that a receipt
+    still reproduces, so a retuned table is STATE_REPLAY_DRIFT there and must stay that
+    way. Here the same difference is the ANSWER, reported per atom.
+
+    Reports, never gates. Nothing is written, no receipt is re-stamped, and a verdict that
+    moves is an answer rather than a refusal -- so this exits 0 whenever it could read its
+    inputs, and atoms the gate never scored are carried and named rather than re-zoned.
+
+    Exit codes:
+      0  the re-grade ran; flips, if any, are in the report.
+      1  the candidate table is unreadable or invalid, or neither/both of
+         --records-dir and --record was given.
+      2  a receipt is unreadable or is not a receipt.
+    """
+    try:
+        # Both-or-neither is decided BEFORE the table is read, so the refusal names the
+        # mistake the operator made rather than whatever the loader met first.
+        if (records_dir is None) == (record is None):
+            raise PromptCraftError(
+                "INPUT_REGRADE_TARGET",
+                "regrade needs exactly one of --records-dir or --record",
+                hint="Pass --records-dir at a directory of receipts for the corpus "
+                "question, or --record at one receipt for a single asset.",
+            )
+        from ..core.gate.regrade import regrade as regrade_record
+        from ..core.gate.regrade import regrade_dir
+        from ..core.gate.thresholds import load_thresholds
+        from ..core.receipt.asset_record import load
+
+        candidate = load_thresholds(table)
+        if records_dir is not None:
+            reports = regrade_dir(records_dir, candidate)
+        elif record is not None:
+            reports = [regrade_record(load(record), candidate)]
+        else:  # unreachable: the both-or-neither refusal above already fired
+            raise PromptCraftError(
+                "INPUT_REGRADE_TARGET",
+                "regrade needs exactly one of --records-dir or --record",
+                hint="Pass --records-dir at a directory of receipts for the corpus "
+                "question, or --record at one receipt for a single asset.",
+            )
+        for report in reports:
+            _say(f"{report.record_id}: {report.summary()}", as_json=as_json)
+        blocking = [r for r in reports if r.blocking_flips]
+        total = sum(len(r.blocking_flips) for r in reports)
+        _say(
+            f"{len(reports)} receipt{'' if len(reports) == 1 else 's'}, "
+            f"{len(blocking)} with blocking flips, {total} blocking flips total",
+            as_json=as_json,
+        )
+        if as_json:
+            _emit_json(
+                {
+                    "table": candidate.version,
+                    "receipts": [json.loads(r.model_dump_json()) for r in reports],
+                    "receipts_total": len(reports),
+                    "with_blocking_flips": len(blocking),
+                    "blocking_flips_total": total,
+                }
+            )
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+@app.command()
+def calibrate(
+    manifest: Path = typer.Argument(..., help="labelled holdout manifest (JSONL: image, contract, atom, label in present|absent|borderline)"),
+    out: Path = typer.Option(..., "--out", help="write the emitted sprite.cal.v2 table here -- a NEW file; the packaged calibration is refused"),
+    scored_out: Path | None = typer.Option(None, "--scored-out", help="also write the scored companion (the manifest rows plus the score each verifier gave)"),
+    contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
+    thresholds: Path | None = typer.Option(None, "--thresholds", help="base table the emitted one is built from; default: shipped sprite calibration"),
+    as_json: bool = typer.Option(False, "--json", help="emit CalibrationResult as JSON on stdout"),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
+) -> None:
+    """Fit threshold bands against a labelled holdout and EMIT a sprite.cal.v2 table.
+
+    Emits, never adopts. The shipped table stays the default until a Director ratifies the
+    swap, and every existing receipt keeps replaying under the table that decided it -- so
+    the new numbers go to a new file under a new version name, and writing them over
+    sprite.cal.v1 is refused. Adopt one explicitly with --thresholds when you mean to.
+
+    A band the holdout did not measure is reported unmeasured and left OUT of the emitted
+    table rather than defaulted: an invented number where a measurement is claimed is the
+    exact defect this harness exists to end.
+
+    The holdout and its images are DATA and stay outside the wheel -- MANIFEST is a path,
+    and nothing here ships or writes a corpus.
+
+    Exit codes:
+      0  the holdout was scored and the table was emitted.
+      1  the manifest is unusable, or the target refuses the write.
+      2  the [image] extra is missing, or the holdout loader is unavailable.
+    """
+    try:
+        # Inside the try, unlike `gate`'s: that command imports modules this package always
+        # ships, while the calibration harness is an optional-extra-adjacent import whose
+        # failure must arrive as a classified refusal rather than as the raw traceback this
+        # CLI's docstring says --debug is the only route to.
+        import pcraft.domains.image  # noqa: F401  (registers the plugin)
+
+        from ..core.gate.thresholds import load_thresholds
+        from ..core.plugin import get
+        from ..domains.image.subdomains.sprite import calibrate as harness
+
+        base = load_thresholds(thresholds) if thresholds is not None else None
+        result = harness.calibrate_from_manifest(
+            manifest,
+            contracts_dirs=contracts_dir or None,
+            verifiers=list(get("image").verifiers().values()),
+            base_table=base,
+        )
+        table_path = harness.write_table(result.table, out)
+        _say(f"holdout: {result.manifest}  rows: {result.rows}", as_json=as_json)
+        for fit in result.bands:
+            _say(
+                f"  {fit.band_key}: {fit.high}/{fit.low}"
+                if fit.fitted
+                else f"  {fit.band_key}: UNMEASURED ({fit.reason})",
+                as_json=as_json,
+            )
+        _say(f"emitted {result.table.version} -> {table_path}", as_json=as_json)
+        _say("NOT adopted: pass --thresholds at this file to use it.", as_json=as_json)
+        if scored_out is not None:
+            _say(f"scored companion -> {harness.write_scored(result.scored, scored_out)}", as_json=as_json)
+        if as_json:
+            _emit_model(result)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+@app.command()
 def doctor(
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
@@ -932,9 +1097,86 @@ def _parse_image_names(pairs: list[str]) -> dict[str, str]:
     return out
 
 
+def _loadimage_filenames(graph: dict) -> list[str]:
+    """Every filename a ``LoadImage`` node in the emitted graph carries, in node order.
+
+    The GRAPH is the source of truth here, deliberately, and not the upload manifest the
+    image domain hangs off ``RecipeReport``. ``bind_cloud_names`` matches on exactly this
+    field -- ``inputs['image']`` of every ``class_type == 'LoadImage'`` node -- so diffing
+    the parsed pairs against anything else would be checking a DESCRIPTION of the graph
+    rather than the thing the rewrite will actually consult. The manifest describes the
+    same nodes (it is built from the same ``build_graph`` output), so the two agree by
+    construction; where they could ever disagree, the graph is the half that decides what
+    gets remapped. Reading it here also means the check needs no field that may or may not
+    be present on the report, so ``--image-name`` behaves identically on a build with the
+    manifest and one without.
+    """
+    out: list[str] = []
+    for node in graph.values():
+        if not isinstance(node, dict) or node.get("class_type") != "LoadImage":
+            continue
+        current = (node.get("inputs") or {}).get("image")
+        if isinstance(current, str) and current and current not in out:
+            out.append(current)
+    return out
+
+
+def _refuse_unmatched_image_names(graph: dict, names: dict[str, str]) -> None:
+    """Refuse ``--image-name`` local sides no ``LoadImage`` node in this graph carries.
+
+    F-69661dda. ``_parse_image_names`` above owns the SHAPE half of this refusal -- it can
+    see that ``a=b`` is malformed, but it has no graph, so it cannot see that
+    ``ashen-reaver-frnt.png`` is a real-looking name matching nothing. That difference was
+    the whole failure: ``bind_cloud_names``'s documented behaviour for an unrecognised key
+    is "missing keys stay", which is correct for a pure graph rewrite with no opinion about
+    intent, and MEASURED the result was exit 0, a graph on disk with the original filename
+    still in it, and ``RecipeReport.cloud_names`` recording the pair as though it had been
+    applied. The artifact then asserts a remap the graph does not carry, and the next step
+    is a Comfy Cloud submit at real spend naming a file Comfy never issued.
+
+    This is a PRE-FLIGHT check, not a change to ``bind_cloud_names``: it runs before the
+    rewrite, before the graph is written, and it does not exist when no pairs were passed.
+    ``INPUT_`` rather than ``GATE_`` for the same reason ``INPUT_FILL_MASK`` is: a typo'd
+    filename is bad user input (exit 1, "fix your input"), not a gate-discipline violation.
+    """
+    carried = _loadimage_filenames(graph)
+    unmatched = [key for key in names if key not in carried]
+    if not unmatched:
+        return
+    keys = ", ".join(repr(k) for k in unmatched)
+    side = "local side" if len(unmatched) == 1 else "local sides"
+    verb = "matches" if len(unmatched) == 1 else "match"
+    loads = ", ".join(repr(name) for name in carried) if carried else "no images at all"
+    raise PromptCraftError(
+        "INPUT_IMAGE_NAME",
+        f"--image-name {side} {keys} {verb} no LoadImage node in this graph",
+        hint=f"This graph loads: {loads}. The local side is the basename the node carries, "
+        "not a path -- pass it exactly as listed. An unmatched name is not applied by "
+        "bind_cloud_names, so the graph would have been written and submitted at real "
+        "spend with the original filename still in it.",
+    )
+
+
+# F-763b6107. `recipe`'s whole job is the Kontext reference-lock stitch, and
+# `method=reference` is the only identity method that path can apply -- an ip_adapter
+# contract is refused by name at assemble time and always will be. So the default has to
+# name a contract that DECLARES reference, or a zero-argument `pcraft recipe` cannot
+# demonstrate the one path the command exists for; MEASURED on the shipped tree, the bare
+# invocation exited 2 with GATE_CONDITIONING_UNSUPPORTED, which is a correct refusal of an
+# incorrect default. The SDXL example keeps its own commands: synth / gate / bind /
+# validate still default to `char:ashen-reaver`, and naming it here still produces the
+# same clean refusal.
+#
+# STABILITY.md covers this command's "flags and the emitted recipe graph". The flag is
+# unchanged -- same name, same string type -- but a zero-argument invocation's OUTPUT
+# moves for existing callers, which is a real behaviour change on a covered command and is
+# flagged as such rather than filed as obviously safe.
+RECIPE_DEFAULT_CONTRACT = "char:ashen-reaver-cloud"
+
+
 @app.command()
 def recipe(
-    contract: str = typer.Option("char:ashen-reaver", help="contract id whose plates feed the stitch"),
+    contract: str = typer.Option(RECIPE_DEFAULT_CONTRACT, help="contract id whose plates feed the stitch; needs identity_ref.method=reference (ip_adapter is the SDXL encoder and is refused here)"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     out: Path = typer.Option(Path("kontext-fill.recipe.json"), "--out", help="write the Comfy API graph here"),
     fill_region: str = typer.Option("fist", help="Fill mask region. fist only -- hands/weapon ate the bracer"),
@@ -944,12 +1186,19 @@ def recipe(
         [],
         "--image-name",
         help="remap a LoadImage filename to a Cloud upload name (local=cloud, repeatable; "
-        "split on the LAST '=', so a local filename may contain one)",
+        "split on the LAST '=', so a local filename may contain one). A local side no "
+        "LoadImage node carries is refused, and the refusal lists the ones that exist",
     ),
     as_json: bool = typer.Option(False, "--json", help="emit RecipeReport as JSON on stdout"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Write the Cloud Kontext stitch + left crop + fist-only Fill graph. Does not submit."""
+    """Write the Cloud Kontext stitch + left crop + fist-only Fill graph. Does not submit.
+
+    This is the method=reference path and only that path. The contract's identity_ref must
+    declare method=reference; ip_adapter is the SDXL encoder and is refused by name here,
+    so `--contract char:ashen-reaver` (the SDXL example the other commands default to)
+    exits 2 rather than building a graph the Kontext recipe could not have applied.
+    """
     from ..core.loop.orchestrate import _assemble_conditioning
     from ..domains.image.generator import kontext_fill
     from ..sample import load_workspace
@@ -966,6 +1215,9 @@ def recipe(
         )
         names = _parse_image_names(image_name)
         if names:
+            # Before the rewrite and before anything is written: a pair naming no node is
+            # not applied by bind_cloud_names and must not reach disk as if it were.
+            _refuse_unmatched_image_names(graph, names)
             graph = kontext_fill.bind_cloud_names(graph, names)
             report = report.model_copy(update={"cloud_names": names})
         out.parent.mkdir(parents=True, exist_ok=True)

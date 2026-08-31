@@ -42,8 +42,9 @@ catch, so it is not left to good intentions.
 `IO_RECORD_SCHEMA_UNSUPPORTED` is a deliberate per-code override: despite its `IO_` prefix it
 exits **1**, matching its contract sibling `CONTRACT_SCHEMA_UNSUPPORTED` — a well-formed receipt
 written by a newer prompt-craft is your input to upgrade for, not a tool crash. (v1.0.0 as
-released exits 2 here; the alignment landed on `main` immediately after and ships in the
-first patch, before any minor.)
+tagged exits 2 here; the alignment landed on `main` immediately after and ships in the
+first release that actually reaches the registries -- v1.0.0 was tagged but its publish
+was never approved, so no registry artifact carries the old behaviour.)
 
 `4` is deliberate and load-bearing: **could-not-check is not checked-clean**, and collapsing it
 onto `2` would let a CI branch read "the gate ran and failed" when the gate never ran.

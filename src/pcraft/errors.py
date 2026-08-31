@@ -245,6 +245,28 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "CONFIG_THRESHOLDS_VERSION_MISMATCH": "The table you named is not the table you passed. Pass "
     "the version of the table you are actually running (table.version), or leave "
     "config.thresholds_version unset to assert nothing.",
+    # F-1d76b4ba, the same ruling applied once more. CONFIG_THRESHOLDS_INVALID means "this file
+    # is malformed" and its hint prescribes fixing a band. A table that PARSES and simply does
+    # not declare a band the gate will look up is a third, unrelated failure: the file is fine,
+    # the numbers are fine, and the gate will quietly grade against `default`. Widening either
+    # existing code to cover it is what "parse the code, not the prose" forbids.
+    # ---------------------------------------------------------------- F-6f6fc50e
+    # The labelled-holdout files. Three codes because they have three recoveries that have
+    # nothing in common -- the same split IO_RECORD_READ / IO_RECORD_INVALID and
+    # INPUT_EMPTY_STORE already draw, applied to the format the calibration instruction needs.
+    "IO_HOLDOUT_READ": "Pass a readable JSONL file. A holdout manifest is one JSON object per "
+    "line with the fields image, contract, atom and label; the scored companion adds score and "
+    "band_key.",
+    "INPUT_HOLDOUT_ROW": "One row is malformed and the message names its line number. Fix that "
+    "row. A label is exactly one of present, absent or borderline, and a manifest row carries no "
+    "score -- scores live in the scored companion file, which is a different format.",
+    "INPUT_HOLDOUT_EMPTY": "The file parsed and contains no rows, so there is nothing to "
+    "calibrate against. A band fitted on an empty holdout would be the generic seed the shipped "
+    "table already warns about.",
+    "CONFIG_THRESHOLDS_UNUSABLE": "This table parses and its numbers are fine; it just does not "
+    "declare a band the gate will look up, so those atoms would grade against `default` with "
+    "nothing in the transcript saying so. Add the named band, or narrow the keys you asked to "
+    "check. This is an authoring-time refusal: nothing about loading or grading has changed.",
     "CONTRACT_CYCLIC_DEPENDS_ON": "Two or more atoms depend_on each other (or an atom depends_on "
     "itself), so no parent-first order exists and the gate cannot evaluate parents before "
     "children. Break the cycle in the contract's depends_on edges.",

@@ -11,6 +11,47 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
+Feature tranche 1 (dogfood swarm, Director-approved slices S1-S4, 2026-08-31; suite
+883 -> 984):
+
+### Added
+
+- **The calibration workflow the shipped table has been asking for** (S1): a labelled
+  holdout format (`pcraft.core.gate.holdout` -- JSONL rows of image/contract/atom/label
+  with named refusals), a GPU-free scoring and separation report over it, band fitting
+  that emits a `sprite.cal.v2`-format table (emitted, never silently adopted; unmeasured
+  bands omitted, not defaulted), table lint/fingerprint/diff tooling reusing the
+  drift-hash, and an **offline re-grade** (`pcraft regrade`) that answers "what would this
+  candidate table have decided about receipts already on disk" -- per-atom, per-receipt,
+  pure read, `STATE_REPLAY_DRIFT` untouched. `pcraft calibrate` drives the harness. The
+  identity sub-gate remains unwired and unreferenced; this ships the evidence workflow its
+  future ruling requires.
+- **The Cloud recipe quick-start works again** (S2): a `method=reference` example pair
+  ships (`faction:ashen-pact-cloud` + `char:ashen-reaver-cloud` -- it must be a pair; a
+  character alone still inherits the SDXL plate and refuses), and bare `pcraft recipe`
+  defaults to it. The SDXL example still refuses on the recipe path with the same named
+  error, now by explicit `--contract`.
+- **Cloud-spend guards** (S3): the recipe emits an upload manifest (name, role, resolved
+  local path, exists) and `build_graph` names its LoadImage nodes FROM it so drift is
+  inexpressible; `--image-name` entries matching no node in the graph are refused
+  (`INPUT_IMAGE_NAME`) listing the real basenames -- a typo used to silently no-op into
+  paid Cloud spend.
+- **Release hardening** (S4): `verify.py` gains a three-leg wheel smoke (throwaway venv,
+  `--no-deps --no-index` install, provenance/version/console-script/data-file checks --
+  the built artifact was previously deleted unopened); `release.yml` gains a default-true
+  `dry_run` dispatch rung system with its runbook in the header; `RELEASING.md` documents
+  the release sequence (ownership split: the workflow header owns mechanics, the file owns
+  sequence); `typer>=0.12,<0.28` with the two-incident evidence comment.
+
+### Fixed
+
+- **The v1.0.0 record corrected to measured truth**: v1.0.0 was tagged 2026-08-18 and its
+  publish was never approved -- the release run sat armed on its approval gate for twelve
+  days and was cancelled 2026-08-31; PyPI and npm remained at 0.4.0 throughout. Every
+  operating-surface claim of "shipped / both registries confirmed" now states this, and
+  the [1.0.0] entry below carries a dated correction banner. The first registry artifact
+  to carry the v1.0.0 interface promise will be v1.0.1.
+
 Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 107 findings fixed
 across five amend rounds (Stage A bug/security x2, Stage B proactive, Stage C
 humanization, Stage D visual), suite 394 -> 883.
@@ -202,7 +243,12 @@ First-round entries follow.
   per-code override in STABILITY.md, aligned in the first patch after v1.0.0 before any
   minor shipped).
 
-## [1.0.0] — 2026-08-18
+## [1.0.0] — 2026-08-18 (tagged; never reached the registries)
+
+> Measured 2026-08-31: this version was tagged and its release run then sat on the
+> publish-approval gate for twelve days without approval; the run was cancelled and
+> PyPI/npm remained at 0.4.0. The interface promise below is true of the tag; the first
+> registry artifact to carry it is v1.0.1.
 
 **The interfaces are stable. The pictures are not finished, and the two are different claims.**
 

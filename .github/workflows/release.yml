@@ -66,6 +66,59 @@
 #
 # The publisher's project name and workflow FILENAME are both matched byte-for-byte at
 # authentication time. That is why this file is `release.yml` and not `publish.yml`.
+#
+# ---------------------------------------------------------------------------------------
+# HOW TO PROVE THIS WORKFLOW WITHOUT PUBLISHING ANYTHING. Run these BEFORE cutting the tag
+# you intend to release; the whole point is that they cost nothing to fail.
+#
+# Everything above this block was verified by careful static reading -- the Node24 action
+# majors, the version check that used to skip itself on `workflow_dispatch`, the `release`
+# environment's reviewer and `tag v*` policy. None of it had been exercised by a real run
+# reaching the approval gate. What DID exist was the opposite: the run triggered by the
+# v1.0.0 release sat in `waiting` for 302 hours, armed against that tag, holding a dist
+# artifact built from a workflow revision no longer on main -- until it was cancelled by
+# hand. v1.0.0 was tagged and never published; both registries were measured at 0.4.0 at that
+# point. A workflow nobody exercises is exactly the one that discovers something during a
+# release, and this is the recipe for exercising it on purpose instead.
+#
+#   0. BEFORE TAGGING, look for a run left armed. A pending deployment is invisible unless
+#      you go looking, and that is how one went unnoticed for 302 hours:
+#        gh run list --workflow=release.yml --limit 10
+#        # any run in `waiting` is holding an approval against some tag -- resolve it
+#        # (approve or reject) before cutting a new one, or you are stacking a second
+#        # armed run on top of a stale one.
+#
+#   1. RUNG ONE -- gates only, no approval, no deployment, nothing left armed:
+#        gh workflow run release.yml --ref v1.0.1 -f dry_run=true
+#      Green means: checkout/setup/install ran on the Node24 majors, `verify.py --installed`
+#      passed on THAT tag's tree, twine checked the metadata, and the tag/pyproject/npm
+#      version comparison agreed. The `pypi` and `npm` jobs are skipped, so the `release`
+#      environment is never entered: no deployment is created and no reviewer is asked.
+#      `dry_run` defaults to TRUE, so a dispatch someone fires without reading this is the
+#      harmless one; publishing from a dispatch requires deliberately unchecking the box.
+#
+#   2. RUNG TWO -- prove the environment gate itself, still publishing nothing:
+#        gh workflow run release.yml --ref v1.0.1 -f dry_run=false
+#      This arms the environment on purpose. Both publish jobs pause for the required
+#      reviewer BEFORE either registry is touched, so the safe move is to REJECT both
+#      pending deployments at the prompt. Rejected-not-published is the proof that the
+#      reviewer rule is real; if the jobs run straight through without pausing, the
+#      environment's protection rules are gone and the pin above is a label again.
+#
+#   3. RUNG THREE, optional -- dispatch from a BRANCH ref. What this actually proves is the
+#      version-check step's ref-type refusal, which is the message an operator would really
+#      see: `verify` fails, so `pypi` and `npm` never start and the environment is never
+#      reached. Note what that means: the `tag v*` deployment branch policy sits BEHIND a
+#      refusal that fires first and cannot be exercised without removing the step in front of
+#      it. Two guards deep is the intended shape, and the outer one is the one under test.
+#
+# WHAT A DRY RUN DOES NOT PROVE, because a gate reporting more scope than it has is this
+# repo's subject: it never enters the `release` environment, so it says nothing about the
+# reviewer rule, the branch policy, or OIDC minting -- that is rung two's job, and rung two
+# still cannot prove a publish SUCCEEDS without doing one. It also still uploads the `dist`
+# artifact (deliberately: that exercises upload-artifact@v7). The artifact expires on its
+# own and is never downloaded; it is not a pending approval and holds nothing open.
+# ---------------------------------------------------------------------------------------
 
 name: release
 
@@ -73,6 +126,14 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Prove the gate without publishing: run verify, build, twine check and the
+          tag/version comparison, then STOP. The pypi and npm jobs are skipped, so the
+          release environment is never entered and no approval is armed.
+        type: boolean
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -171,10 +232,37 @@ jobs:
           name: dist
           path: dist/
 
+      # A skipped job is quiet: GitHub greys the `pypi` and `npm` boxes out and says nothing
+      # about why. The entire value of a dry run is an operator KNOWING that the gate was
+      # proven and the registries were not reached, so it is said twice -- once as an
+      # annotation on the run, and once in the step summary, which is the page a human
+      # actually opens. "Could not check" must never read as "checked clean", and the
+      # inverse holds too: "checked, and deliberately stopped" must not read as "published".
+      - name: Dry run stops here -- nothing was published
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          echo "::notice::DRY RUN on $GITHUB_REF_NAME -- verify, build, twine check and the tag/version comparison all passed. The pypi and npm jobs are SKIPPED, the release environment was never entered, and no approval is armed. Re-dispatch with dry_run=false to arm it."
+          {
+            echo "## Dry run -- nothing was published"
+            echo
+            echo "Ref: \`$GITHUB_REF_NAME\` ($GITHUB_REF_TYPE)"
+            echo
+            echo "Passed: \`verify.py --installed\`, build, \`twine check\`, and tag == pyproject == npm."
+            echo
+            echo "Skipped: the \`pypi\` and \`npm\` jobs. The \`release\` environment was never entered, so no deployment was created and no reviewer was asked."
+            echo
+            echo "This proves the gates and the Node24 action majors on this ref. It does NOT prove the environment's reviewer rule or its \`tag v*\` branch policy: re-dispatch with \`dry_run=false\` and reject at the approval prompt for that."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   pypi:
     needs: verify
     runs-on: ubuntu-latest
     environment: release
+    # A dry run stops before this job, so the `release` environment is never entered: no
+    # deployment is created and no approval is armed. Written as "not a dry-run dispatch"
+    # rather than as `!inputs.dry_run` because the `inputs` context is empty on a
+    # `release: published` event, and a publish path must not depend on how a null coerces.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
     permissions:
       id-token: write
     steps:
@@ -193,6 +281,8 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     environment: release
+    # Same guard as the `pypi` job above, and for the same reason -- see the note there.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
     permissions:
       id-token: write
     steps:

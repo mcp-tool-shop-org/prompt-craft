@@ -6,9 +6,26 @@
     python verify.py --audit      # + the dependency audit (needs the network)
 
 Legs: version coherence (--installed only), lint, typecheck, the suite,
-the suite under -O (gates must still raise), the wheel and sdist.
+the suite under -O (gates must still raise), the wheel and sdist, and a
+smoke of that built wheel installed into a throwaway venv.
 --basetemp is always set so Windows dead-symlink cleanup does not look
 like a repo failure.
+
+The wheel smoke is a default leg rather than an --audit-style opt-in,
+because unlike the audit it is a function of the tree: the wheel installs
+with --no-deps --no-index into a venv created with --system-site-packages,
+so no index is contacted and pydantic and typer come from the interpreter
+that just ran the suite with them. It closes what the build leg left open.
+That leg built a wheel into a scratch directory and then deleted the
+directory, artifact included, before printing VERIFY OK -- so no gate in
+this repo had ever installed the thing it publishes, imported from it, or
+run the console script it declares. Every other install path here is
+`pip install -e`, which resolves pcraft out of src/ and never exercises
+[tool.hatch.build.targets.wheel]; 18 tracked non-Python files that the
+runtime opens ride on that rule, and twine check validates METADATA, not
+contents. What the smoke does NOT prove -- dependency resolution, the
+sdist, anything with a GPU -- is written down beside what it does, in
+scripts/wheel_smoke.py's own docstring.
 
 The dependency audit is a leg only under --audit, and off by default.
 Not squeamishness: running it makes the gate *time-varying*, so the same
@@ -212,11 +229,36 @@ def _audit(py: str, env: dict[str, str], ran: list[str]) -> tuple[list, list]:
     return unfixable, unauditable
 
 
-# What a failing leg MEANS, and what to do about it. One shared template used to serve
-# all five, which is true of every leg and diagnostic for none of them -- and the legs do
-# not fail in the same KIND of way. For lint, typecheck, suite and build the child's own
-# uncaptured output above the refusal usually IS the fix pointer, so the guidance mostly
-# says which output to read. `suite under -O` is different in kind, and the docstring at
+def _wheel_smoke_env(env: dict[str, str]) -> dict[str, str]:
+    """The child environment for the wheel-smoke legs: this one, minus PYTHONPATH.
+
+    Load-bearing rather than tidy, and it is the single line the whole leg rests on. Without
+    ``--installed``, ``main()`` puts ``<root>/src`` on PYTHONPATH for every other leg -- and
+    PYTHONPATH is searched BEFORE a venv's own site-packages, so a smoke run that inherited it
+    would import ``pcraft`` from the source tree, pass every check, and prove exactly nothing
+    about the wheel it had just installed. That is this file's recurring shape (a gate
+    reporting more scope than it has) landing inside the leg written to close it.
+
+    Measured rather than reasoned about: with PYTHONPATH cleared, the venv's site-packages
+    wins over both the ambient interpreter's site-packages and a hatchling editable ``.pth``
+    pointing at this same checkout. scripts/wheel_smoke.py refuses if that ordering ever
+    stops holding, so neither half is trusted alone.
+    """
+    return {key: value for key, value in env.items() if key != "PYTHONPATH"}
+
+
+def _venv_python(venv_dir: Path) -> Path:
+    """The interpreter inside a stdlib venv, on either layout."""
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+# What a failing leg MEANS, and what to do about it. One shared template used to serve every
+# leg there was, which is true of all of them and diagnostic for none of them -- and the legs
+# do not fail in the same KIND of way. For lint, typecheck, suite, build and the wheel smoke
+# the child's own uncaptured output above the refusal usually IS the fix pointer, so the
+# guidance mostly says which output to read. `suite under -O` is different in kind, and the docstring at
 # the top of this file already says so: its entire purpose is to catch an invariant
 # enforced with a bare `assert`, which -O strips silently. When it fails -- especially
 # right after the plain `suite` leg passed -- the fix is in src/, not in the test, and
@@ -250,6 +292,30 @@ _LEG_HINTS: dict[str, str] = {
         "is packaging rather than code: read the build output above against "
         "[tool.hatch.build.targets.wheel] in pyproject.toml."
     ),
+    "wheel smoke venv": (
+        "the throwaway venv for the wheel smoke could not be created, which is an "
+        "environment problem and not a finding about this tree. The usual cause on Linux is "
+        "a python without ensurepip: install the distro's python3-venv package. Nothing was "
+        "installed anywhere and nothing needs cleaning up -- the venv lives inside the "
+        "scratch directory this script deletes on exit."
+    ),
+    "wheel smoke install": (
+        "the wheel this tree just built would not install into a clean venv. The build leg "
+        "passed one step earlier, so the artifact exists and is malformed rather than "
+        "missing: read pip's output above against [tool.hatch.build.targets.wheel] in "
+        "pyproject.toml. Note the flags -- --no-deps --no-index means no index was "
+        "contacted, so this is never a network failure, and --ignore-installed (never "
+        "--force-reinstall) means nothing outside the throwaway venv was touched."
+    ),
+    "wheel smoke": (
+        "the wheel installed but the package it produced does not hold up: read the "
+        "WHEEL SMOKE FAIL line above, which names the specific claim that failed. This is "
+        "the leg that runs against a NON-editable install, so it is the only one that sees "
+        "[tool.hatch.build.targets.wheel] at all -- a data file dropped by a packaging rule "
+        "lands here and nowhere else. The fix is in pyproject.toml, not in src/, unless the "
+        "refusal says otherwise. scripts/wheel_smoke.py documents what this leg does and "
+        "does not prove."
+    ),
 }
 
 
@@ -266,10 +332,10 @@ def _run(label: str, cmd: list[str], env: dict[str, str], ran: list[str]) -> Non
     depends on the table being complete.
 
     The leg's output is wrapped in GitHub Actions log-group markers when running there.
-    ci.yml invokes this entire five-leg sequence as ONE step, so without them a red run is
-    a single flat concatenation of ruff + mypy + pytest + pytest -O + build output and the
-    reader has to scroll to find where it turned red; with them each leg collapses on its
-    own. ``::endgroup::`` is printed from a ``finally`` so the group closes whether the leg
+    ci.yml invokes this entire eight-leg sequence as ONE step, so without them a red run is
+    a single flat concatenation of ruff + mypy + pytest + pytest -O + build + venv + pip +
+    wheel-smoke output and the reader has to scroll to find where it turned red; with them
+    each leg collapses on its own. ``::endgroup::`` is printed from a ``finally`` so the group closes whether the leg
     passed or failed. Gated on GITHUB_ACTIONS so local runs read exactly as they did.
     Nothing about what runs, or in what order, changes.
     """
@@ -349,6 +415,41 @@ def main(argv: list[str] | None = None) -> int:
         dist = scratch / "dist"
         dist.mkdir()
         _run("build", [py, "-m", "build", "--outdir", str(dist)], env, ran)
+        # The wheel that was just built is installed and exercised here rather than deleted
+        # unexamined with the scratch directory. `dist` is a fresh mkdtemp, so exactly one
+        # wheel is in it; any other count means the build leg did something this does not
+        # understand, and picking one arbitrarily would smoke-test an artifact that is not
+        # necessarily the one a release would publish.
+        wheels = sorted(dist.glob("*.whl"))
+        if len(wheels) != 1:
+            raise SystemExit(
+                f"VERIFY FAIL: wheel smoke -- the build leg left {len(wheels)} wheels in "
+                f"{dist}, expected exactly one. Nothing can be smoke-tested without knowing "
+                f"which artifact would be published."
+            )
+        smoke_env = _wheel_smoke_env(env)
+        venv_dir = scratch / "smoke-venv"
+        # --system-site-packages so pydantic and typer come from the interpreter that just
+        # ran the suite with them, rather than from an index. That keeps the leg hermetic
+        # and a function of the tree; the cost is that it proves nothing about whether the
+        # wheel's DEPENDENCY METADATA resolves on a clean machine, which is stated in the
+        # smoke script's docstring rather than left to be assumed either way.
+        _run("wheel smoke venv",
+             [py, "-m", "venv", "--system-site-packages", str(venv_dir)], smoke_env, ran)
+        venv_py = str(_venv_python(venv_dir))
+        # --ignore-installed and deliberately NOT --force-reinstall: the venv can see the
+        # parent's site-packages, where this project is very often already installed
+        # editable, and --force-reinstall would UNINSTALL it from there -- breaking the
+        # developer's environment as a side effect of verifying. --ignore-installed simply
+        # installs into the venv and leaves everything outside it alone (measured).
+        _run("wheel smoke install",
+             [venv_py, "-m", "pip", "install", "--no-deps", "--no-index",
+              "--ignore-installed", "--disable-pip-version-check", "--quiet",
+              str(wheels[0])], smoke_env, ran)
+        _run("wheel smoke",
+             [venv_py, str(ROOT / "scripts" / "wheel_smoke.py"),
+              "--tree", str(ROOT), "--expect-version", _declared_version()],
+             smoke_env, ran)
         if args.audit:
             caveats = _audit(py, env, ran)
     finally:

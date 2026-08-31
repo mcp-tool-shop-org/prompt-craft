@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...errors import PromptCraftError
 from ..contract.compile_questions import CheckType, Polarity, Question, QuestionDAG, Severity
 from .family_guard import assert_distinct_families
-from .thresholds import ThresholdTable, Zone
+from .thresholds import Band, ThresholdTable, Zone
 from .verifier_iface import Verifier, forbid_clipscore
 
 # which gate tier owns each check_type
@@ -309,8 +309,7 @@ def evaluate(
             score=round(score, 4), zone=zone, tier_used=used_tier, tiers_consulted=tiers_consulted,
             verifier_id=used_id, band_key=band_key,
             detail=_detail_for(used_verifier, image_path, q),
-            reason=f"score {score:.4f} -> {zone.value} "
-            f"(band {band_key}: {band.describe(q.polarity)})",
+            reason=verdict_reason(score, zone, band_key, band, q.polarity),
         )
 
     ordered = [verdicts[q.atom_id] for q in dag.questions]
@@ -321,6 +320,23 @@ def evaluate(
         tier_census=_tier_census(dag, ordered),
         thresholds_version=thresholds.version,
     )
+
+
+def verdict_reason(
+    score: float, zone: Zone, band_key: str, band: Band, polarity: Polarity
+) -> str:
+    """The one sentence a scored verdict carries: the number, the zone, and the band that decided.
+
+    Extracted from ``evaluate`` (F-dec37d4e) so the OFFLINE re-grade can compose the same line
+    for a candidate table. A re-graded transcript whose zones moved but whose ``reason`` strings
+    still quote the old band would be a transcript that contradicts itself on the one field a
+    reader consults to ask WHY -- and copying the format string into ``regrade`` would leave two
+    spellings of it free to drift, which is the defect class this package is built to catch.
+
+    ``band.describe`` reads the band in the direction the atom is actually asked, so a ``negate``
+    row prints its inverted reading here exactly as it does on the live path (F-b1b29cef).
+    """
+    return f"score {score:.4f} -> {zone.value} (band {band_key}: {band.describe(polarity)})"
 
 
 def _safe_score(verifier: Verifier, image_path: str, question: Question) -> tuple[float | None, str | None]:

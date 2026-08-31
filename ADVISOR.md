@@ -7,9 +7,9 @@ day and no longer read from that arrangement.
 **Executor:** new seat
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
 **HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
-**Version:** **1.0.0** (shipped to PyPI + npm 2026-08-18, tag `v1.0.0`; `STABILITY.md` is the promise)
+**Version:** **1.0.0** (TAGGED 2026-08-18; `STABILITY.md` is the promise. MEASURED 2026-08-31: the publish was never approved -- both registries stop at 0.4.0; the stale release run was cancelled on the Director's green. The healed tree ships as v1.0.1.)
 **Suite last counted:** **516** (2026-08-31, post health-wave fold; re-count before quoting)
-**Released:** v1.0.0 — both registries confirmed; handbook + all seven translations current at the tag; the pre-1.0 ruling is RETIRED (its flip criteria were met — see the RULING block in `HANDOFF.md`)
+**Released:** registries at **0.4.0** (v1.0.0 tagged, publish never approved -- measured against PyPI/npm 2026-08-31, run 32210324323 cancelled). The pre-1.0 ruling is RETIRED (flip criteria met -- see the RULING block in `HANDOFF.md`); v1.0.1 is the release that carries it out.
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.
 This file is the standing state and the fences. Measure HEAD and the suite yourself.

@@ -161,6 +161,24 @@ def resolve_ref(raw: str | Path) -> Path:
     raise FileNotFoundError(text)
 
 
+def is_packaged_ref(path: str | Path) -> bool:
+    """True when a RESOLVED ref points inside the installed sprite tree, not a working directory.
+
+    ``resolve_ref`` searches the packaged ``poses/`` and ``plates/`` folders after trying the path
+    as given, so a contract naming ``plates/ashen-reaver-front.png`` resolves to a file inside
+    site-packages on an installed build. Anything that has to hand those files to something else --
+    the Cloud upload manifest (F-0caa740d), a docs snippet -- must be able to SAY that, rather than
+    print an absolute path that reads as if it were copyable out of the operator's own project.
+    Answering it here is the point: this module owns the resolution rule, so it is the only place
+    that cannot be wrong about which of its own search roots produced a hit.
+    """
+    try:
+        Path(path).resolve().relative_to(_SPRITE_ROOT)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def bind_refs(conditioning: dict, *, generator_id: str = "") -> dict:
     """Copy conditioning with every named ref resolved. Refuse if any is missing."""
     who = f"{generator_id} " if generator_id else ""
