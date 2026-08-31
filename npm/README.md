@@ -55,7 +55,7 @@ around this tool, branch on `4` separately.
 The Python toolkit's **local** GPU `generate()` **ran** on the 5090 this was developed
 on (2026-08-18, seed `169405236028824`, OpenPose + identity plate). The frame is
 orcish; grip, sigil, and bracer did not land. The core is GPU-free, deterministic,
-and covered by **394 passing tests** (counted 2026-08-18). SDXL pose-lock, IP-Adapter,
+and covered by **516 passing tests** (counted 2026-08-31). SDXL pose-lock, IP-Adapter,
 LoRA, InstantID, and regional inpaint are wired in code and tested with fakes; Flux
 still refuses those refs. A Cloud recipe (`pcraft recipe`) has been submitted live.
 A live GEPA compile ran on local Ollama `hermes3:8b` (not 600B) and pinned

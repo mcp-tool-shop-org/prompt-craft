@@ -105,7 +105,7 @@ class FluxGenerator:
                 "GATE_CLOUD_SUBMIT",
                 f"{self.generator_id} wrote the Cloud recipe to {path}; "
                 "it does not run Kontext locally",
-                hint="Submit that graph on Comfy Cloud (pcraft recipe --image-name …). "
+                hint="Submit that graph on Comfy Cloud (pcraft recipe --image-name ...). "
                 "Do not treat this refuse as a missing plate.",
             )
         cond.refuse_unmeasured_family(self.generator_id, self.family, conditioning)

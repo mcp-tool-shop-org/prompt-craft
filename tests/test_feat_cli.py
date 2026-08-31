@@ -1,4 +1,4 @@
-"""F-CLI-FEAT-001 / 003 / 004 — the CLI can load a store that is not the shipped demo."""
+"""F-CLI-FEAT-001 / 003 / 004 -- the CLI can load a store that is not the shipped demo."""
 
 from __future__ import annotations
 

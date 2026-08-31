@@ -8,7 +8,7 @@ day and no longer read from that arrangement.
 **Repo:** `E:\AI\prompt-craft` (`mcp-tool-shop-org/prompt-craft`)
 **HEAD at write:** `1503769` on `origin/main`, tree clean. **CI green on both legs.** Nothing open in the repo.
 **Version:** **1.0.0** (shipped to PyPI + npm 2026-08-18, tag `v1.0.0`; `STABILITY.md` is the promise)
-**Suite last counted:** **394** (2026-08-31; re-count before quoting)
+**Suite last counted:** **516** (2026-08-31, post health-wave fold; re-count before quoting)
 **Released:** v1.0.0 — both registries confirmed; handbook + all seven translations current at the tag; the pre-1.0 ruling is RETIRED (its flip criteria were met — see the RULING block in `HANDOFF.md`)
 
 Read **`HANDOFF.md`** first — it carries this session's job and the verified fix.

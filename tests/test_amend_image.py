@@ -891,18 +891,153 @@ def test_flux_method_reference_still_raises_cloud_submit(tmp_path):
     assert (out / "flux.kontext-stitch-crop-fill.v1.json").is_file()
 
 
+# =========================== F-a6acaab1 -- user-facing text in this domain must survive cp437
+#
+# Family-of-call-sites sibling of the em-dash crash the cli-ux, core-gate-loop and contract agents
+# closed in their own files; this is the image domain's share of the same family. A structured
+# refusal is worth nothing if PRINTING it raises: `_emit` writes message and hint to stdout, and a
+# classic cmd.exe console is cp437, which has no U+2026. The refusal then dies as a
+# UnicodeEncodeError -- a clean exit-2 diagnosis turned into a traceback, at the exact moment the
+# operator is trying to read what to do next.
+#
+# One live literal in this domain carried a non-ASCII character: flux_generator.py's
+# GATE_CLOUD_SUBMIT hint ("pcraft recipe --image-name U+2026"), which is raised on the reference
+# path -- the shipped Cloud-recipe route, not a corner case.
+#
+# The sweep covers whole files rather than a hand-picked list, because which text is user-facing is
+# not a stable property of where that text sits.
+
+_CONSOLE_ENCODING = "cp437"
+
+_OWNED_SOURCE_GLOBS = ("domains/**/*.py",)
+
+
+def _owned_sources():
+    import pcraft
+
+    root = Path(pcraft.__file__).parent
+    found: list[Path] = []
+    for pattern in _OWNED_SOURCE_GLOBS:
+        found.extend(sorted(root.glob(pattern)))
+    assert found, "owned-source globs matched nothing; the fixture is broken, not the code"
+    return found
+
+
+def _string_constants_under(node) -> list[str]:
+    """Every str literal beneath a node, f-string fragments included."""
+    import ast
+
+    return [
+        n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+
+
+def _user_facing_literals(path: Path) -> list[tuple[str, str]]:
+    """(where, text) for every refusal message/hint literal in one owned source file."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        # every string inside a PromptCraftError(...) construction: code, message, hint
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = getattr(func, "id", None) or getattr(func, "attr", None)
+            if name == "PromptCraftError":
+                where = f"{path.name}:{node.lineno} PromptCraftError"
+                out.extend((where, text) for text in _string_constants_under(node))
+        # and every module-level hint constant those calls point at by name
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.endswith("_HINT"):
+                    where = f"{path.name}:{node.lineno} {target.id}"
+                    out.extend((where, text) for text in _string_constants_under(node.value))
+    return out
+
+
+def test_every_refusal_message_and_hint_in_this_domain_encodes_on_a_cp437_console():
+    offenders = []
+    scanned = 0
+    for path in _owned_sources():
+        for where, text in _user_facing_literals(path):
+            scanned += 1
+            try:
+                text.encode(_CONSOLE_ENCODING, errors="strict")
+            except UnicodeEncodeError as err:
+                offenders.append(f"{where}: {err.reason} at {text[err.start : err.end]!r}")
+    assert scanned, "the AST sweep found no refusal literals at all -- the pattern has drifted"
+    assert not offenders, "user-facing text that a cp437 console cannot print:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_the_cloud_submit_refusal_renders_on_a_cp437_console(tmp_path, monkeypatch):
+    """End to end through the real object: to_safe_text() is what `_emit` hands to the console, and
+    this is the refusal the shipped reference path raises every time it writes a recipe."""
+    identity = write_solid_png(tmp_path / "face.png")
+    pose = write_solid_png(tmp_path / "two-hand.openpose.png")
+    with pytest.raises(PromptCraftError) as exc:
+        FluxGenerator(out_dir=tmp_path / "out").generate(
+            "p",
+            "n",
+            {
+                "pose_refs": [str(pose)],
+                "identity_refs": [{"plate": str(identity), "method": "reference", "scope": "face"}],
+            },
+            seed=1,
+        )
+    assert exc.value.code == "GATE_CLOUD_SUBMIT"
+    exc.value.to_safe_text().encode(_CONSOLE_ENCODING, errors="strict")
+
+
 # =========================================================================== suite hygiene canary
+
+
+# F-56f08800: the hotfix that added _install_fake_pil did not add PIL to the canary that exists to
+# catch exactly a faked module leaking. The tuple below iterated only ('torch', 'diffusers'), so a
+# raw sys.modules mutation of PIL -- or a fake outliving its test -- would have silently poisoned
+# every later test that reads an image, including the palette verifier's Pillow branch, with no
+# signal at all. The gap was latent rather than live (the helper uses monkeypatch.setitem like its
+# siblings, so it is auto-reverted), which is precisely why it could sit there unnoticed.
+#
+# Two lists rather than one tuple, because the two groups are checked differently: the first may
+# legitimately be installed for real, the second is never installed in this environment and so must
+# be absent outright. test_the_canary_watches_every_module_this_file_fakes below keeps both in step
+# with the _install_fake_* helpers automatically, so the next helper cannot repeat this.
+_FAKED_MAY_BE_REAL = ("torch", "diffusers", "PIL", "PIL.Image", "PIL.ImageDraw")
+_FAKED_NEVER_INSTALLED = ("ai_eyes_mcp", "ai_eyes_mcp.engine", "t2v_metrics")
 
 
 def test_no_fake_modules_leak_past_this_files_tests():
     """Every fake-module test above uses monkeypatch.setitem (auto-reverted per test), never raw
-    sys.modules mutation. [image] may now be installed, so torch/diffusers can be present —
+    sys.modules mutation. [image] may now be installed, so torch/diffusers/PIL can be present —
     they must be the real packages, not a leftover ModuleType stand-in."""
-    for name in ("torch", "diffusers"):
+    for name in _FAKED_MAY_BE_REAL:
         mod = sys.modules.get(name)
         if mod is None:
             continue
         assert getattr(mod, "__file__", None), f"{name} leaked as a fake ModuleType"
-    assert "ai_eyes_mcp" not in sys.modules
-    assert "ai_eyes_mcp.engine" not in sys.modules
-    assert "t2v_metrics" not in sys.modules
+    for name in _FAKED_NEVER_INSTALLED:
+        assert name not in sys.modules
+
+
+def test_the_canary_catches_a_leaked_fake_pil(monkeypatch):
+    """The canary's own coverage, measured rather than assumed: with a fake PIL in sys.modules it
+    must FAIL. Before PIL was added to the watch list this passed happily, which is the whole
+    defect -- a canary that does not sing for one of the three modules its file fakes."""
+    _install_fake_pil(monkeypatch)
+    with pytest.raises(AssertionError, match="PIL"):
+        test_no_fake_modules_leak_past_this_files_tests()
+
+
+def test_the_canary_watches_every_module_this_file_fakes():
+    """Keeps the watch lists in step with the _install_fake_* helpers by construction. The stale
+    tuple was a maintenance gap, so the fix is one that cannot go stale: every module name this
+    file hands to monkeypatch.setitem(sys.modules, ...) must appear in a watch list."""
+    import re
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    faked = set(re.findall(r'setitem\(\s*sys\.modules,\s*"([^"]+)"', source))
+    watched = set(_FAKED_MAY_BE_REAL) | set(_FAKED_NEVER_INSTALLED)
+    assert faked, "the scan found no fake-module installs at all -- the pattern has drifted"
+    assert faked <= watched, f"faked but unwatched: {sorted(faked - watched)}"

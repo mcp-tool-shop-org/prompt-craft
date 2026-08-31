@@ -139,8 +139,9 @@ Two rules that will bite you:
 ## What is true (re-measure before quoting)
 
 - **v1.0.0 shipped** to PyPI + npm 2026-08-18 (tag `v1.0.0`, both registries
-  confirmed; `STABILITY.md` is the promise). Suite last counted **394** (2026-08-31).
-  Re-count before quoting.
+  confirmed; `STABILITY.md` is the promise). Suite last counted **516** (2026-08-31,
+  post health-wave fold). Re-count before quoting -- a count pinned during an active
+  amend wave is stale by construction; this line went 394 -> 516 within one sitting.
 - The gate **checks itself**: the lint and typecheck legs cover `verify.py`, pinned by
   `test_the_gate_checks_the_file_that_defines_the_gate` so they cannot narrow back.
 - The lint rule set is declared, not inherited (`f41d46b`). See above.

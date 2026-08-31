@@ -76,7 +76,7 @@ pcraft demo              # the whole loop end-to-end, no GPU, deterministic stub
 pcraft list              # contract ids in the store
 pcraft validate          # resolve + compile the question DAG, no generate
 pcraft gate <image>      # check an image against a contract
-pcraft recipe            # emit the Cloud Kontext + fist-only Fill graph
+pcraft recipe            # Cloud Kontext + Fill graph — refuses unless identity method=reference
 pcraft replay <record>   # re-read a bound asset's provenance receipt
 ```
 
@@ -139,7 +139,7 @@ better in minor releases; what stops moving is the surface you build against.
 
 | | |
 |---|---|
-| Core | **394 tests passing** (counted 2026-08-18), GPU-free, deterministic. `verify` runs version coherence, lint, typecheck, the suite, the suite again under `-O`, and a package build — then **names what it did not check**. It lints and typechecks itself, pinned by a test so the targets cannot narrow back |
+| Core | **516 tests passing** (counted 2026-08-31), GPU-free, deterministic. `verify` runs version coherence, lint, typecheck, the suite, the suite again under `-O`, and a package build — then **names what it did not check**. It lints and typechecks itself, pinned by a test so the targets cannot narrow back |
 | Predicates | the eleven compound decision points in `core/` are **mutation-tested** — 20 of 21 mutants killed, and [the survivor is named](scripts/mutate_predicates.py) rather than hidden |
 | SDXL conditioning | ControlNet OpenPose, IP-Adapter, LoRA, **InstantID**, and regional inpaint are **wired and covered by fake-torch tests**. InstantID and IP-Adapter cannot share one generate. Two IP-Adapter plates stay on one adapter (all images; scale is the strongest lock). Local `generate()` **ran** on the 5090 (2026-08-18, seed `169405236028824`, kind `controlnet_ip`). The frame is orcish; grip, sigil, and bracer did not land. |
 | Flux encoder | Text-only and **Fill inpaint** are wired (fake-torch). ControlNet pose, IP-Adapter, LoRA, and InstantID stay refused (wrong family). `method=reference` writes the Cloud recipe graph and refuses to pretend Kontext ran locally (`GATE_CLOUD_SUBMIT`). |

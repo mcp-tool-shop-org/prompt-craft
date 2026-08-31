@@ -58,15 +58,29 @@ class Tier0Router:
     for EVERY Tier-0 score, including ones produced by ``PaletteVerifier`` -- a deterministic stdlib
     RGB histogram that declares ``family='palette-hist'``, ``verifier_id='palette.hist.v1'``. So a
     palette atom's evidence line attributed a no-model histogram result to the SigLIP2 neural
-    family. ``last_delegate`` now names whichever sub-verifier actually produced the score, so the
-    receipt can say what ran; the single ``family`` the guard needs is unchanged and the reason it
-    is single is stated here rather than only in a docstring elsewhere.
+    family. The single ``family`` the guard needs is unchanged and the reason it is single is stated
+    here rather than only in a docstring elsewhere.
+
+    F-64b4f422: that fix recorded the delegate on ``last_delegate`` and documented it as existing
+    "so the receipt can say what ran" -- but NOTHING in src/ read it. ``core/gate/harness.py`` stamps
+    ``AtomVerdict.verifier_id`` from ``verifier.verifier_id``, and the only readers of
+    ``last_delegate`` were this module's own tests. Measured end to end, ``palette.hist.v1`` appeared
+    nowhere in the AtomVerdict or the GateTranscript: the attribution defect was verbatim intact
+    behind a field that looked live.
+
+    So ``verifier_id`` is now the answer to "who produced the score I just returned", which is
+    exactly what ``AtomVerdict.verifier_id`` means. The harness reads it immediately after calling
+    ``score()``, so a palette line names the histogram and a screened line names SigLIP2 -- no widen
+    -ing of the core transcript required. ``family`` deliberately does NOT follow: family_guard must
+    keep seeing one Tier-0 family, and the transcript carries no family field for this to contradict.
     """
 
     family = "siglip2"
     tier = 0
-    verifier_id = "tier0.router.v1"
     version = "v1"
+    # What a router that has not scored anything yet answers -- the tier registry and the plugin
+    # smoke test read verifier_id before any image exists.
+    router_id = "tier0.router.v1"
     # The one Tier-0 family family_guard sees. Named on the receipt so "siglip2" on a palette line
     # reads as "the router's guard family", not "SigLIP2 measured this".
     family_is_shared_for_guard = True
@@ -78,6 +92,13 @@ class Tier0Router:
         self._palette = PaletteVerifier()
         self.last_delegate: dict[str, str] | None = None
 
+    @property
+    def verifier_id(self) -> str:
+        """The sub-verifier that produced the most recent score; the router before there is one."""
+        if self.last_delegate is None:
+            return self.router_id
+        return self.last_delegate["verifier_id"]
+
     def _record(self, delegate) -> None:
         self.last_delegate = {
             "verifier_id": delegate.verifier_id,
@@ -87,9 +108,12 @@ class Tier0Router:
 
     def score(self, image_path: str, question: Question) -> float | None:
         if question.check_type.value == "palette":
+            # Recorded BEFORE the call, not after: the harness also reads verifier_id to name who
+            # raised or who was unavailable, and a delegate left over from the previous atom would
+            # put the wrong instrument on that line too.
+            self._record(self._palette)
             score = self._palette.score(image_path, question)
             if score is not None:
-                self._record(self._palette)
                 return score
             # The enum carried no hex colours ('gold heraldry'). palette_verifier's module docstring
             # says those "belong to SigLIP2" -- but routing on check_type ALONE returned None here,
@@ -141,13 +165,99 @@ def load_rgb(path: str | Path) -> list[tuple[int, int, int]]:
     installed Pillow. Only the import statement may be guarded; a decode-time ImportError has to
     propagate so ``PaletteVerifier.score`` classifies it as RUNTIME_VERIFIER_CALL_FAILED with the
     real cause attached.
+
+    F-09db27bc: F-5ca8ecd3's declared-vs-decoded completeness check was added to the stdlib fallback
+    ONLY -- the branch that runs when Pillow is absent. The Pillow branch is the one every [image] /
+    GPU install takes, and Pillow's own truncation guard is measurably not sufficient: a VALID but
+    short zlib stream (a nonconforming encoder that finalises deflate early) decodes without error
+    and Pillow PADS the missing scanlines with BLACK. The verifier then scored those invented pixels
+    -- a ``#000000`` atom measured 1.0 on an image containing no black pixels. Both branches now
+    answer the same question before trusting any decode.
     """
     try:
         from PIL import Image  # type: ignore
     except ImportError:
         return _load_png_filter0(path)
+    _assert_png_not_short(path)
     im = Image.open(path).convert("RGB")
     return list(im.getdata())
+
+
+# IHDR colour type -> samples per pixel. Used only to size a scanline; the Pillow branch reads every
+# real-world PNG, so this cannot be narrowed to the fallback's 8-bit-RGB-only case.
+_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+
+
+def _short_png_error(path: str | Path, width: int, height: int, decoded: int) -> PromptCraftError:
+    """The one wording for "the file declares more image than it carries".
+
+    Both readers raise through here so the asymmetry that was F-09db27bc cannot come back as a
+    difference in phrasing: the same bytes must refuse the same way whether Pillow is installed
+    or not.
+    """
+    return PromptCraftError(
+        "RUNTIME_VERIFIER_CALL_FAILED",
+        f"PNG {path} declares {width}x{height} ({width * height} pixels) but only "
+        f"{decoded} decoded",
+        hint="The file is truncated or its IDAT is short (an interrupted write, a partial "
+        "copy). A palette score over a fraction of the image is not a measurement.",
+    )
+
+
+def _png_complete_rows(data: bytes) -> tuple[int, int, int] | None:
+    """``(width, height, whole scanlines actually present in the IDAT)``, or None if unmeasurable.
+
+    Deliberately lenient: this guards a branch that reads every format Pillow reads, so anything it
+    cannot parse exactly -- a non-PNG, an Adam7 interlace, an unknown colour type, corrupt deflate --
+    returns None and is left to Pillow. The guard may only ever refuse on a POSITIVE measurement
+    that the image is short; a false refusal here would break the shipped path it protects.
+    """
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos = 8
+    width = height = bit = color = None
+    idat = b""
+    while pos + 8 <= len(data):
+        length = struct.unpack(">I", data[pos : pos + 4])[0]
+        typ = data[pos + 4 : pos + 8]
+        chunk = data[pos + 8 : pos + 8 + length]
+        pos += 12 + length
+        if typ == b"IHDR":
+            if len(chunk) < 13:
+                return None
+            width, height, bit, color, compression, filter_method, interlace = struct.unpack(
+                ">IIBBBBB", chunk[:13]
+            )
+            if compression != 0 or filter_method != 0 or interlace != 0:
+                return None  # Adam7 rows are not a flat sequence; do not guess at a count
+        elif typ == b"IDAT":
+            idat += chunk
+        elif typ == b"IEND":
+            break
+    if not width or not height or color not in _PNG_CHANNELS or bit not in (1, 2, 4, 8, 16):
+        return None
+    row_bytes = 1 + (width * bit * _PNG_CHANNELS[color] + 7) // 8
+    try:
+        # decompressobj, not decompress: a truncated deflate stream must yield what it has rather
+        # than raise, because "it has fewer rows than IHDR promised" is exactly the measurement.
+        raw = zlib.decompressobj().decompress(idat)
+    except zlib.error:
+        return None
+    return (width, height, min(height, len(raw) // row_bytes))
+
+
+def _assert_png_not_short(path: str | Path) -> None:
+    """Refuse a PNG whose IDAT carries fewer scanlines than its IHDR declares."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return  # not readable from here; let Pillow raise its own, better-worded error
+    measured = _png_complete_rows(data)
+    if measured is None:
+        return
+    width, height, rows = measured
+    if rows < height:
+        raise _short_png_error(path, width, height, rows * width)
 
 
 def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
@@ -215,11 +325,6 @@ def _load_png_filter0(path: str | Path) -> list[tuple[int, int, int]]:
     # in [0,1] over a fraction of the image and the receipt could not tell the difference -- a
     # silently-wrong verdict in the one verifier that is supposed to be deterministic.
     if len(pixels) != width * height:
-        raise PromptCraftError(
-            "RUNTIME_VERIFIER_CALL_FAILED",
-            f"PNG {path} declares {width}x{height} ({width * height} pixels) but only "
-            f"{len(pixels)} decoded",
-            hint="The file is truncated or its IDAT is short (an interrupted write, a partial "
-            "copy). A palette score over a fraction of the image is not a measurement.",
-        )
+        # F-09db27bc: shared wording with the Pillow branch's guard -- one law, one sentence.
+        raise _short_png_error(path, width, height, len(pixels))
     return pixels

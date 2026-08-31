@@ -534,3 +534,160 @@ def test_sync_rules_wraps_interface_drift_in_the_loaded_script(monkeypatch, tmp_
     assert "Traceback" not in text, f"sync-rules leaked a raw traceback: {text!r}"
     assert "RUNTIME_UNEXPECTED" in text
     assert result.exit_code == 2
+
+
+# --------------------------------------------------------------------------- F-df34f27e
+# Ctrl-C exits 130, and that is DELIBERATE -- not an oversight in the 0/1/2/3/4 table.
+#
+# What the machinery actually does (typer 0.26.7, core.py:197-198): a KeyboardInterrupt
+# raised anywhere inside `self.invoke(ctx)` is caught by typer itself and re-raised as
+# `_click.exceptions.Exit(130)`, never as Abort. `_ExitContractGroup.main` forces
+# `standalone_mode=False` on the inner call, so that Exit hits core.py's outer handler,
+# which returns the int 130 instead of raising -- meaning `super().main(...)` RETURNS
+# 130 with no exception at all. Neither `except _ClickException` nor `except _ClickAbort`
+# ever fires; control falls through to the final `sys.exit(rv)`.
+#
+# 130 is 128 + SIGINT, the universal shell convention for "the operator interrupted this."
+# Remapping it into the 0/1/2/3/4 band would DESTROY information a scripted caller relies
+# on: exit 1 already means "bad user input", and a wrapper that retries on 1 but bails on
+# an interrupt could no longer tell the two apart. So the number is pinned here rather
+# than normalised, and named as a documented exception in STABILITY.md.
+#
+# These two tests are the reason the `except _ClickAbort:` clause STAYS despite being
+# unreachable for Ctrl-C: the second one proves the branch is live for the paths that do
+# raise Abort (typer core.py:194-196 converts a bare EOFError into one, and core.py's
+# `except Abort: if not standalone_mode: raise` hands it straight to us). Deleting the
+# clause as "dead" would turn an Abort into an uncaught RuntimeError subclass -- a raw
+# traceback, exiting 1, which is strictly worse than the banner it prints today.
+
+
+def _scratch_group_app() -> typer.Typer:
+    """A throwaway Typer app built on the REAL, imported ``_ExitContractGroup``.
+
+    The override under test lives in ``main()``, which ``CliRunner`` reaches but cannot
+    drive into an interrupt: no shipped command body raises KeyboardInterrupt or EOFError
+    on demand. A scratch app on the same class exercises the identical code path with a
+    body we control.
+
+    The ``@scratch.callback()`` is load-bearing, not decoration: Typer folds a
+    single-command app into a bare ``Command`` and never consults ``cls=`` at all, so
+    without it this harness silently measures stock Click instead of the override. The
+    ``isinstance`` guard in ``_run_scratch`` is the standing check on that.
+    """
+    from pcraft.cli import _ExitContractGroup
+
+    scratch = typer.Typer(cls=_ExitContractGroup, add_completion=False)
+
+    @scratch.callback()
+    def _scratch_root() -> None:
+        """scratch root"""
+
+    return scratch
+
+
+def _run_scratch(scratch: typer.Typer, argv: list[str]) -> int | str | None:
+    """Invoke the way the installed console script does, and return the exit code.
+
+    ``typer.Typer.__call__`` is ``get_command(self)(*args)`` -> ``BaseCommand.__call__``
+    -> ``self.main(...)`` with ``standalone_mode`` defaulting True at the outer layer.
+    This calls that same ``main`` directly, skipping only ``__call__``'s assignment to
+    ``sys.excepthook`` -- a process-global mutation that has nothing to do with the exit
+    contract and should not leak out of a test.
+    """
+    from pcraft.cli import _ExitContractGroup
+
+    command = typer.main.get_command(scratch)
+    assert isinstance(command, _ExitContractGroup), (
+        f"the scratch app collapsed to {type(command).__name__}, so cls=_ExitContractGroup "
+        "was never consulted and this test would be measuring stock Click"
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        command.main(args=argv, prog_name="pcraft-scratch", standalone_mode=True)
+    return excinfo.value.code
+
+
+def test_an_interrupted_run_exits_130_outside_the_documented_code_table(capsys):
+    """Ctrl-C during a long bind/gate run. 130 is the contract, and it is intentional."""
+    scratch = _scratch_group_app()
+
+    @scratch.command(name="longrun")
+    def _longrun() -> None:
+        """stands in for the bind/gate run the operator interrupts"""
+        raise KeyboardInterrupt
+
+    code = _run_scratch(scratch, ["longrun"])
+    captured = capsys.readouterr()
+    assert code == 130, (
+        f"an interrupted run exited {code!r}, expected 130 (128 + SIGINT). Folding the "
+        "interrupt into the 0/1/2/3/4 band collides with exit 1 (bad user input) and "
+        "leaves a scripted caller no way to tell a typo from a Ctrl-C"
+    )
+    assert "Aborted!" not in captured.err, (
+        "the interrupt path never reaches the Abort branch -- if this banner appears, the "
+        "flow changed and the 130 above is no longer the pass-through this test pins"
+    )
+
+
+def test_the_abort_branch_is_live_for_the_paths_that_really_do_raise_abort(capsys):
+    """Why ``except _ClickAbort:`` is kept even though Ctrl-C bypasses it.
+
+    typer core.py:194-196 converts a bare EOFError raised anywhere inside ``invoke`` into
+    ``Abort()``, and its outer ``except Abort: if not standalone_mode: raise`` hands that
+    straight to ``_ExitContractGroup.main``. Abort subclasses RuntimeError, so nothing
+    else in this module would catch it: remove the clause and this becomes a raw
+    traceback exiting 1 instead of a one-line banner exiting 1.
+    """
+    scratch = _scratch_group_app()
+
+    @scratch.command(name="eof")
+    def _eof() -> None:
+        """stands in for a read that hits a closed stdin"""
+        raise EOFError
+
+    code = _run_scratch(scratch, ["eof"])
+    captured = capsys.readouterr()
+    assert code == 1, f"an aborted run exited {code!r}, expected 1"
+    assert "Aborted!" in captured.err, (
+        "the Abort branch did not fire; if `except _ClickAbort:` were deleted as dead "
+        "code this path would escape as an uncaught RuntimeError subclass"
+    )
+
+
+# --------------------------------------------------------------------------- F-f31c4b10
+# The private-typer import in cli/__init__.py has broken twice, each time at IMPORT, before
+# any command runs: ModuleNotFoundError on <0.26, then an uncaught ImportError on 0.27 from
+# a module that still exists (which `except ModuleNotFoundError` cannot see). Both times the
+# only thing that caught it was CI's ambient mypy leg resolving a non-blessed typer -- an
+# environment property nothing in this repo asserts. afb391c moved Abort to the public
+# `typer.Abort` and measured the identity by hand; these two tests make that measurement a
+# standing assertion instead of a note in a commit message.
+
+
+def test_the_public_abort_name_is_what_the_cli_imports():
+    """The literal claim afb391c measured by hand, now run on every suite."""
+    from pcraft.cli import _ClickAbort
+
+    assert typer.Abort is _ClickAbort, (
+        "cli/__init__.py's _ClickAbort has drifted off the public typer.Abort; on a layout "
+        "where the vendored and public classes differ, the handler would catch a class the "
+        "machinery never raises"
+    )
+
+
+def test_abort_is_a_runtimeerror_not_a_clickexception():
+    """The structural half, and the one that is not a tautology.
+
+    ``_ExitContractGroup``'s own docstring rests on this: it claims typer.Exit/typer.Abort
+    "subclass RuntimeError, not Click's ClickException, so they are a structurally
+    different type and this override can never intercept one." If Abort ever became a
+    ClickException subclass, the `except _ClickException` clause above it would swallow
+    every abort into the INPUT_-class exit-1 path and the Abort branch would go dead for
+    real -- silently, since both branches exit 1.
+    """
+    from pcraft.cli import _ClickAbort, _ClickException
+
+    assert issubclass(_ClickAbort, RuntimeError)
+    assert not issubclass(_ClickAbort, _ClickException), (
+        "Abort became a ClickException subclass; the clause ordering in "
+        "_ExitContractGroup.main is no longer sound"
+    )

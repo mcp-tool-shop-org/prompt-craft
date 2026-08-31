@@ -74,6 +74,54 @@ def test_a_contract_id_may_not_be_the_empty_string():
         Contract(id="", level="faction")
 
 
+# ---------------------------------------------------------------------------
+# F-7409e175 -- the length floor above counts raw characters, so it closed the empty
+# string and nothing else. MEASURED before the fix: Atom(id='   ') satisfied min_length=1
+# with a length of 3 and constructed untouched, as did MustNot(id=' ') and Atom(id='\t\n').
+# An id nobody would call anything but blank still reached the DAG, the receipt, and the
+# refusal messages that quote it back to the author.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blank", ["   ", " ", "\t\n", "\n", "\t"], ids=repr)
+def test_an_atom_id_may_not_be_whitespace_only(blank):
+    with pytest.raises(ValidationError):
+        Atom(id=blank, claim="a ghost", check_type=CheckType.vqa)
+
+
+@pytest.mark.parametrize("blank", ["   ", " ", "\t\n"], ids=repr)
+def test_a_must_not_id_may_not_be_whitespace_only(blank):
+    with pytest.raises(ValidationError):
+        MustNot(id=blank, claim="a ghost")
+
+
+@pytest.mark.parametrize("blank", ["   ", " ", "\t\n"], ids=repr)
+def test_a_contract_id_may_not_be_whitespace_only(blank):
+    with pytest.raises(ValidationError):
+        Contract(id=blank, level="faction")
+
+
+def test_an_id_with_incidental_whitespace_is_kept_exactly_as_authored():
+    """The deliberate scope limit, pinned so nobody "completes" the fix by normalizing.
+
+    Only BLANK is refused. Stripping a stored id would silently merge ids that the DAG index,
+    the duplicate guard, and every dict key in this domain treat as distinct -- ' tabard' and
+    'tabard' are consistently two nodes today, and that consistency is what made this finding
+    narrow rather than a live defect.
+    """
+    atom = Atom(id=" tabard ", claim="a tabard", check_type=CheckType.vqa)
+    assert atom.id == " tabard "
+    contract = Contract(
+        id="faction:x",
+        level="faction",
+        must_have=[
+            Atom(id="tabard", claim="a tabard", check_type=CheckType.vqa),
+            atom,
+        ],
+    )
+    assert [a.id for a in contract.must_have] == ["tabard", " tabard "]
+
+
 def test_the_dag_index_can_never_contain_an_empty_key(sprite_example):
     """The property the three constraints above buy, stated once at the DAG level: because
     no id can be empty, `"" in index` is False for every constructible contract, so the

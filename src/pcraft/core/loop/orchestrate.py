@@ -20,8 +20,18 @@ A TRANSIENT generator error (timeout / rate limit / GPU OOM, i.e. an uncoded exc
 one outside the SYNTH_/CONTRACT_/GATE_/INPUT_/DEP_ prefixes and not RUNTIME_GENERATOR_LOAD_FAILED)
 is auto-retried within the existing best-of-N / repair budget; a SEMANTIC one escalates immediately
 -- never an automatic re-roll (retry_policy.classify_failure). Every failed generate still records
-an Attempt row naming its code, and the exhaustion error quotes and chains the last failure, so a
-permanently broken generator is not reported as a transient exhaustion that names nothing.
+an Attempt row naming its code -- TRANSIENT and SEMANTIC alike -- and the exhaustion error quotes
+and chains the last failure, so a permanently broken generator is not reported as a transient
+exhaustion that names nothing.
+
+CORRECTED IN PLACE (F-521335b9): the sentence above used to end at "naming its code", and that was
+true of the TRANSIENT path only. On the SEMANTIC path ``_safe_generate`` raised, ``run()`` returned
+early with ``attempts`` untouched, and no row was ever appended for a generate() that was actually
+called and actually failed -- so ``pcraft bind`` printed "attempts: 0" for a run in which the
+generator had been invoked once and raised. The two codes that recorded nothing were DEP_ and
+RUNTIME_GENERATOR_LOAD_FAILED, i.e. including DEP_IMAGE_MISSING, the code the fix that widened the
+SEMANTIC bucket was itself measured on. The row is recorded at the raise site now (see
+``_generate_and_record``), which is what makes the sentence true rather than narrower.
 
 The contract is used TWICE here: ``synthesize`` covers its atoms, and ``compile_questions`` gates the
 same atoms — one declarative source, two consumers."""
@@ -75,10 +85,21 @@ class LoopConfig(BaseModel):
     version the table did not have got no error and no effect.
 
     ``run()`` now asserts it. Setting it is a statement about which table you are running, and
-    a table that disagrees is refused (``CONFIG_THRESHOLDS_INVALID``) -- the replay-drift check
-    ``asset_record.replay`` performs after the fact, applied at bind time instead. The default
-    changed from ``"unversioned"`` to ``""`` so that "unset" is falsy and therefore asserts
-    nothing; a sentinel string would have made the hook fire for every caller who never set it.
+    a table that disagrees is refused (``CONFIG_THRESHOLDS_VERSION_MISMATCH``) -- the
+    replay-drift check ``asset_record.replay`` performs after the fact, applied at bind time
+    instead. The default changed from ``"unversioned"`` to ``""`` so that "unset" is falsy and
+    therefore asserts nothing; a sentinel string would have made the hook fire for every caller
+    who never set it.
+
+    REACHABILITY (F-09f30018): this is a LIBRARY-caller guard and cannot fire through any
+    shipped CLI command. Both public entry points -- ``sample.run_mock_loop`` and
+    ``sample.run_live_loop`` -- pass ``table.version`` from the same ``load_workspace()`` call
+    that produced the table, so their claim agrees by construction; ``LoopConfig()`` is
+    constructed nowhere else in ``src/``; and an unset field is falsy, so it asserts nothing.
+    That is intended, not a gap. It is stated because the repo made stating it the norm one
+    file over (``retry_policy.verdict_from_transcript``, F-c1832100): a guard that does not say
+    whether a shipped path reaches it reads as either dead code to delete or a live check to
+    rely on, and a reader cannot tell which.
     """
     records_dir: str = "records"
     base_seed: int = 1000
@@ -100,13 +121,27 @@ class OrchestrationResult(BaseModel):
 
 
 class _GenerationBlockedError(Exception):
-    """Internal control-flow signal only: generator.generate() raised a SEMANTIC error
-    (F-83c3ad00). Raised by ``_safe_generate``, caught in ``run()``, never escapes this module.
+    """Internal control-flow signal only: this run is human-gated and must not be re-rolled
+    (F-83c3ad00). Caught in ``run()``, never escapes this module.
 
-    A SEMANTIC defect is human-gated and must not be absorbed into best-of-N / the repair
-    ladder's automatic reroll. A TRANSIENT error never reaches this class at all — ``_safe_generate``
-    resolves it internally by returning ``None`` so the caller's existing loop naturally retries
-    within its existing budget, no extra budget granted."""
+    Three sites raise it, which matters because only one of them owes an Attempt row:
+    ``_safe_generate`` on a SEMANTIC generate() failure (a row IS owed -- generate() was called
+    and failed; see ``_generate_and_record``), ``_gate`` when preflight cannot read the image
+    that generate() successfully produced (no row: nothing about the generate failed), and
+    ``_best_of_n`` on RUNTIME_GENERATE_EXHAUSTED after every attempt has already recorded its
+    own row (no row: appending here would report N+1 attempts for N generates).
+
+    A SEMANTIC defect must not be absorbed into best-of-N / the repair ladder's automatic
+    reroll. A TRANSIENT error never reaches this class at all -- ``_safe_generate`` returns
+    ``(None, err)`` so the caller's existing loop naturally retries within its existing budget,
+    no extra budget granted, and hands back the classified error so the caller can record it.
+
+    CORRECTED IN PLACE (F-521335b9). This docstring said ``_safe_generate`` "resolves it
+    internally by returning ``None``" -- a return shape that stopped existing when F-9ee95e14
+    changed it to the ``(None, err)`` tuple, and the whole point of that change was that the
+    error stopped being discarded. It also described SEMANTIC as covering only "schema-invalid
+    output" after the same commit moved DEP_ and RUNTIME_GENERATOR_LOAD_FAILED into the bucket
+    (retry_policy._SEMANTIC_PREFIXES / _SEMANTIC_CODES)."""
 
     def __init__(self, err: PromptCraftError) -> None:
         super().__init__(str(err))
@@ -128,10 +163,18 @@ def run(
     # --- CONFIG: the caller's threshold-version claim, if it made one, must be the table it got.
     # F-badd2eba: this field was inert. Asserting it here refuses a run whose table is not the one
     # the caller believes it is running, BEFORE any pixels are generated -- the same drift check
-    # `asset_record.replay` applies to a finished receipt, moved to the door.
+    # `asset_record.replay` applies to a finished receipt, moved to the door. Reachable only from
+    # a library caller, never from the CLI -- see LoopConfig.thresholds_version's REACHABILITY
+    # note for why, and why saying so is required here.
+    #
+    # F-09f30018: this used to raise CONFIG_THRESHOLDS_INVALID, which thresholds.load_thresholds
+    # already raises for a structurally malformed band table. One covered, machine-parseable code
+    # carrying two unrelated meanings is exactly what STABILITY.md's "parse the code, not the
+    # prose" contract forbids -- and DEFAULT_HINTS described only the other one, so a script
+    # could not tell them apart and a human got the wrong advice.
     if config.thresholds_version and config.thresholds_version != thresholds.version:
         raise PromptCraftError(
-            "CONFIG_THRESHOLDS_INVALID",
+            "CONFIG_THRESHOLDS_VERSION_MISMATCH",
             f"config.thresholds_version is {config.thresholds_version!r} but the threshold table "
             f"passed to run() is {thresholds.version!r}; the receipt would be stamped "
             f"{thresholds.version!r}, so the same scores would land in a different zone from the "
@@ -320,6 +363,32 @@ def _safe_generate(
         return None, wrapped
 
 
+def _generate_and_record(
+    generator: Generator, prompt: str, negative_prompt: str, conditioning: dict, seed: int,
+    attempts: list[Attempt], repair=None,
+) -> tuple[GenerationResult | None, PromptCraftError | None]:
+    """``_safe_generate`` plus the Attempt row a failed generate owes the receipt (F-521335b9).
+
+    Both failure classes record here, which is what makes orchestrate's module docstring true:
+    a TRANSIENT failure returns ``(None, err)`` and the caller retries within its own budget; a
+    SEMANTIC one raises past this function to ``run()``, but the row is appended on the way out.
+
+    Recording in ``run()``'s ``except _GenerationBlockedError`` handler instead would be wrong
+    in both directions: that handler is also reached by the preflight failure (where generate()
+    SUCCEEDED, so "generate failed" would be a false row) and by RUNTIME_GENERATE_EXHAUSTED
+    (where N rows already exist, so it would double-count the last one). The fact "generate()
+    was called and failed" is only true here, so this is where it is written down.
+    """
+    try:
+        gen, err = _safe_generate(generator, prompt, negative_prompt, conditioning, seed)
+    except _GenerationBlockedError as blocked:
+        attempts.append(_failed_generate_attempt(attempts, seed, blocked.err, repair=repair))
+        raise
+    if gen is None:
+        attempts.append(_failed_generate_attempt(attempts, seed, err, repair=repair))
+    return gen, err
+
+
 def _failed_generate_attempt(attempts, seed: int, err: PromptCraftError | None, repair=None) -> Attempt:
     """One Attempt row for a generate that never produced an image (F-9ee95e14).
 
@@ -360,13 +429,16 @@ def _best_of_n(resolved, synth, generator, verifiers, thresholds, dag, condition
     n = max(1, budget.best_of_n)
     for i in range(n):
         seed = config.base_seed + i
-        gen, gen_err = _safe_generate(generator, synth.prompt, synth.negative_prompt, conditioning, seed)
+        gen, gen_err = _generate_and_record(
+            generator, synth.prompt, synth.negative_prompt, conditioning, seed, attempts
+        )
         if gen is None:
             # TRANSIENT generate() failure -- auto-retry with the next seed, same budget. The
             # attempt is RECORDED (F-9ee95e14): it happened, it burned a seed, and dropping it
-            # made retry_count and the receipt under-report the runs that failed.
+            # made retry_count and the receipt under-report the runs that failed. A SEMANTIC
+            # failure never arrives here at all; it raised out of the call above, having
+            # recorded its own row on the way (F-521335b9).
             last_err = gen_err
-            attempts.append(_failed_generate_attempt(attempts, seed, gen_err))
             continue
         transcript = _gate(gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=transcript.overall,
@@ -453,15 +525,16 @@ def _repair_ladder(
             }
             budget.inpaints -= 1
 
-        new_gen, gen_err = _safe_generate(
-            generator, current_synth.prompt, current_synth.negative_prompt, cond, seed
+        new_gen, _gen_err = _generate_and_record(
+            generator, current_synth.prompt, current_synth.negative_prompt, cond, seed,
+            attempts, repair=repair,
         )
         if new_gen is None:
             # TRANSIENT generate() failure on this repair attempt -- repairs_left and the action's
             # own sub-budget above are already charged; try the next one. F-9ee95e14: the row is
             # recorded, carrying the repair that was attempted, so the receipt shows a repair that
-            # was paid for and never ran instead of showing nothing.
-            attempts.append(_failed_generate_attempt(attempts, seed, gen_err, repair=repair))
+            # was paid for and never ran instead of showing nothing. F-521335b9: a SEMANTIC
+            # failure on a repair records the same row, with the same repair, before it raises.
             continue
         new_t = _gate(new_gen, verifiers, thresholds, dag, generator.family)
         attempts.append(Attempt(attempt=len(attempts) + 1, seed=seed, overall=new_t.overall,

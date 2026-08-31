@@ -4,8 +4,10 @@ Routing is cheapest-decides-first: ``siglip2``/``palette`` atoms hit the Tier-0 
 hit Tier-1 (VQAScore); a Tier-1 UNCERTAIN/FAIL escalates to Tier-2 (DSG) for per-atom localization.
 Evaluation is parent-first: a non-passing parent forces its children to N/A (a NO parent forces NO on
 descendants), and a ``depends_on`` naming no atom in this contract is SKIPPED, not treated as an atom
-with no parent. A required atom that cannot be confirmed (SKIPPED / NA / UNCERTAIN) never rolls up to
-a silent PASS -- it routes the whole asset to the UNCERTAIN (human) band."""
+with no parent. A ``depends_on`` cycle has no parent-first order at all, so it is a coded refusal
+(``CONTRACT_CYCLIC_DEPENDS_ON``, exit 1) rather than a gate result. A required atom that cannot be
+confirmed (SKIPPED / NA / UNCERTAIN) never rolls up to a silent PASS -- it routes the whole asset to
+the UNCERTAIN (human) band."""
 
 from __future__ import annotations
 
@@ -135,7 +137,38 @@ def evaluate(
 
     verdicts: dict[str, AtomVerdict] = {}
 
-    for q in dag.topological():
+    # --- The DAG really is acyclic, or this is a refusal and not a gate result (F-2b317b56).
+    # depends_on referential integrity used to be closed in ONE direction: the loader refuses a
+    # parent that does not exist and the branch below fails closed with SKIPPED, but nothing on
+    # this path ever asked whether the surviving edges are ACYCLIC. The acyclicity check lives
+    # in QuestionDAG.topological() as a bare ``raise ValueError``, an exception from outside the
+    # PromptCraftError hierarchy, and this call site was unguarded -- in deliberate contrast to
+    # ``_safe_score`` below, which is careful to classify every exception a verifier can throw.
+    # MEASURED before the fix, on a contract with tabard.depends_on='sigil' and
+    # sigil.depends_on='tabard': ``pcraft bind --mock`` and ``pcraft gate <image>`` both died
+    # with error[RUNTIME_UNEXPECTED] at exit 2 -- the backstop code -- on what is a plain
+    # contract-authoring typo that the namespace table in errors.py puts at exit 1 with a
+    # CONTRACT_ code. Same shape as F-45c39f7d (raw ValidationError) and F-84788251 (raw
+    # KeyError), landing on the field this wave's own depends_on fix was about.
+    #
+    # REACHABILITY: this is the gate's own net. A load-time refusal belongs at the loader's
+    # door and does not remove the need for this one -- a caller who constructs a QuestionDAG
+    # directly rather than resolving a contract (the regression tests do exactly that) reaches
+    # no loader at all, and a cyclic DAG must be an ANSWER here, never a bare ValueError and
+    # never an unbounded walk.
+    try:
+        parent_first = dag.topological()
+    except PromptCraftError:
+        raise  # already coded (e.g. refused at the loader's door); do not re-wrap
+    except (ValueError, RecursionError) as err:
+        raise PromptCraftError(
+            "CONTRACT_CYCLIC_DEPENDS_ON",
+            f"contract {dag.contract_id!r} has a depends_on cycle, so no parent-first "
+            f"evaluation order exists: {err}",
+            cause=err,
+        ) from err
+
+    for q in parent_first:
         # Parent gating: a non-passing parent forces this atom to N/A.
         if q.depends_on:
             # CORRECTED IN PLACE (F-19f97de2). This branch read
@@ -151,6 +184,14 @@ def evaluate(
             # (bind to canon), with a clean tier census in both runs -- so the ANDON watchdog
             # never saw it. An unresolvable parent is now an explicit outcome. SKIPPED already
             # never rolls up to PASS, so this closes the hole without inventing a new zone.
+            #
+            # REACHABILITY (F-09f30018): this branch is defence in depth, not a live check, and
+            # says so for the same reason retry_policy.verdict_from_transcript and
+            # exit_contract's census branch now do -- a guard that does not state its status
+            # reads as either dead code to delete or a live check to rely on, and a maintainer
+            # cannot tell which. loader._reject_unknown_depends_on refuses a dangling parent at
+            # resolve() time, so no shipped command reaches here; a caller who constructs a
+            # QuestionDAG himself still can, and this is his net.
             parent = verdicts.get(q.depends_on)
             if parent is None:
                 verdicts[q.atom_id] = _skipped(

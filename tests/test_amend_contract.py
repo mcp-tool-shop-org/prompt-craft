@@ -751,6 +751,97 @@ def test_a_promptcrafterror_raised_inside_a_validator_still_passes_through(tmp_p
 
 
 # ---------------------------------------------------------------------------
+# F-2b317b56 -- `pcraft validate` must REFUSE a depends_on cycle, not report ok
+#
+# The wave-2 fix (F-19f97de2) closed the DANGLING edge at load time. A CYCLE was the sibling
+# case nobody refused. MEASURED before this fix, through this exact CLI path: a 2-cycle
+# contract printed "ok  faction:cyc" and exited 0 -- because `validate` compiles the question
+# DAG but never WALKS it -- and the defect surfaced only later, in bind/gate, as a bare
+# ValueError out of QuestionDAG.topological(). "ok, exit 0" for a contract that cannot be
+# gated is the loudest possible version of this system's one recurring failure shape: a
+# fail-closed guarantee that is fail-OPEN at a specific seam.
+# ---------------------------------------------------------------------------
+
+
+def _cyclic_payload(contract_id: str = "faction:cyc") -> dict:
+    return {
+        "$schema": "prompt-craft/contract.v1",
+        "id": contract_id,
+        "level": "faction",
+        "must_have": [
+            {"id": "a", "claim": "an a", "check_type": "vqa", "depends_on": "b"},
+            {"id": "b", "claim": "a b", "check_type": "vqa", "depends_on": "a"},
+        ],
+    }
+
+
+def test_validate_refuses_a_cyclic_contract_instead_of_reporting_ok(tmp_path):
+    _write_contract(tmp_path, "cyc.contract.json", _cyclic_payload())
+    result = runner.invoke(
+        app, ["validate", "--contract", "faction:cyc", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "CONTRACT_CYCLIC_DEPENDS_ON" in text
+    assert "ok  faction:cyc" not in text
+    assert "RUNTIME_UNEXPECTED" not in text  # a named refusal, not the backstop
+
+
+def test_validate_refuses_a_self_depending_atom(tmp_path):
+    _write_contract(
+        tmp_path,
+        "self.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:self",
+            "level": "faction",
+            "must_have": [
+                {"id": "scar", "claim": "a scar", "check_type": "vqa", "depends_on": "scar"}
+            ],
+        },
+    )
+    result = runner.invoke(
+        app, ["validate", "--contract", "faction:self", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "CONTRACT_CYCLIC_DEPENDS_ON" in text
+
+
+def test_validate_still_reports_ok_for_an_intact_depends_on_chain(tmp_path):
+    """The collateral guard: the shipped contracts use depends_on, and a chain is not a loop."""
+    _write_contract(
+        tmp_path,
+        "chain.contract.json",
+        {
+            "$schema": "prompt-craft/contract.v1",
+            "id": "faction:chain",
+            "level": "faction",
+            "must_have": [
+                {"id": "face", "claim": "a face", "check_type": "vqa"},
+                {"id": "scar", "claim": "a scar", "check_type": "vqa", "depends_on": "face"},
+                {"id": "stitch", "claim": "a stitch", "check_type": "vqa", "depends_on": "scar"},
+            ],
+        },
+    )
+    result = runner.invoke(
+        app, ["validate", "--contract", "faction:chain", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert "ok  faction:chain" in text
+
+
+def test_the_cycle_refusal_renders_on_a_cp437_console(tmp_path):
+    """Same discipline as every other refusal in this domain: the new message and hint must
+    survive the console that made F-fd21bd37 a crash rather than a diagnosis."""
+    _write_contract(tmp_path, "cyc.contract.json", _cyclic_payload())
+    with pytest.raises(PromptCraftError) as exc:
+        ContractStore([tmp_path]).resolve("faction:cyc")
+    exc.value.to_safe_text().encode("cp437", errors="strict")
+
+
+# ---------------------------------------------------------------------------
 # F-84788251 -- an unrankable severity fails loud-and-STRUCTURED, not raw KeyError
 # ---------------------------------------------------------------------------
 
@@ -847,24 +938,57 @@ def test_an_unrankable_must_not_severity_is_also_structured():
 
 _CONSOLE_ENCODING = "cp437"
 
+# [!] CORRECTED IN PLACE (F-de08ba2e). The three package globs read `core/contract/*.py`,
+# `core/synth/*.py`, `core/optimize/*.py` -- a single `*`, which does not cross a `/`. This
+# domain's actual ownership globs are the RECURSIVE `core/contract/**` etc., so the fixture's
+# reach was pinned to today's incidentally-flat directory layout rather than to what the
+# domain claims. MEASURED: with a file written to a new core/synth/<subdir>/, `core/synth/*.py`
+# did not find it while `core/synth/**/*.py` did -- so the first subdirectory added under any
+# of the three packages would make every string in every file under it permanently invisible
+# to all three sweeps below, which stay GREEN while checking strictly less than they claim.
+# Not hypothetical for this domain: the deferred F-f7bce385 names an Ollama-Cloud / local-8B
+# backend as the intended integration point for core/synth's predictor seam, which is a named
+# place for a new core/synth submodule to land. `**` still matches depth-zero files, so
+# nothing that was covered stops being covered.
 _OWNED_SOURCE_GLOBS = (
-    "core/contract/*.py",
-    "core/synth/*.py",
-    "core/optimize/*.py",
+    "core/contract/**/*.py",
+    "core/synth/**/*.py",
+    "core/optimize/**/*.py",
     "core/plugin.py",
     "core/__init__.py",
 )
 
 
+def _sources_under(root: Path) -> list[Path]:
+    """Every owned source file under one package root, by the globs above.
+
+    Non-emptiness is asserted PER GLOB, not only on the combined list: a rename that orphans
+    one of the three packages would otherwise be masked by the other two still matching, and
+    the sweeps would go quietly narrow instead of red.
+    """
+    found: list[Path] = []
+    for pattern in _OWNED_SOURCE_GLOBS:
+        matched = sorted(root.glob(pattern))
+        assert matched, f"owned-source glob {pattern!r} matched nothing under {root}"
+        found.extend(matched)
+    return found
+
+
 def _owned_sources():
     import pcraft
 
-    root = Path(pcraft.__file__).parent
-    found: list[Path] = []
-    for pattern in _OWNED_SOURCE_GLOBS:
-        found.extend(sorted(root.glob(pattern)))
-    assert found, "owned-source globs matched nothing; the fixture is broken, not the code"
-    return found
+    return _sources_under(Path(pcraft.__file__).parent)
+
+
+def _non_ascii_offenders(path: Path, *, label: str | None = None) -> list[str]:
+    """(file:line: codepoints) for every line carrying a character above U+007F."""
+    offenders: list[str] = []
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        bad = {c for c in line if ord(c) > 127}
+        if bad:
+            codepoints = ", ".join(sorted(f"U+{ord(c):04X}" for c in bad))
+            offenders.append(f"{label or path.name}:{lineno}: {codepoints}")
+    return offenders
 
 
 def _string_constants_under(node) -> list[str]:
@@ -958,9 +1082,40 @@ def test_no_owned_source_file_carries_a_non_ascii_character():
     """
     offenders = []
     for path in _owned_sources():
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            bad = {c for c in line if ord(c) > 127}
-            if bad:
-                codepoints = ", ".join(sorted(f"U+{ord(c):04X}" for c in bad))
-                offenders.append(f"{path.name}:{lineno}: {codepoints}")
+        offenders.extend(_non_ascii_offenders(path))
     assert not offenders, "non-ASCII in owned source:\n" + "\n".join(offenders)
+
+
+def test_the_sweep_reaches_a_file_in_a_new_subpackage(tmp_path):
+    """The fixture's own self-check, on a synthetic tree (F-de08ba2e).
+
+    This is the finding's exact measured gap, both directions in one test: a genuine em dash
+    written into a NEW subdirectory under core/synth/ must be found by the shipped globs, and
+    must NOT be found by the non-recursive form they replaced. Asserting the miss as well as
+    the hit is what makes this a proof rather than a restatement -- without it, the test would
+    pass just as happily against the old patterns.
+    """
+    for pkg in ("contract", "synth", "optimize"):
+        (tmp_path / "core" / pkg).mkdir(parents=True)
+        (tmp_path / "core" / pkg / "flat.py").write_text("FLAT = 'ascii'\n", encoding="utf-8")
+    (tmp_path / "core" / "plugin.py").write_text("PLUGIN = 1\n", encoding="utf-8")
+    (tmp_path / "core" / "__init__.py").write_text("", encoding="utf-8")
+
+    nested = tmp_path / "core" / "synth" / "backend" / "ollama.py"
+    nested.parent.mkdir()
+    # chr() keeps THIS file ASCII while the file it writes carries a real U+2014 -- the
+    # em dash whose print on a cp437 console is the crash this whole section exists to stop.
+    em_dash = chr(0x2014)
+    nested.write_text(
+        f'HINT = "install the backend {em_dash} then retry"\n', encoding="utf-8"
+    )
+
+    found = _sources_under(tmp_path)
+    assert nested in found, "the shipped globs do not reach a new core/synth subpackage"
+
+    old_patterns = ("core/contract/*.py", "core/synth/*.py", "core/optimize/*.py")
+    missed = [p for pat in old_patterns for p in tmp_path.glob(pat)]
+    assert nested not in missed, "fixture is not measuring the gap it claims to close"
+
+    # and the reach is worth having: the sweep's own detector flags what lives down there.
+    assert _non_ascii_offenders(nested, label="ollama.py") == ["ollama.py:1: U+2014"]

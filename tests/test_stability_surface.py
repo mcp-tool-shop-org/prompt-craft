@@ -111,6 +111,40 @@ def test_the_whole_rendered_error_survives_cp437():
         rendered.encode("cp437")  # raises UnicodeEncodeError if a console could not print it
 
 
+def test_the_module_docstring_exit_tables_agree_with_the_real_maps():
+    """F-a2de5ab2: STABILITY.md was updated for the IO_RECORD_SCHEMA_UNSUPPORTED -> 1 override
+    and errors.py was not, so the front-door table in the file that DEFINES the mapping still
+    read "IO_ ... -> exit 2", with the correction living only in a comment forty lines below.
+    That is the same in-source-vs-front-door drift this repo names commits after -- and the risk
+    is a maintainer reading either table and concluding the wrong thing.
+
+    In the same spirit as test_stability_surface_names_resolve.py, this parses the DOCUMENT
+    (here, the module docstring) rather than restating it: hard-coding the expected rows would
+    let the two drift apart in exactly the way the check exists to prevent. A prefix row ends
+    with ``_``; a per-code override does not.
+    """
+    import re
+
+    import pcraft.errors as errors_module
+
+    rows = re.findall(
+        r"^\s{4}([A-Z][A-Z0-9_]*)\s+\S.*?->\s*exit\s+(\d)\s*$",
+        errors_module.__doc__ or "",
+        re.MULTILINE,
+    )
+    assert rows, "parsed no exit rows out of the module docstring; the parser has drifted"
+    documented_prefixes = {name: int(code) for name, code in rows if name.endswith("_")}
+    documented_codes = {name: int(code) for name, code in rows if not name.endswith("_")}
+
+    assert documented_codes == errors_module._EXIT_BY_CODE, (
+        "the 'Per-code overrides' block is the only override list a reader of this file will "
+        "find; an override missing from it is a front door that lies"
+    )
+    assert documented_prefixes == errors_module._EXIT_BY_PREFIX, (
+        "the namespace table has to name every prefix the mapping actually has"
+    )
+
+
 def test_a_genuinely_malformed_receipt_still_reports_as_invalid(tmp_path):
     """The other side of the same fence: adding the version branch must not turn real
     corruption into a version complaint."""

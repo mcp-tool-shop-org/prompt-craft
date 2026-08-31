@@ -376,7 +376,7 @@ def test_a_thresholds_version_that_disagrees_with_the_table_is_refused(tmp_path)
             LoopConfig(thresholds_version="my.table.v2", records_dir=str(tmp_path)),
             generator=gen,
         )
-    assert exc.value.code == "CONFIG_THRESHOLDS_INVALID"
+    assert exc.value.code == "CONFIG_THRESHOLDS_VERSION_MISMATCH"
     assert "my.table.v2" in str(exc.value)
     assert thresholds.version in str(exc.value)
     assert gen.calls == 0, "the refusal must land before any pixels are generated"
@@ -401,6 +401,68 @@ def test_an_unset_thresholds_version_asserts_nothing(tmp_path):
     result = _run_with_config(tmp_path, LoopConfig(records_dir=str(tmp_path)))
     assert result.decision == "bound"
     assert LoopConfig().thresholds_version == "", "unset must be falsy, or the hook fires by default"
+
+
+# --------------------------------------------------------------------------- F-09f30018
+
+
+def test_the_version_disagreement_has_a_code_of_its_own():
+    """F-09f30018(2): the refusal reused CONFIG_THRESHOLDS_INVALID, which
+    thresholds.load_thresholds already raises for a structurally malformed band table. One
+    covered, machine-parseable code then carried two unrelated meanings -- "your table is
+    broken" and "your table is fine but it is not the one you named" -- and DEFAULT_HINTS
+    described only the first, so only the inline hint disambiguated, and only for a human.
+    STABILITY.md tells callers to parse the code, not the prose."""
+    from pcraft.errors import DEFAULT_HINTS, exit_code_for
+
+    assert exit_code_for("CONFIG_THRESHOLDS_VERSION_MISMATCH") == 1, "a CONFIG_ code is user error"
+    hint = DEFAULT_HINTS.get("CONFIG_THRESHOLDS_VERSION_MISMATCH", "")
+    assert hint, "a distinct code with no distinct guidance is half a refusal"
+    assert hint != DEFAULT_HINTS["CONFIG_THRESHOLDS_INVALID"], (
+        "two codes sharing one hint is the merge this split exists to undo"
+    )
+    assert "band" not in hint.lower(), (
+        "this failure is not about band shape; that is CONFIG_THRESHOLDS_INVALID's job"
+    )
+
+
+def test_a_structurally_malformed_band_table_keeps_the_original_code(tmp_path):
+    """The other side of the same fence: splitting the version-drift meaning out must not
+    reclassify the failure CONFIG_THRESHOLDS_INVALID was named for."""
+    import json
+
+    from pcraft.core.gate.thresholds import load_thresholds
+
+    path = tmp_path / "bad.calibration.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "bands": {"vqa": {"low": 0.9, "high": 0.1}},  # high < low: the real invariant
+                "default": {"low": 0.1, "high": 0.9},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(PromptCraftError) as exc:
+        load_thresholds(path)
+    assert exc.value.code == "CONFIG_THRESHOLDS_INVALID"
+
+
+def test_the_thresholds_version_guard_says_whether_a_shipped_path_reaches_it():
+    """F-09f30018(1): the guard cannot fire through any CLI command. Both public entry points
+    (sample.run_mock_loop / run_live_loop) pass ``table.version`` from the same load_workspace()
+    call that produced the table, LoopConfig() is constructed nowhere else in src/, and an unset
+    field is falsy so it asserts nothing. That is fine and probably intended -- it is a
+    library-caller guard -- but it was not stated, and the same wave made stating it the norm
+    one file over (retry_policy.verdict_from_transcript, F-c1832100)."""
+    import inspect
+
+    src = inspect.getsource(LoopConfig)
+    assert "library" in src.lower(), "say who can reach this guard, like the sibling guards do"
+    assert "run_mock_loop" in src or "entry point" in src, (
+        "name why the CLI cannot reach it: both entry points derive the claim from the table"
+    )
 
 
 # --------------------------------------------------------------------------- F-9ee95e14
@@ -542,3 +604,162 @@ def test_the_census_gate_does_not_advertise_a_retracted_mechanism():
     assert "GATE-002" not in src, "GATE-002 resolves nowhere in this repo; drop it or define it"
     # and the gate it justifies is still wired -- the correction is to the prose, not the check
     assert "census" in src
+
+
+# --------------------------------------------------------------------------- F-521335b9
+#
+# The F-9ee95e14 rework's two halves contradicted each other, on the exact error the finding
+# was measured against. orchestrate.py's module docstring asserted "Every failed generate still
+# records an Attempt row naming its code". That held on the TRANSIENT path only: _best_of_n and
+# _repair_ladder call _failed_generate_attempt, but on the SEMANTIC path _safe_generate raised
+# _GenerationBlockedError, run() caught it and returned with `attempts` untouched. The same
+# commit moved DEP_ and RUNTIME_GENERATOR_LOAD_FAILED INTO the SEMANTIC bucket, so the two
+# codes that recorded nothing included DEP_IMAGE_MISSING -- the code F-9ee95e14 was measured on.
+#
+# MEASURED before the fix: DEP_IMAGE_MISSING -> decision=escalated, attempts=0; a TimeoutError
+# -> attempts=4. So `pcraft bind` printed "attempts: 0" for a run in which generate() was
+# invoked and failed. The row is what makes that count honest.
+
+
+def test_a_semantic_generate_failure_still_records_its_attempt_row(tmp_path):
+    """The claim in src/ becomes true, rather than the claim being narrowed to fit.
+
+    A SEMANTIC failure still escalates on the FIRST raise -- that half of F-9ee95e14 is not
+    being undone. What changes is that the generate which was called and failed leaves a row
+    behind, exactly like its transient sibling.
+    """
+    gen = _AlwaysRaisesGenerator(lambda: PromptCraftError("DEP_IMAGE_MISSING", "torch is not installed"))
+    result = _run(tmp_path, generator=gen)
+    assert result.decision == "escalated"
+    assert gen.calls == 1, "still no re-roll: a missing dependency is not a seed problem"
+    assert len(result.attempts) == 1, "generate() was called and failed; that is one attempt"
+    row = result.attempts[0]
+    assert row.attempt == 1
+    assert row.seed == 1000, "the row must carry the seed the failed generate actually burned"
+    assert "DEP_IMAGE_MISSING" in row.note, "the row names the real code, like the transient rows"
+    assert row.overall is Zone.UNAVAILABLE, "nothing was gated"
+    assert row.verdict is Verdict.AMEND, "a failed generate is never an ADVANCE"
+
+
+def test_a_semantic_generator_load_failure_records_its_row_too(tmp_path):
+    """The other code F-9ee95e14 moved into the SEMANTIC bucket. Same shape, different name --
+    pinned separately so a fix that special-cases DEP_ does not read as closing the class."""
+    gen = _AlwaysRaisesGenerator(
+        lambda: PromptCraftError("RUNTIME_GENERATOR_LOAD_FAILED", "checkpoint missing")
+    )
+    result = _run(tmp_path, generator=gen)
+    assert len(result.attempts) == 1
+    assert "RUNTIME_GENERATOR_LOAD_FAILED" in result.attempts[0].note
+
+
+def test_a_semantic_failure_during_a_repair_records_the_repair_it_was_paying_for(tmp_path):
+    """The ladder half. A SEMANTIC failure on a repair attempt must record the repair whose
+    budget it just spent -- the same reasoning the transient ladder row already carries, so the
+    receipt shows a repair that was paid for and never ran rather than showing nothing.
+
+    Driven through _repair_ladder directly: run() converts the raised error into an
+    OrchestrationResult, and the rows are appended to the caller's list, which is the object
+    that has to carry them.
+    """
+    from pcraft.core.contract.compile_questions import compile_questions
+    from pcraft.core.loop.retry_policy import RetryBudget
+
+    _store, resolved, thresholds, compiled = load_sprite_example()
+    synth_result = TemplateSynthesizer(compiled).synthesize(resolved, "")
+    dag = compile_questions(resolved)
+    verifiers = passing_verifiers(scores={"face": 0.05})
+    ok_gen = StubGenerator(out_dir=tmp_path / "_stub_images")
+    first = ok_gen.generate(synth_result.prompt, synth_result.negative_prompt, {}, 1000)
+    transcript = orchestrate._gate(first, verifiers, thresholds, dag, ok_gen.family)
+    assert transcript.overall is not Zone.PASS, "the ladder must actually enter its loop"
+
+    blocked = _AlwaysRaisesGenerator(
+        lambda: PromptCraftError("DEP_IMAGE_MISSING", "torch is not installed")
+    )
+    attempts: list = []
+    with pytest.raises(orchestrate._GenerationBlockedError):
+        orchestrate._repair_ladder(
+            resolved, synth_result, TemplateSynthesizer(compiled), blocked, verifiers,
+            thresholds, dag, {}, attempts, RetryBudget(), (first, transcript),
+            LoopConfig(records_dir=str(tmp_path)),
+        )
+    assert len(attempts) == 1
+    assert attempts[0].repair is not None, "the repair the budget paid for has to be named"
+    assert "DEP_IMAGE_MISSING" in attempts[0].note
+
+
+def test_the_exhaustion_path_does_not_double_count_the_last_attempt(tmp_path):
+    """The collateral guard the naive fix fails. _GenerationBlockedError reaches run() from
+    THREE raise sites, and only one of them owes a row: _safe_generate's SEMANTIC branch.
+    _best_of_n's RUNTIME_GENERATE_EXHAUSTED is raised after N rows are already recorded, so
+    appending in run()'s handler would report five attempts for four generates."""
+    gen = _AlwaysRaisesGenerator(lambda: PromptCraftError("RUNTIME_TIMEOUT", "generator timed out"))
+    result = _run(tmp_path, generator=gen)
+    assert gen.calls == 4
+    assert len(result.attempts) == 4, "one row per generate, not one extra for the exhaustion"
+    assert [a.attempt for a in result.attempts] == [1, 2, 3, 4]
+
+
+def test_a_gate_that_cannot_read_the_image_records_no_generate_failure(tmp_path):
+    """The other raise site that must NOT get a row. preflight_image failing means generate()
+    SUCCEEDED and the gate could not see its output -- "generate failed [IO_GATE_INPUT]" would
+    be a false row, which is the same class of defect as the missing one."""
+
+    class _VanishingGenerator:
+        generator_id = "test.vanishing.v0"
+        family = "stable-diffusion"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, negative_prompt, conditioning, seed):
+            from pcraft.core.loop.generator_iface import GenerationResult
+
+            self.calls += 1
+            return GenerationResult(
+                image_path=str(tmp_path / "never-written.png"),
+                seed=seed,
+                sampler="ddim-stub-30",
+                generator_id=self.generator_id,
+                generator_family=self.family,
+                conditioning=conditioning,
+            )
+
+    gen = _VanishingGenerator()
+    result = _run(tmp_path, generator=gen)
+    assert result.decision == "escalated"
+    assert gen.calls == 1, "an unreadable image is not a seed problem either"
+    assert "IO_GATE_INPUT" in result.reason
+    assert result.attempts == [], "generate() succeeded; there is no failed generate to record"
+
+
+def test_the_module_docstring_claim_about_attempt_rows_holds_on_both_paths():
+    """The finding is a false claim in src/ -- the defect class this package exists to catch,
+    corrected one file over in retry_policy.py by the same wave. Either the behaviour matches
+    the sentence or the sentence matches the behaviour; this pins that they agree."""
+    module_doc = orchestrate.__doc__ or ""
+    assert "Every failed generate" in module_doc, "the claim is the thing under test; do not delete it"
+    assert "TRANSIENT and SEMANTIC alike" in module_doc, (
+        "the docstring has to say the claim covers BOTH classes, or it is true of one path and "
+        "asserted of the loop -- which is what F-521335b9 measured"
+    )
+
+
+def test_the_generation_blocked_docstring_describes_the_return_shape_it_actually_has():
+    """Two smaller staleness items the same F-9ee95e14 edit introduced in this file.
+
+    (1) _GenerationBlockedError's docstring still said _safe_generate "resolves it internally
+    by returning ``None``" after the return type became a ``(None, err)`` tuple -- the whole
+    point of that fix was that the error stopped being discarded. (2) It still described
+    SEMANTIC as covering only "schema-invalid output" after DEP_ and the generator load failure
+    were added to the bucket.
+    """
+    doc = orchestrate._GenerationBlockedError.__doc__ or ""
+    live, _, retraction = doc.partition("CORRECTED IN PLACE")
+    assert retraction, "the correction has to be marked, per this file's own convention"
+    assert "(None, err)" in live, "the tuple return is what F-9ee95e14 changed; say so"
+    assert "resolves it internally" not in live, (
+        "that return shape has not existed since F-9ee95e14; quoting it as retracted is fine, "
+        "asserting it as current is the defect"
+    )
+    assert "DEP_" in doc, "SEMANTIC is wider than schema-invalid output now; name what is in it"

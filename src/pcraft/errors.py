@@ -9,6 +9,7 @@ Error-code namespaces (prefix -> CLI exit code):
     INPUT_   bad user input / missing args / invalid contract      -> exit 1
     CONFIG_  misconfiguration (missing key, bad threshold table)    -> exit 1
     CONTRACT_ contract resolution / relaxation violations           -> exit 1
+    SYNTH_   synthesizer output defect (coverage, prose dump)       -> exit 2
     GATE_    gate / verifier discipline violations                  -> exit 2
     DEP_     missing optional dependency ([image]/[synth] extra)    -> exit 2
     IO_      filesystem read/write failure                          -> exit 2
@@ -23,6 +24,22 @@ Could-not-run therefore sits at 4, not 2:
 
     GATE_UNAVAILABLE  no required atom produced a score              -> exit 4
     IO_GATE_INPUT     path missing / not a file / unreadable         -> exit 4
+
+The third override goes the other way. A receipt written by a NEWER build is
+well formed, not a crash, so it is user input like its contract sibling
+CONTRACT_SCHEMA_UNSUPPORTED -- not an IO_ runtime fault:
+
+    IO_RECORD_SCHEMA_UNSUPPORTED  receipt schema_version is from the future -> exit 1
+
+CORRECTED IN PLACE (F-a2de5ab2). Both tables above had drifted from the maps
+they describe: SYNTH_ was missing from the namespace list, and the
+IO_RECORD_SCHEMA_UNSUPPORTED override (F-4846c12e) was added to STABILITY.md
+and to _EXIT_BY_CODE but not here -- so the front-door table in the file that
+DEFINES the mapping still read "IO_ ... -> exit 2", with the correction living
+only in a comment forty lines below. This block is the only override list a
+reader of this file will find, so it is now parsed and compared against
+_EXIT_BY_CODE / _EXIT_BY_PREFIX by tests/test_stability_surface.py: adding an
+entry to either map without adding its row here goes red.
 """
 
 from __future__ import annotations
@@ -90,6 +107,18 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "one reading it. Upgrade prompt-craft to read it. Do NOT re-bind: the file is well formed, "
     "not corrupt, and re-binding would destroy a good receipt. Exit 1 (your input), not 2.",
     "CONFIG_THRESHOLDS_INVALID": "Each band needs high >= low and both in [0, 1]. Recalibrate or fix the table.",
+    # F-09f30018: the version-disagreement refusal in orchestrate.run() used to reuse
+    # CONFIG_THRESHOLDS_INVALID, which load_thresholds already raises for a structurally
+    # malformed table. One covered, machine-parseable code then carried two unrelated meanings
+    # -- "your table is broken" and "your table is fine but it is not the one you named" --
+    # while the hint above described only the first. STABILITY.md tells callers to parse the
+    # code, not the prose, so the two failures get two codes.
+    "CONFIG_THRESHOLDS_VERSION_MISMATCH": "The table you named is not the table you passed. Pass "
+    "the version of the table you are actually running (table.version), or leave "
+    "config.thresholds_version unset to assert nothing.",
+    "CONTRACT_CYCLIC_DEPENDS_ON": "Two or more atoms depend_on each other (or an atom depends_on "
+    "itself), so no parent-first order exists and the gate cannot evaluate parents before "
+    "children. Break the cycle in the contract's depends_on edges. Exit 1 (your input), not 2.",
     "INPUT_EMPTY_STORE": "Pass --contracts-dir at a tree that contains *.contract.json, or omit it to use the shipped sprite example.",
     "INPUT_IMAGE_NAME": "Pass --image-name as local.png=cloud-hash.png (repeatable).",
     "INPUT_CONTRACTS_DIR": "The path must be an existing directory.",

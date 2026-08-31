@@ -20,13 +20,13 @@ def test_wheel_does_not_force_include_trees_already_in_packages():
 def test_version_is_one_or_later_and_the_public_surface_agrees():
     """The version is 1.x, the README may not drift from it, and STABILITY.md must exist.
 
-    ⚑ REPLACES `test_version_is_pre_one_and_the_readme_agrees`, which asserted the major was
+    REPLACES `test_version_is_pre_one_and_the_readme_agrees`, which asserted the major was
     still `0` and said promoting "needs an evidence-backed decision, not a test edit." That is
-    exactly what happened, so this is the edit the old test was holding the door for — not a
+    exactly what happened, so this is the edit the old test was holding the door for -- not a
     deletion of an inconvenient assertion.
 
     The decision, in one line: the pre-1.0 ruling was *"a generate that ran is not a stability
-    claim,"* which argues from **capability** — and capability is the category that does not
+    claim,"* which argues from **capability** -- and capability is the category that does not
     block a stable interface. It gets better in minors. The real blockers were three markers
     that read as compatibility checks and were never compared: an unversioned receipt format
     whose reader was fail-closed in both directions, a `$schema` label that accepted any
@@ -39,7 +39,7 @@ def test_version_is_one_or_later_and_the_public_surface_agrees():
        stability promise, and that needs the same deliberation the promotion did.
     2. **The README cannot drift from the version.** Unchanged, and it is this repo's own
        defect one level up: a front door advertising a version the package does not carry.
-    3. **The promise exists.** `1.0.0` without `STABILITY.md` is a number, not a commitment —
+    3. **The promise exists.** `1.0.0` without `STABILITY.md` is a number, not a commitment;
        the document is what names the covered surface and, just as importantly, the excluded
        one.
     """

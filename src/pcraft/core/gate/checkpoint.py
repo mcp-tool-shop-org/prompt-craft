@@ -75,5 +75,14 @@ def build_checkpoint(transcript: GateTranscript, dag: QuestionDAG | None = None)
         thought = "You probably thought nothing needed a human."
         chose = f"I escalated ({transcript.overall.value})."
     parts = [thought, chose]
-    parts.extend(f"{line.thought}; {line.chose} — {line.claim}." for line in lines)
+    # CORRECTED IN PLACE (F-a6acaab1). This separator was a literal U+2014 EM DASH. `text` is
+    # not decoration: it becomes OrchestrationResult.reason and the CLI prints it verbatim, so
+    # on a cp437 console -- classic cmd.exe -- an escalation died with an unhandled
+    # UnicodeEncodeError inside click after writing the first banner line. That lands in
+    # bind/demo's `except Exception` backstop, so the run reported error[RUNTIME_UNEXPECTED] at
+    # exit 2 (whose own hint says "this code is the backstop, not a diagnosis") instead of the
+    # escalation's 3 or 4 -- and the operator never saw the contrastive checkpoint at all. The
+    # UNCERTAINTY_GATED_HUMANS artifact was exactly what the crash destroyed. ASCII, because it
+    # is the only codepage-independent guarantee and this is advice, not typography.
+    parts.extend(f"{line.thought}; {line.chose} -- {line.claim}." for line in lines)
     return ContrastiveCheckpoint(thought=thought, chose=chose, lines=lines, text=" ".join(parts))

@@ -14,6 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
+from ...errors import PromptCraftError
 from .schema import CheckType, ResolvedContract, Severity, Spatial
 
 
@@ -43,7 +44,21 @@ class QuestionDAG(BaseModel):
         return next((q for q in self.questions if q.atom_id == atom_id), None)
 
     def topological(self) -> list[Question]:
-        """Parents before children. Raises on a dependency cycle (fail-closed)."""
+        """Parents before children. Refuses a dependency cycle (fail-closed).
+
+        [!] The cycle arm raised a bare ``ValueError`` until F-2b317b56. A gate raises named
+        codes, never bare errors: an unclassified exception reaching the CLI is caught by the
+        ``except Exception`` backstop and reported as RUNTIME_UNEXPECTED (exit 2,
+        "prompt-craft crashed") when the truth is a malformed contract (exit 1, "fix your
+        input"). It now raises the same CONTRACT_CYCLIC_DEPENDS_ON that
+        ``ResolvedContract`` refuses at construction.
+
+        That construction-time refusal is the real door -- ``pcraft validate`` compiles the
+        DAG but never walks it, so a cycle used to reach ``bind``/``gate`` before anything
+        noticed. This arm is now defence in depth for a ``QuestionDAG`` assembled directly,
+        without a ``ResolvedContract`` behind it (which is exactly how the harness tests
+        build their fixtures).
+        """
         order: list[Question] = []
         visiting: set[str] = set()
         done: set[str] = set()
@@ -53,7 +68,18 @@ class QuestionDAG(BaseModel):
             if q.atom_id in done:
                 return
             if q.atom_id in visiting:
-                raise ValueError(f"dependency cycle at atom {q.atom_id!r}")
+                raise PromptCraftError(
+                    "CONTRACT_CYCLIC_DEPENDS_ON",
+                    f"question DAG {self.contract_id!r} has a depends_on cycle at atom "
+                    f"{q.atom_id!r}",
+                    hint=(
+                        "depends_on is a DAG edge: the parent is evaluated first so a "
+                        "failing parent can force NO on its descendants. A cycle has no "
+                        "first atom, so there is no order the gate could run it in. Break "
+                        "the loop -- an atom may not depend on itself, directly or through "
+                        "its ancestors."
+                    ),
+                )
             visiting.add(q.atom_id)
             if q.depends_on and q.depends_on in index:
                 visit(index[q.depends_on])

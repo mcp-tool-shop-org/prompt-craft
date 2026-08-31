@@ -8,9 +8,24 @@ were touched), per the amend method: red, then fix, then green.
   F-175c3b3e  silent tier fall-forward graded a score on the wrong verifier's scale
   F-d9b28ca6  escalating Tier-1 -> Tier-2 erased the record that Tier-1 also ran
   (unlabelled) nothing consulted the tier census, so a half-run gate could still exit 0
+  F-19f97de2  a dangling depends_on silently deleted the edge instead of failing closed
+
+A later wave (swarm-1788165870-6880) added the seam the isolated fixes could not see, plus
+the output-surface half of the cp437 sweep:
+
+  F-2b317b56  depends_on integrity was closed one way only -- an ACYCLIC check existed
+              nowhere on the gate path, and QuestionDAG.topological()'s bare ValueError
+              escaped evaluate() as RUNTIME_UNEXPECTED at exit 2
+  F-a6acaab1  the em-dash sweep covered --help pages and DEFAULT_HINTS but not the strings
+              the RUNTIME surface prints -- checkpoint.text is the hottest of them
+  F-09f30018  a guard that does not say whether it is reachable reads as dead code
 """
 
 from __future__ import annotations
+
+import ast
+import inspect
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +38,7 @@ from pcraft.core.contract.compile_questions import (
     compile_questions,
 )
 from pcraft.core.gate import harness
+from pcraft.core.gate.checkpoint import build_checkpoint
 from pcraft.core.gate.exit_contract import error_from_transcript
 from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
 from pcraft.core.gate.thresholds import Zone
@@ -334,4 +350,331 @@ def test_a_dangling_depends_on_cannot_flip_amend_into_advance(sprite_example):
     assert dangling.overall is not Zone.PASS, "a dropped edge must not manufacture a clean gate"
     assert verdict_from_transcript(dangling) is Verdict.AMEND, (
         "a typo in depends_on must never be the difference between escalate and bind"
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# F-2b317b56 -- depends_on referential integrity was closed in ONE direction only. The loader
+# refuses a parent that does not exist and the harness fails closed with SKIPPED (F-19f97de2
+# above), but neither half asked whether the surviving edges are ACYCLIC. The acyclicity check
+# lived downstream in QuestionDAG.topological() as a bare `raise ValueError(...)` -- an
+# exception from outside the PromptCraftError hierarchy -- and evaluate() called that method
+# unguarded, in deliberate contrast to _safe_score three lines below it, which is careful to
+# classify every exception a verifier can throw.
+#
+# Measured before the fix, on a two-atom contract with tabard.depends_on='sigil' and
+# sigil.depends_on='tabard': `pcraft bind --mock` and `pcraft gate <image>` both died with
+# error[RUNTIME_UNEXPECTED] at exit 2 -- the backstop code, on a plain contract-authoring typo
+# that errors.py's namespace table puts at exit 1 with a CONTRACT_ code.
+#
+# This is the harness half. A load-time refusal is the other half and lives in the contract
+# domain; the tests below construct the cycle directly against QuestionDAG so they pin THIS
+# door whatever that one does -- which is also the only door a library caller who builds a DAG
+# himself ever reaches.
+# --------------------------------------------------------------------------------------------
+
+
+def _cyclic_dag(*, self_edge: bool = False) -> QuestionDAG:
+    """tabard <-> sigil (or tabard -> tabard), closed by mutation AFTER construction.
+
+    Same convention test_amend_contract.py uses to reach a state the loader refuses
+    (``character.must_have[0].severity = "advisory"``): build the legal object, then set the
+    field. Building it cyclic in the constructor would couple this regression to whatever
+    validator the load-time half installs, and the point here is the gate's own net.
+    """
+    dag = QuestionDAG(
+        contract_id="test:pin-2b317b56",
+        questions=[
+            Question(
+                atom_id="tabard", text="Does this show a crimson tabard?",
+                check_type=CheckType.vqa, polarity=Polarity.affirm, severity=Severity.required,
+            ),
+            Question(
+                atom_id="sigil", text="Does this show a sigil on the tabard?",
+                check_type=CheckType.vqa, polarity=Polarity.affirm, severity=Severity.required,
+                depends_on="tabard",
+            ),
+        ],
+    )
+    dag.by_id("tabard").depends_on = "tabard" if self_edge else "sigil"
+    return dag
+
+
+def _evaluate_cyclic(thresholds, *, self_edge: bool = False):
+    v = ScriptedVerifier(family="clip-flant5", tier=1, verifier_id="scripted.vqa.v0")
+    return harness.evaluate(
+        _cyclic_dag(self_edge=self_edge), "x.png", {1: v}, thresholds,
+        generator_family="stable-diffusion",
+    )
+
+
+def test_a_dependency_cycle_at_the_gate_is_a_coded_refusal_not_a_bare_valueerror(sprite_example):
+    """The exception class is the whole finding. A bare ValueError out of evaluate() lands on
+    the CLI's `except Exception` backstop and is reported as RUNTIME_UNEXPECTED at exit 2 --
+    whose own hint says "this code is the backstop, not a diagnosis" -- for what is a plain
+    contract-authoring typo."""
+    _s, _resolved, thresholds, _c = sprite_example
+    with pytest.raises(PromptCraftError) as exc:
+        _evaluate_cyclic(thresholds)
+    assert not isinstance(exc.value, ValueError), "the refusal must not BE the raw ValueError"
+    assert exc.value.code.startswith("CONTRACT_"), (
+        f"a cyclic depends_on is a contract defect, not a runtime crash; got {exc.value.code}"
+    )
+    assert exc.value.exit_code == 1, "exit 1 (fix your input), not the RUNTIME_ backstop's 2"
+
+
+def test_the_cycle_refusal_names_the_cycle_and_carries_a_hint(sprite_example):
+    """A distinct code with no distinct guidance is half a refusal (the standard this repo
+    already applied to IO_RECORD_SCHEMA_UNSUPPORTED). The message has to name an atom on the
+    cycle, or the author has nothing to go and edit."""
+    _s, _resolved, thresholds, _c = sprite_example
+    with pytest.raises(PromptCraftError) as exc:
+        _evaluate_cyclic(thresholds)
+    text = exc.value.to_safe_text()
+    assert "tabard" in text or "sigil" in text, "the refusal must name an atom on the cycle"
+    assert exc.value.hint, "the code needs a DEFAULT_HINTS entry, not just a name"
+    assert "hint:" in text
+
+
+def test_a_self_referential_depends_on_takes_the_same_path(sprite_example):
+    """``a.depends_on == 'a'`` reaches topological()'s cycle branch by the identical route and
+    must not be a different answer."""
+    _s, _resolved, thresholds, _c = sprite_example
+    with pytest.raises(PromptCraftError) as exc:
+        _evaluate_cyclic(thresholds, self_edge=True)
+    assert exc.value.code.startswith("CONTRACT_")
+    assert exc.value.exit_code == 1
+
+
+def test_evaluate_terminates_on_a_cycle_rather_than_walking_it(sprite_example):
+    """The other failure mode a graph walk can have. Whatever the guard does, it must be an
+    ANSWER: never a hang, never an unbounded walk. Pinned by the fact that the call returns
+    control at all -- if it looped, the suite would time out here rather than fail."""
+    _s, _resolved, thresholds, _c = sprite_example
+    for self_edge in (False, True):
+        with pytest.raises(PromptCraftError):
+            _evaluate_cyclic(thresholds, self_edge=self_edge)
+
+
+def test_an_ordinary_parent_child_dag_still_evaluates(sprite_example):
+    """Collateral guard: the acyclicity net must not refuse the edges depends_on exists for."""
+    _s, _resolved, thresholds, _c = sprite_example
+    t, verdicts = _evaluate_sigil_dag(
+        thresholds, depends_on="tabard", parent_severity=Severity.required
+    )
+    assert verdicts["sigil"].zone is Zone.NA  # gated by its parent, not refused by the guard
+    assert t.overall is Zone.FAIL
+
+
+# --------------------------------------------------------------------------------------------
+# F-a6acaab1 -- the wave-2 em-dash sweep (F-fd21bd37) covered --help pages and errors.py's
+# DEFAULT_HINTS. It did not cover the RUNTIME output surface, and the string it missed is on
+# the hottest non-bind path in the product: build_checkpoint composes the escalation text with
+# a literal U+2014, that text becomes ContrastiveCheckpoint.text -> OrchestrationResult.reason,
+# and the CLI prints it verbatim.
+#
+# Measured before the fix under PYTHONIOENCODING=cp437:strict: an escalating mock run died with
+# an unhandled UnicodeEncodeError inside click after writing the first banner line, so on a
+# cp437 console every escalation reported error[RUNTIME_UNEXPECTED] at exit 2 and the operator
+# never saw the contrastive checkpoint at all -- the UNCERTAINTY_GATED_HUMANS artifact is
+# exactly what the crash destroys.
+#
+# The instances are fixed in checkpoint.py, exit_contract.py and family_guard.py. The CLASS is
+# closed by the sweep at the bottom: which text is user-facing is not a stable property of
+# where that text sits, so every string literal in the domain that is not a docstring is held
+# to ASCII. Docstrings and comments are excluded deliberately and the exclusion is paid for:
+# nothing in this domain prints them (`pcraft schema` dumps Contract.model_json_schema() only,
+# which reaches core/contract, not here) -- pinned by the last test in this section.
+# --------------------------------------------------------------------------------------------
+
+_CONSOLE_ENCODING = "cp437"
+
+_DOMAIN_SOURCE_GLOBS = (
+    "core/gate/*.py",
+    "core/loop/*.py",
+    "core/receipt/*.py",
+    "errors.py",
+    "gate_report.py",
+)
+
+
+def _domain_sources() -> list[Path]:
+    import pcraft
+
+    root = Path(pcraft.__file__).parent
+    found: list[Path] = []
+    for pattern in _DOMAIN_SOURCE_GLOBS:
+        found.extend(sorted(root.glob(pattern)))
+    assert found, "domain globs matched nothing; the fixture is broken, not the code"
+    return found
+
+
+def _docstring_constant_ids(tree: ast.AST) -> set[int]:
+    """id() of every str Constant that is a bare expression statement.
+
+    That is exactly the docstring set: module / class / function docstrings, plus the
+    attribute-docstring convention LoopConfig.thresholds_version uses. Comments never reach
+    the AST at all, so they need no exclusion.
+    """
+    return {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+
+
+def _printable_literals(path: Path) -> list[tuple[int, str]]:
+    """(lineno, text) for every non-docstring str literal, f-string fragments included.
+
+    f-string fragments matter: checkpoint.py's em dash lived inside
+    ``f"{line.thought}; {line.chose} - {line.claim}."``, which is a JoinedStr, not a plain
+    Constant, and is invisible to a scan that only looks at whole string literals.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = _docstring_constant_ids(tree)
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+
+
+def _flagged_transcript(overall: Zone) -> GateTranscript:
+    """One FAIL and one could-not-confirm atom, so every per-line branch of _line() is used and
+    ``parts.extend(...)`` -- the line that carried the em dash -- actually runs."""
+    return GateTranscript(
+        contract_id="test:pin-a6acaab1",
+        overall=overall,
+        verdicts=[
+            _one_atom_verdict(atom_id="face", score=0.05, zone=Zone.FAIL),
+            _one_atom_verdict(
+                atom_id="palette", score=0.55, zone=Zone.UNCERTAIN, tier_used=1,
+            ),
+            _one_atom_verdict(
+                atom_id="weapon", score=None, zone=Zone.SKIPPED, tier_used=None,
+                tiers_consulted=[], verifier_id=None, reason="no verifier available for tier",
+            ),
+        ],
+        tier_census=TierCensus(required=[0, 1], executed=[0, 1]),
+    )
+
+
+@pytest.mark.parametrize(
+    "overall", [Zone.UNCERTAIN, Zone.FAIL, Zone.UNAVAILABLE, Zone.NA],
+    ids=["uncertain", "fail", "unavailable", "other"],
+)
+def test_the_contrastive_checkpoint_text_prints_on_a_cp437_console(overall):
+    """All four overall-Zone branches of build_checkpoint, because the em dash was not in any
+    of them -- it was in the per-line join every branch shares, which is worse: no branch was
+    safe. ASCII rather than merely cp437-encodable, for the reason the DEFAULT_HINTS pin
+    already gives: ASCII is the only codepage-independent guarantee and this is advice, not
+    typography."""
+    checkpoint = build_checkpoint(_flagged_transcript(overall))
+    assert checkpoint.lines, "no flagged lines means the join under test never ran"
+    checkpoint.text.encode("ascii")
+    checkpoint.text.encode(_CONSOLE_ENCODING, errors="strict")
+
+
+def test_the_escalation_reason_the_cli_prints_survives_cp437(tmp_path):
+    """End to end through the real loop, on the failure run_mock_loop's own docstring names as
+    the example. OrchestrationResult.reason IS checkpoint.text on this path, and the CLI writes
+    it verbatim -- so this is the exact string that crashed click."""
+    from pcraft.sample import run_mock_loop
+
+    result = run_mock_loop(records_dir=str(tmp_path), verifier_scores={"face": 0.1})
+    assert result.decision == "escalated"
+    assert result.checkpoint is not None
+    assert result.reason == result.checkpoint.text
+    result.reason.encode(_CONSOLE_ENCODING, errors="strict")
+
+
+def test_every_printable_string_literal_in_this_domain_encodes_on_a_cp437_console():
+    """The class, not the three instances. A refusal or a checkpoint is worth nothing if
+    PRINTING it raises, and the em dash reached the console from three different kinds of site:
+    an f-string fragment (checkpoint.py), a ``hint=`` argument (exit_contract.py) and a
+    ``message`` argument (family_guard.py). None of those is a DEFAULT_HINTS entry, which is
+    all the wave-2 sweep looked at."""
+    offenders: list[str] = []
+    for path in _domain_sources():
+        for lineno, text in _printable_literals(path):
+            try:
+                text.encode(_CONSOLE_ENCODING, errors="strict")
+            except UnicodeEncodeError as err:
+                bad = text[err.start : err.end]
+                offenders.append(f"{path.name}:{lineno}: {bad!r} (U+{ord(bad[0]):04X})")
+    assert not offenders, (
+        "string literals a cp437 console cannot print:\n" + "\n".join(offenders)
+    )
+
+
+def test_every_printable_string_literal_in_this_domain_is_pure_ascii():
+    """One notch stricter than cp437, same argument as the DEFAULT_HINTS pin: cp437 accepts a
+    handful of accented characters that then break on a UTF-8-only reader, and no message in
+    this domain needs one."""
+    offenders: list[str] = []
+    for path in _domain_sources():
+        for lineno, text in _printable_literals(path):
+            bad = sorted({f"U+{ord(c):04X}" for c in text if ord(c) > 127})
+            if bad:
+                offenders.append(f"{path.name}:{lineno}: {', '.join(bad)}")
+    assert not offenders, "non-ASCII string literals in this domain:\n" + "\n".join(offenders)
+
+
+def test_no_docstring_in_this_domain_reaches_a_printed_surface():
+    """What the sweep's docstring exclusion is paid for with.
+
+    core/contract holds its whole FILE to ASCII because pydantic folds each model's docstring
+    into `model_json_schema()` and `pcraft schema` prints that. Nothing in this domain is
+    dumped that way, so its docstrings are not user-facing text and the sweep above may
+    legitimately skip them. This test is what goes red the day that stops being true.
+    """
+    import pcraft
+
+    root = Path(pcraft.__file__).parent
+    dumpers = sorted(
+        {
+            p.relative_to(root).as_posix()
+            for p in root.rglob("*.py")
+            for line in p.read_text(encoding="utf-8").splitlines()
+            if "model_json_schema" in line and not line.lstrip().startswith("#")
+        }
+    )
+    assert dumpers == ["core/contract/schema.py"], (
+        f"a new schema-dump site would put docstrings on a printed surface: {dumpers}"
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# F-09f30018 -- three guards in this domain do not say whether they are reachable through a
+# shipped path today. The repo already treats that as required: F-c1832100 corrected
+# retry_policy.verdict_from_transcript for exactly this, and exit_contract's census branch
+# states plainly "Not reachable via harness.evaluate() today". A guard that does not say reads
+# as either dead code (delete it) or a live check (rely on it) -- and a maintainer cannot tell
+# which without re-deriving the whole call graph.
+# --------------------------------------------------------------------------------------------
+
+
+def test_the_dangling_parent_branch_states_that_it_is_defence_in_depth():
+    """The loader's _reject_unknown_depends_on refuses this input at resolve() time, so the
+    SKIPPED branch is not reachable through any shipped command -- the same status
+    exit_contract's census branch declares one file over. The branch's long CORRECTED IN PLACE
+    comment described the old measured consequence and never said that."""
+    src = inspect.getsource(harness.evaluate)
+    assert "defence in depth" in src, (
+        "the SKIPPED branch must say whether a shipped path can reach it, like its siblings do"
+    )
+    assert "_reject_unknown_depends_on" in src, "name the guard that makes it unreachable"
+
+
+def test_the_cycle_guard_states_whether_a_shipped_path_reaches_it():
+    """Same rule applied to the guard this wave adds, rather than leaving the next reader to
+    ask the same question about a fourth branch."""
+    src = inspect.getsource(harness.evaluate)
+    assert "topological" in src, "the guard is on the topological() call"
+    assert "constructs a QuestionDAG" in src or "builds a QuestionDAG" in src, (
+        "say who can still reach a cyclic DAG once the loader refuses one"
     )

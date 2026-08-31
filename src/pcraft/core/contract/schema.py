@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...errors import PromptCraftError
 
@@ -65,18 +65,61 @@ input class, so the equivalence argument holds on a schema guarantee instead of 
 assumption -- the same shape as rejecting duplicate ids here rather than letting the DAG's
 own dedup be the enforcement mechanism."""
 
+_BLANK_ID_RATIONALE = """Why the floor above is measured AFTER stripping (F-7409e175).
+
+``Field(min_length=1)`` counts raw Python characters, so it closes the empty string and
+nothing else. MEASURED: ``Atom(id='   ')`` satisfies the floor with a length of 3 and
+constructs untouched, as do ``MustNot(id=' ')`` and ``Atom(id='\\t\\n')``. That is the letter
+of the floor rather than the rationale above it -- "an empty id is not a contract anyone
+means to write" applies with the same force to an id that LOOKS empty everywhere it is ever
+shown: in the compiled DAG, in a receipt, and inside the refusal messages that quote the id
+back to the author.
+
+The gap is narrow and no downstream defect was found. It does not reopen the CQ58 drop-first
+mutant (Python string falsiness is False only for the empty string, so a whitespace-only id
+is truthy and the short-circuit behaves exactly as the original), and it does not defeat
+CONTRACT_DUPLICATE_ATOM_ID (exact string equality is used everywhere an id is compared, so
+``' tabard'`` and ``'tabard'`` are consistently two distinct nodes rather than a silent
+collision). What is left is a typo class: a stray copy-pasted space in hand-authored contract
+JSON, which should fail closed at construction like every other malformed id rather than name
+a node no reader can identify.
+
+Only BLANK is refused. An id carrying incidental leading, inner, or trailing whitespace is
+stored exactly as authored -- NORMALIZING it would silently merge ids that the DAG index, the
+duplicate guard, and every dict key in this domain currently treat as distinct, which is a
+much larger behaviour change than this gap justifies."""
+
+
+def _reject_blank_id(value: str) -> str:
+    """Refuse an id that is empty once stripped. See ``_BLANK_ID_RATIONALE``.
+
+    Raises ``ValueError`` rather than ``PromptCraftError`` on purpose: pydantic folds a
+    ValueError raised in a field validator into the same ``ValidationError`` that
+    ``min_length=1`` already produces for the empty string, so both halves of one rule refuse
+    in one shape -- and ``loader._read_contract`` turns that into CONTRACT_INVALID (exit 1)
+    for an on-disk file, exactly as it already does for every other schema violation.
+    """
+    if not value.strip():
+        raise ValueError(f"id must not be blank; {value!r} is empty once stripped")
+    return value
+
 
 class Atom(BaseModel):
     """One atomic depictable claim. The same atom list is used twice -- to synthesize and to gate."""
 
     model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE + _BLANK_ID_RATIONALE
     claim: str  # a single visible claim, phrased as a checkable statement
     check_type: CheckType
     severity: Severity = Severity.required
     depends_on: str | None = None  # DAG edge: this atom is only meaningful if the parent passes
     spatial: Spatial | None = None
     enum: list[str] | None = None  # closed set for siglip2/palette atoms
+
+    @field_validator("id")
+    @classmethod
+    def _id_is_not_blank(cls, value: str) -> str:
+        return _reject_blank_id(value)
 
 
 class MustNot(BaseModel):
@@ -102,12 +145,17 @@ class MustNot(BaseModel):
     severity with the measurement in hand."""
 
     model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE + _BLANK_ID_RATIONALE
     claim: str
     check_type: CheckType = CheckType.vqa
     severity: Severity = Severity.required
     spatial: Spatial | None = None
     enum: list[str] | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _id_is_not_blank(cls, value: str) -> str:
+        return _reject_blank_id(value)
 
 
 class IdentityRef(BaseModel):
@@ -173,6 +221,113 @@ def _reject_duplicates_in(
         seen.add(atom.id)
 
 
+def _reject_unknown_depends_on(
+    must_have: Sequence[Atom], must_not: Sequence[MustNot], *, contract_id: str
+) -> None:
+    """Fail closed on a ``depends_on`` that names no atom in this contract (F-19f97de2).
+
+    A typo'd parent did not fail -- it silently DEMOTED its atom to a root:
+    ``QuestionDAG.topological()``'s ``if q.depends_on and q.depends_on in index`` skips the
+    unknown edge, so the atom is evaluated unconditionally and the "a NO parent forces NO on
+    descendants" guarantee -- the entire reason ``depends_on`` exists -- quietly does not
+    apply to it. The gate then verifies the colour of an axe that is not there, which is the
+    exact false confidence the DAG was built to kill.
+
+    [!] MOVED HERE FROM ``loader.resolve()`` (F-877a8d9b). It shipped as an imperative call
+    inside ``resolve()``, which made the invariant a property of ONE construction path
+    instead of a property of the type. MEASURED before the move: a ``ResolvedContract`` built
+    directly with ``depends_on='ghost'`` constructed with zero error, while the identical
+    direct-construction style with a duplicate id raised CONTRACT_DUPLICATE_ATOM_ID
+    immediately -- because THAT guard was a ``@model_validator``. The live blast radius was
+    zero (every production caller reaches the DAG through ``harness.evaluate``, whose own
+    ``verdicts.get(parent) is None -> SKIPPED`` arm is the other half of F-19f97de2), but
+    ``loader.resolve`` is not the only way to obtain a ``ResolvedContract``: ``optimize/
+    compile.py``'s GateMetric takes ``list[ResolvedContract]``, so a programmatically
+    assembled GEPA trainset is a concrete caller that never touches ``ContractStore``. On the
+    type, the invariant holds for every construction path.
+
+    Runs on RESOLVED lists, never on a raw child contract: a character legitimately depends on
+    an atom it INHERITS rather than declares, so a pre-merge check would refuse correct
+    contracts. The id namespace spans must_have AND must_not because ``compile_questions``
+    indexes both into one DAG keyed by ``atom_id`` -- the check mirrors the index the walk
+    actually uses.
+    """
+    known = {a.id for a in must_have} | {m.id for m in must_not}
+    items: tuple[Atom | MustNot, ...] = (*must_have, *must_not)
+    for item in items:
+        parent = getattr(item, "depends_on", None)
+        if parent is None:
+            continue
+        if parent not in known:
+            raise PromptCraftError(
+                "CONTRACT_UNKNOWN_DEPENDS_ON",
+                f"{contract_id!r} atom {item.id!r} depends_on {parent!r}, "
+                f"which is not an atom of this contract",
+                hint=(
+                    "depends_on must name an id declared in this contract's must_have or "
+                    "must_not (inherited atoms count, after extends is resolved). An "
+                    "unresolvable parent is not 'no parent' -- the atom would be gated "
+                    "unconditionally instead of only when its parent passes."
+                ),
+            )
+
+
+def _reject_cyclic_depends_on(
+    must_have: Sequence[Atom], must_not: Sequence[MustNot], *, contract_id: str
+) -> None:
+    """Fail closed on a ``depends_on`` cycle, at load time (F-2b317b56).
+
+    The referential check above closed the DANGLING edge; a cycle is the other way a
+    dependency graph can be unusable, and it was not refused anywhere an author would meet
+    it. MEASURED before this guard: a contract whose atoms depend on each other in a 2-cycle
+    passed ``pcraft validate`` with ``ok`` and exit 0 -- because ``validate`` compiles the
+    DAG but never walks it -- and then died in ``bind``/``gate`` with a bare ``ValueError``
+    out of ``QuestionDAG.topological()``. A self-edge (``depends_on`` naming the atom's own
+    id) behaved the same way: it satisfies the referential check, since the id is present.
+
+    Two things were wrong with that and both are fixed. The refusal now happens where the
+    defect is -- the contract, not the gate run -- so ``validate`` is the command that tells
+    you; and it carries a named CONTRACT_ code (exit 1, "fix your input") rather than an
+    unclassified ValueError that the CLI backstop would have reported as RUNTIME_UNEXPECTED
+    (exit 2, "prompt-craft crashed"). ``topological()`` keeps a cycle guard of its own, now
+    raising this same code: a gate raises named codes, never bare errors.
+
+    Each atom has at most one parent, so the graph is functional and a plain chain-walk from
+    every edge-carrying node finds every cycle: the first node revisited on a walk is
+    necessarily ON the cycle, because the walk from it is deterministic and returned to it.
+    """
+    parent_of: dict[str, str] = {}
+    items: tuple[Atom | MustNot, ...] = (*must_have, *must_not)
+    for item in items:
+        parent = getattr(item, "depends_on", None)
+        if parent is not None:
+            parent_of[item.id] = parent
+
+    settled: set[str] = set()  # ids already proven to reach a root without looping
+    for start in parent_of:
+        chain: list[str] = []
+        seen: set[str] = set()
+        node = start
+        while node in parent_of and node not in seen and node not in settled:
+            seen.add(node)
+            chain.append(node)
+            node = parent_of[node]
+        if node in seen:
+            cycle = chain[chain.index(node) :]
+            path = " -> ".join([*cycle, cycle[0]])
+            raise PromptCraftError(
+                "CONTRACT_CYCLIC_DEPENDS_ON",
+                f"{contract_id!r} has a depends_on cycle: {path}",
+                hint=(
+                    "depends_on is a DAG edge: the parent is evaluated first so a failing "
+                    "parent can force NO on its descendants. A cycle has no first atom, so "
+                    "there is no order the gate could run it in. Break the loop -- an atom "
+                    "may not depend on itself, directly or through its ancestors."
+                ),
+            )
+        settled |= seen
+
+
 CONTRACT_SCHEMA_ID = "prompt-craft/contract.v1"
 """The on-disk contract format this build reads.
 
@@ -190,7 +345,7 @@ class Contract(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     schema_id: str = Field(default=CONTRACT_SCHEMA_ID, alias="$schema")
-    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE
+    id: str = Field(min_length=1)  # see _NON_EMPTY_ID_RATIONALE + _BLANK_ID_RATIONALE
     level: str  # "faction" | "character"
     extends: str | None = None  # a faction id, for level == "character"
     must_have: list[Atom] = Field(default_factory=list)
@@ -202,6 +357,11 @@ class Contract(BaseModel):
     # while every OTHER unknown/misspelled key (musthave, mustnot, extend, ...) still fails
     # closed instead of being silently dropped along with it.
     note: str | None = Field(default=None, alias="_note")
+
+    @field_validator("id")
+    @classmethod
+    def _id_is_not_blank(cls, value: str) -> str:
+        return _reject_blank_id(value)
 
     @model_validator(mode="after")
     def _check_unique_atom_ids(self) -> Contract:
@@ -230,6 +390,17 @@ class ResolvedContract(BaseModel):
     @model_validator(mode="after")
     def _check_unique_atom_ids(self) -> ResolvedContract:
         _reject_duplicate_ids(self.must_have, self.must_not, contract_id=self.id)
+        return self
+
+    @model_validator(mode="after")
+    def _check_depends_on_edges(self) -> ResolvedContract:
+        """Every dependency edge resolves, and the edges form a DAG.
+
+        Referential first, deliberately: a dangling parent gets the error that names the
+        missing id, rather than being reported as a stray root by the cycle walk.
+        """
+        _reject_unknown_depends_on(self.must_have, self.must_not, contract_id=self.id)
+        _reject_cyclic_depends_on(self.must_have, self.must_not, contract_id=self.id)
         return self
 
     def required_atoms(self) -> list[Atom]:

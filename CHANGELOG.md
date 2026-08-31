@@ -11,9 +11,41 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
-Health wave over the v1.0.0 surface (dogfood swarm, 2026-08-31): 29 findings fixed, suite
-394 -> 516. The recurring shape, again: checks that read as live while checking less than
-they appear — this time including one on the bind door itself.
+Health waves over the v1.0.0 surface (dogfood swarm, 2026-08-31): 46 findings fixed across
+two amend rounds, suite 394 -> 607. The recurring shape, again: checks that read as live
+while checking less than they appear — this time including one on the bind door itself.
+
+Second-round fixes (composed-surface re-audit findings — seams between the first round's
+fixes):
+
+- **The recipe door now refuses an identity method it cannot apply** (`pcraft recipe` on a
+  contract declaring `method=ip_adapter` exits 2 with `GATE_CONDITIONING_UNSUPPORTED` and a
+  hint naming `method=reference`), instead of silently stamping the plate into the Cloud
+  stitch as if the declared lock applied. The shipped example contract declares SDXL
+  methods, so the bare quick-start `pcraft recipe` now demonstrates the refusal; a
+  reference-method shipped example is queued as follow-up work.
+- A `depends_on` **cycle** is refused at validate/load (`CONTRACT_CYCLIC_DEPENDS_ON`, exit
+  1, self-edges included) instead of passing `pcraft validate` and dying downstream in a
+  bare `ValueError`; the referential guard moved onto the model so every construction path
+  is covered, and the harness fails closed if a cycle arrives by construction anyway.
+- The **Pillow decode branch** gets the same declared-vs-decoded pixel-count refusal the
+  stdlib fallback got in round one — a truncated file scored a confident palette verdict on
+  short data in the branch that runs in production.
+- A nonexistent `--fill-mask` path is refused with a named input error instead of writing a
+  Cloud graph with the bracer refusal silently disabled.
+- The cp437/ASCII sweep reached the strings round one missed: the escalation checkpoint
+  text (which crashed at the exact moment a human checkpoint should display), a Flux hint,
+  and every remaining user-facing string in gate/loop/domain files — pinned by
+  AST-sweep encodability tests per domain.
+- A bare Ctrl-C exiting **130** (128+SIGINT) is now a documented, test-pinned convention
+  (STABILITY.md), deliberately outside the 0-4 table — folding it into exit 1 would leave a
+  script unable to tell a typo from an interrupt.
+- `Tier0Router` reports the delegate that actually scored (`palette.hist.v1`) as its
+  verifier id on verdicts and receipts, matching what round one's provenance fix intended.
+- Five public surfaces quoting the pre-wave test count were refreshed to the measured
+  suite; the count-pinned-in-prose habit is now called out in the operating docs.
+
+First-round entries follow.
 
 ### Added
 

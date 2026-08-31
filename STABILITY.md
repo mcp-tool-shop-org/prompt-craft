@@ -41,11 +41,18 @@ catch, so it is not left to good intentions.
 
 `IO_RECORD_SCHEMA_UNSUPPORTED` is a deliberate per-code override: despite its `IO_` prefix it
 exits **1**, matching its contract sibling `CONTRACT_SCHEMA_UNSUPPORTED` — a well-formed receipt
-written by a newer prompt-craft is your input to upgrade for, not a tool crash. (It briefly
-exited 2 in v1.0.0; aligned in the first patch after, before any minor shipped.)
+written by a newer prompt-craft is your input to upgrade for, not a tool crash. (v1.0.0 as
+released exits 2 here; the alignment landed on `main` immediately after and ships in the
+first patch, before any minor.)
 
 `4` is deliberate and load-bearing: **could-not-check is not checked-clean**, and collapsing it
 onto `2` would let a CI branch read "the gate ran and failed" when the gate never ran.
+
+An **interrupt is outside this table by convention, not by omission**: a bare Ctrl-C exits
+`130` (128 + SIGINT), the universal shell convention, surfaced by the CLI framework before any
+command body runs. It is pinned by a test and will not be folded into the codes above — a
+scripted caller should treat it as "the operator stopped this", which no gate verdict can
+mean — folding it into exit 1 would leave a script unable to tell a typo from an interrupt.
 
 Error **codes** are covered — a code will not be renamed or have its meaning changed under a
 minor. Error **message wording** and hint text are not; parse the code, not the prose.

@@ -61,7 +61,11 @@ def error_from_transcript(transcript: GateTranscript) -> PromptCraftError | None
             f"only {census.n} of {census.m} required tiers executed "
             f"(required={census.required}, executed={census.executed}), "
             "though every scored atom passed",
+            # F-a6acaab1: this inline hint carried a U+2014 EM DASH and was missed by the
+            # wave-2 sweep because it is not a DEFAULT_HINTS entry. Same class as the
+            # checkpoint crash, not yet on a reachable path -- to_safe_text() raises on
+            # .encode('cp437') either way.
             hint="A PASS whose gate under-ran its own instruments is not a pass. "
-            "Exit 3 (PARTIAL_), not 0 — the tier census is independent of the zone.",
+            "Exit 3 (PARTIAL_), not 0 -- the tier census is independent of the zone.",
         )
     return None

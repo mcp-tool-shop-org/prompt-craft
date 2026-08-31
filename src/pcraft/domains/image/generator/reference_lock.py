@@ -25,6 +25,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from ....errors import PromptCraftError
 from . import conditioning as cond
 
+# The Cloud recipe this lock feeds. Named here so the refusal below reads as the SAME door
+# FluxGenerator guards, not as a second opinion about the same conditioning.
+RECIPE_GENERATOR_ID = "flux.kontext-fill.v1"
+RECIPE_FAMILY = "flux"
+
 
 class ReferenceLock(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -32,9 +37,9 @@ class ReferenceLock(BaseModel):
     identity: list[str]
     costume: list[str]
     extras: list[str] = []
-    # plate path -> the method the contract DECLARED for it. The Kontext recipe applies every bound
-    # plate as a reference stitch regardless; recording the declared method is what lets the receipt
-    # name the instrument instead of implying one.
+    # plate path -> the method the contract DECLARED for it. Every plate that survives ``assemble``
+    # declared a method this recipe can actually apply (F-0e41e735), so recording the declaration is
+    # a receipt line rather than the fig leaf it used to be.
     methods: dict[str, str] = Field(default_factory=dict)
 
     def all_paths(self) -> list[str]:
@@ -60,6 +65,23 @@ def assemble(conditioning: dict) -> ReferenceLock:
 
     An unrecognised method is refused by name rather than bucketed (the F-916e73b6 allow-list, at
     the lock layer): a receipt must never stamp a plate no generator applied.
+
+    F-0e41e735: fix 1 above closed the shadow for ``method=none`` only. It survived for every other
+    method, on the door whose whole purpose is ``method=reference``. Any SUPPORTED method with a
+    face/full/silhouette scope was still appended to one flat ``identity`` list and ``build_graph``
+    took the first entry, so an inherited faction plate declaring ``method=ip_adapter`` -- which
+    ``_merge_identity_refs`` always places BEFORE the character's own -- became the Kontext stitch
+    identity while the declared ``method=reference`` plate never reached the graph, unnamed anywhere
+    on the receipt. Worse, the two doors into this one Cloud recipe disagreed: on identical
+    conditioning ``FluxGenerator.generate`` refused the wrong-family lock and wrote nothing, while
+    ``kontext_fill.from_conditioning`` -- what ``pcraft recipe`` calls -- accepted it and emitted the
+    graph for submission at real Cloud spend.
+
+    So the lock now enforces the generate door's law, using that door's own refusal: a method the
+    Kontext recipe could not have applied is refused BY NAME instead of being quietly stitched. The
+    two settled behaviours are untouched -- ``method=none`` drops, ``method=reference`` is this
+    path's purpose. What is gone is the middle case where the recipe stamped an identity via an
+    instrument it does not own.
     """
     bound = cond.bind_refs(conditioning)
     unsupported = cond.unsupported_identity_methods(bound)
@@ -70,6 +92,9 @@ def assemble(conditioning: dict) -> ReferenceLock:
             "no encoder is wired for that method",
             hint="Set identity_ref.method to ip_adapter, lora, instantid, reference, or none.",
         )
+    # ip_adapter / lora / instantid are the SDXL encoders. This is the SAME call FluxGenerator makes
+    # before its reference branch, so both doors refuse the identical conditioning identically.
+    cond.refuse_unmeasured_identity_family(RECIPE_GENERATOR_ID, RECIPE_FAMILY, bound)
     pose = list(bound.get("pose_refs") or [])
     identity: list[str] = []
     costume: list[str] = []

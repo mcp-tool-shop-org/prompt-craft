@@ -52,8 +52,11 @@ def assert_distinct_families(generator_family: str, verifier_families: list[str]
     if isinstance(verifier_families, (str, bytes)):
         raise PromptCraftError(
             "GATE_FAMILIES_NOT_A_LIST",
+            # F-a6acaab1: the U+2014 here was missed for the same reason as exit_contract's --
+            # it is a message argument, not a DEFAULT_HINTS value, and the wave-2 sweep only
+            # looked at the hints table.
             f"verifier_families must be a list of family names, not {type(verifier_families).__name__} "
-            f"{verifier_families!r} — iterating a string checks characters and the guard cannot fire",
+            f"{verifier_families!r} -- iterating a string checks characters and the guard cannot fire",
         )
     gen = normalize_family(generator_family)
     for vf in verifier_families:

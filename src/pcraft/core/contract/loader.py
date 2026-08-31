@@ -103,9 +103,9 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     A faction resolves to itself. A character merges its faction base then its own atoms,
     enforcing the no-relaxation rule."""
     if contract.level == "faction" or contract.extends is None:
-        _reject_unknown_depends_on(
-            contract.must_have, contract.must_not, contract_id=contract.id
-        )
+        # depends_on referential integrity + acyclicity are enforced by ResolvedContract's own
+        # @model_validator (schema.py), so they hold for EVERY construction path rather than
+        # only this one. See _reject_unknown_depends_on's F-877a8d9b note for what moved and why.
         return ResolvedContract(
             id=contract.id,
             level=contract.level,
@@ -128,10 +128,10 @@ def resolve(contract: Contract, lookup) -> ResolvedContract:
     identity_refs = _merge_identity_refs(
         base.identity_refs, contract.identity_ref, child_id=contract.id
     )
-    # Referential check runs POST-merge: a character legitimately depends on an atom it
+    # The depends_on checks run POST-merge -- a character legitimately depends on an atom it
     # inherits rather than declares, so checking the raw child would refuse valid contracts.
-    _reject_unknown_depends_on(merged_must_have, merged_must_not, contract_id=contract.id)
-
+    # They now run inside ResolvedContract's validator below, which IS post-merge by
+    # construction, so the merged lists are still what gets checked.
     return ResolvedContract(
         id=contract.id,
         level=contract.level,
@@ -211,41 +211,12 @@ def _severity_rank(severity) -> int:
     return rank
 
 
-def _reject_unknown_depends_on(must_have, must_not, *, contract_id: str) -> None:
-    """Fail closed on a ``depends_on`` that names no atom in this contract (F-19f97de2).
-
-    The loader already refuses a dangling ``extends`` (``CONTRACT_MISSING_BASE``) and a
-    duplicate atom id (``CONTRACT_DUPLICATE_ATOM_ID``) but never checked that a dependency
-    edge resolves. A typo'd parent did not fail -- it silently DEMOTED its atom to a root:
-    ``QuestionDAG.topological()``'s ``if q.depends_on and q.depends_on in index`` skips the
-    unknown edge, so the atom is evaluated unconditionally and the "a NO parent forces NO on
-    descendants" guarantee -- the entire reason ``depends_on`` exists -- quietly does not
-    apply to it. The gate then verifies the colour of an axe that is not there, which is the
-    exact false confidence the DAG was built to kill.
-
-    Runs on the RESOLVED lists, never on a raw child contract: a character legitimately
-    depends on an atom it inherits rather than declares, so a pre-merge check would refuse
-    correct contracts. The id namespace spans must_have AND must_not because
-    ``compile_questions`` indexes both into one DAG keyed by ``atom_id`` -- the check mirrors
-    the index the walk actually uses.
-    """
-    known = {a.id for a in must_have} | {m.id for m in must_not}
-    for item in (*must_have, *must_not):
-        parent = getattr(item, "depends_on", None)
-        if parent is None:
-            continue
-        if parent not in known:
-            raise PromptCraftError(
-                "CONTRACT_UNKNOWN_DEPENDS_ON",
-                f"{contract_id!r} atom {item.id!r} depends_on {parent!r}, "
-                f"which is not an atom of this contract",
-                hint=(
-                    "depends_on must name an id declared in this contract's must_have or "
-                    "must_not (inherited atoms count, after extends is resolved). An "
-                    "unresolvable parent is not 'no parent' -- the atom would be gated "
-                    "unconditionally instead of only when its parent passes."
-                ),
-            )
+# The depends_on referential check that used to live here (F-19f97de2) now lives on
+# ResolvedContract itself as part of _check_depends_on_edges, alongside the cycle check added
+# with it (schema._reject_unknown_depends_on / _reject_cyclic_depends_on). It was moved
+# because an imperative call inside resolve() makes an invariant a property of one code path;
+# a @model_validator makes it a property of the type. Nothing in this module calls it now --
+# each ResolvedContract(...) construction in resolve() above IS the check.
 
 
 _RELAXATION_HINT = (

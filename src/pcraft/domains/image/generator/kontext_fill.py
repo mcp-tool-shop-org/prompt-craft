@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ....errors import PromptCraftError
 from . import conditioning as cond
-from .reference_lock import ReferenceLock, as_generate_refs, assemble
+from .reference_lock import ReferenceLock, assemble
 
 RECIPE_ID = "flux.kontext-stitch-crop-fill.v1"
 MEASURED_GRAPH = "https://cloud.comfy.org/#a3c8c6af-41a1-45f6-b8ca-dab171d9bcc0"
@@ -79,9 +79,42 @@ class MaskPlan(BaseModel):
     do_not_mask_bracer: bool | None
 
 
+def _resolved_mask(fill_mask: str | Path) -> Path:
+    """Existence-check a painted mask the way every other ref in this domain is checked.
+
+    F-b8ee4b0a: passing ANY ``fill_mask`` value disabled BOTH bracer refusals -- they branch on
+    ``fill_mask is None`` alone -- and nothing checked that the value named a readable file.
+    ``conditioning.resolve_ref``, whose stated promise is to refuse "before any pipeline load if a
+    ref cannot be opened", was applied to every identity plate, pose map and inpaint source, and to
+    this one input it was not. So a typo in ``--fill-mask`` silently switched off the module's single
+    measured safety constraint and exited 0 with a graph on disk: an unresolvable ``LoadImage``
+    bound for Comfy Cloud at real spend, on the Fill pass whose documented failure mode is
+    destroying the bone-spike bracer. A directory passed identically, and so did ``Path('')`` --
+    what typer hands this layer for ``--fill-mask ""``.
+
+    INPUT_ rather than GATE_: a mistyped path is bad user input (exit 1, "fix your input"), not a
+    gate-discipline violation. The check lives here, in the one place the mask question is answered,
+    so ``build_graph``, ``report_for`` and ``from_conditioning`` cannot disagree about it.
+    """
+    try:
+        return cond.resolve_ref(fill_mask)
+    except FileNotFoundError as err:
+        raise PromptCraftError(
+            "INPUT_FILL_MASK",
+            f"fill mask {str(fill_mask)!r} is not a readable file",
+            hint="Pass --fill-mask at a painted fist-only mask that exists. Supplying a mask "
+            "replaces the built-in fist box AND turns the bracer guard off, so a mistyped path "
+            "would disable the one constraint this recipe measures. Do not mask the bracer.",
+            cause=err,
+        ) from err
+
+
 def resolve_mask_plan(fill_region: str = "fist", fill_mask: str | Path | None = None) -> MaskPlan:
     """Refuse the measured-unsafe regions, then say what the Fill pass will actually mask."""
     requested = (fill_region or "fist").strip().lower()
+    if fill_mask is not None:
+        # Refuse an unreadable mask BEFORE it is allowed to switch off the bracer refusals below.
+        _resolved_mask(fill_mask)
     if fill_mask is None:
         if requested in BRACER_REGIONS:
             raise PromptCraftError(
@@ -118,6 +151,11 @@ class RecipeReport(BaseModel):
     stages: list[str] = list(STAGES)
     identity: str
     identity_method: str = ""  # the method the contract DECLARED for the stitched plate
+    # F-0e41e735: every plate that reaches the identity bucket now declares a method this recipe can
+    # apply, so a second one is a legitimate composition rather than a wrong-family lock -- but the
+    # stitch still takes exactly one. Name the rest. A silent first-wins on the identity lock is the
+    # one outcome this module's docstrings say must not happen.
+    identity_unchosen: list[str] = Field(default_factory=list)
     pose: str
     crop: str = "left-half"
     fill_region: str = "fist"  # what the Fill pass masks, not what was requested
@@ -184,7 +222,6 @@ def build_graph(
     seed: int = 169405236028824,
 ) -> dict:
     """API-format Comfy graph (node-id keys, class_type + inputs)."""
-    refs = as_generate_refs(lock)
     if not lock.identity:
         raise PromptCraftError(
             "GATE_CONDITIONING_REF_MISSING",
@@ -201,7 +238,11 @@ def build_graph(
     # from the graph (F-90667b30).
     resolve_mask_plan(fill_region, fill_mask)
 
-    identity = str(refs[0])
+    # F-0e41e735: read the identity bucket directly. This used to be ``as_generate_refs(lock)[0]``,
+    # which happens to be the same plate but says "whatever sorted first" rather than "the identity
+    # lock" -- and that indirection is precisely how a costume/pose ordering change could have
+    # silently re-pointed the stitch.
+    identity = str(lock.identity[0])
     pose = lock.pose[0]
     graph = _Graph()
 
@@ -367,6 +408,7 @@ def report_for(
     return RecipeReport(
         identity=identity,
         identity_method=lock.method_for(identity),
+        identity_unchosen=list(lock.identity[1:]),
         pose=lock.pose[0] if lock.pose else "",
         fill_region=plan.region,
         requested_fill_region=plan.requested_region,

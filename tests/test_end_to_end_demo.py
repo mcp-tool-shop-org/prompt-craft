@@ -7,7 +7,7 @@ def test_demo_binds_and_writes_a_viewable_image_and_a_pinned_receipt(tmp_path):
     res = run_mock_loop(records_dir=str(tmp_path))
     assert res.decision == "bound"
 
-    # a real PNG was produced (rough output is fine — the loop is what's proven)
+    # a real PNG was produced (rough output is fine -- the loop is what's proven)
     images = list((tmp_path / "_stub_images").glob("*.png"))
     assert images, "no image produced"
     assert images[0].read_bytes().startswith(b"\x89PNG")

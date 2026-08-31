@@ -2,7 +2,14 @@
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
-model to stdout and the human banner to stderr."""
+model to stdout and the human banner to stderr.
+
+One deliberate exception to that table: an operator interrupt (Ctrl-C) exits **130**
+(128 + SIGINT), the universal shell convention, and prints no structured error line.
+That code is deliberately NOT folded into 0/1/2/3/4 -- exit 1 already means "bad user
+input", so collapsing an interrupt into it would leave a scripted caller unable to tell
+a typo from a Ctrl-C. Pinned in tests/test_amend_cli.py by
+``test_an_interrupted_run_exits_130_outside_the_documented_code_table``. (F-df34f27e)"""
 
 from __future__ import annotations
 
@@ -97,8 +104,20 @@ class _ExitContractGroup(TyperGroup):
             exc.show()
             sys.exit(1)  # INPUT_-class: bad user input -- never GATE_'s exit 2
         except _ClickAbort:
+            # NOT reachable for Ctrl-C, and kept anyway (F-df34f27e). typer converts a
+            # KeyboardInterrupt to Exit(130) internally (core.py:197-198), never to Abort,
+            # so an interrupt returns through the fall-through below instead of arriving
+            # here. Abort still reaches this clause by its other route: core.py:194-196
+            # turns a bare EOFError into Abort(), and core.py's own handler re-raises it
+            # untouched under standalone_mode=False. Abort subclasses RuntimeError, so
+            # nothing else here would catch it -- deleting this clause as "dead" trades a
+            # one-line banner for a raw traceback. Both halves are pinned in
+            # tests/test_amend_cli.py (the interrupt code, and this branch firing).
             typer.echo("Aborted!", err=True)
             sys.exit(1)
+        # Also the interrupt path: super().main() RETURNS 130 with no exception raised,
+        # because standalone_mode=False makes core.py's outer Exit handler return the code
+        # instead of exiting. 130 passes through deliberately -- see the module docstring.
         sys.exit(rv if isinstance(rv, int) else 0)
 
 
