@@ -1434,13 +1434,27 @@ def test_the_mock_path_stays_quiet(tmp_path):
 
 
 def _stdout_at(argv, columns="100"):
-    """Render a command at a PINNED width so a layout assertion measures layout.
+    """Render a command in a FRESH SUBPROCESS at a PINNED width so a layout assertion
+    measures layout.
 
-    Terminal width is an input to every wrap in this section; leaving it to whatever
-    console runs the suite would make these tests report the runner's geometry rather
-    than the product's behaviour.
+    Terminal width is an input to every wrap in this section. The first form of this
+    helper pinned COLUMNS through in-process CliRunner, which is order-dependent: the
+    help renderer's console is created once per process and caches the width it saw
+    first, so these tests reported whichever geometry an EARLIER test had baked in --
+    green on wide developer consoles, red on CI's 80 columns, in the same suite. A
+    fresh process is the only rendering both halves of that split agree on (the same
+    reasoning as the cp437 subprocess tests above: pin the console, not the weather).
     """
-    return runner.invoke(app, argv, env={"COLUMNS": columns}).stdout or ""
+    proc = subprocess.run(
+        [sys.executable, "-m", "pcraft", *argv],
+        capture_output=True,
+        env={**os.environ, "COLUMNS": columns, "PYTHONIOENCODING": "utf-8"},
+        timeout=60,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    return proc.stdout or ""
 
 
 # --------------------------------------------------------------------------- F-f880d5a4
