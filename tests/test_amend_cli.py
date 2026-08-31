@@ -40,13 +40,19 @@ runner = CliRunner()
 # Click/Typer's own parser errors (missing arg, bad option, unknown/missing command) must
 # exit 1 ("bad user input"), never the library's built-in UsageError default of 2 -- this
 # product's own errors.py already spends 2 on "ran, and a required atom failed".
+#
+# NOTE (wave-13, F-76b0940b): `gate`'s IMAGE argument became variadic when the batch door
+# landed, so a bare `pcraft gate` is now refused by the command's OWN INPUT_GATE_TARGET
+# rather than by Click's MissingParameter. The assertion below is unchanged and still the
+# contract -- exit 1 either way -- and the Click path it was written for is still exercised
+# by the other five rows, `["replay"]` most directly (a required, non-variadic argument).
 
 
 @pytest.mark.parametrize(
     "argv",
     [
-        ["gate"],  # missing IMAGE argument
-        ["replay"],  # missing RECORD argument
+        ["gate"],  # missing IMAGE argument (the CLI's own refusal since wave-13)
+        ["replay"],  # missing RECORD argument -- Click's MissingParameter
         ["synth", "--debug=notabool"],  # bad option value (--debug is a flag, takes none)
         ["frobnicate"],  # unknown command
         [],  # bare invocation -> Click's "Missing command."

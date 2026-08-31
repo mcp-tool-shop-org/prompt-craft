@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from ...errors import PromptCraftError
+from .compile_questions import QuestionDAG, compile_questions
 from .schema import SUPPORTED_CONTRACT_SCHEMAS, Contract, IdentityRef, ResolvedContract, Severity
+
+if TYPE_CHECKING:  # `explain` imports THIS module, so the runtime import is deferred
+    from .explain import ContractExplain
 
 
 class ContractStore:
@@ -56,6 +61,32 @@ class ContractStore:
 
     def resolve(self, contract_id: str) -> ResolvedContract:
         return resolve(self.get(contract_id), self._by_id.get)
+
+    def explain(self, contract_id: str) -> ContractExplain:
+        """Where each resolved atom came from, and whether its severity was raised (F-ea403b5a).
+
+        A READ-ONLY reporting view over decisions ``resolve()`` has already made -- never a
+        second place that makes them. It runs the real ``resolve()`` first, so a contract this
+        loader would refuse is refused here too, with the same code, before anything is
+        reported about it.
+
+        The half of FEAT-005 that did not ship alongside ``ids()`` / ``source_path()``. An
+        author composing a character through ``extends`` could otherwise only answer "which
+        atoms came from the faction" by reading this module's private ``_merge_atoms_fail_closed``
+        or by diffing two ``validate`` runs by eye.
+        """
+        from .explain import explain_contract
+
+        return explain_contract(self.get(contract_id), self._by_id.get)
+
+    def questions_preview(self, contract_id: str) -> QuestionDAG:
+        """``resolve()`` + ``compile_questions()``, named (F-ea403b5a).
+
+        No new logic: an entry point, so ``pcraft validate``'s bare ``questions: N`` count can
+        eventually be replaced by the real DAG without a second compile call growing beside
+        the first one.
+        """
+        return compile_questions(self.resolve(contract_id))
 
 
 def _read_contract(path: Path) -> Contract:
@@ -379,37 +410,56 @@ _RELAXATION_HINT = (
 )
 
 
-def _rewritten_atom_fields(base, child) -> list[str]:
+_ATOM_CONTENT_FIELDS: tuple[str, ...] = ("claim", "check_type", "spatial", "enum", "depends_on")
+"""The content of an ``Atom``: everything except its ``id`` and its ``severity``.
+
+Named rather than inlined so ``contract/diff.py`` can report on the SAME field set this
+module refuses rewrites of (F-ea94c287). A diff that enumerated its own list would be a
+second opinion about what "changed" means, free to drift from the one the loader enforces;
+the two now read one constant. Severity is deliberately absent -- it is not content, and
+this module compares it by RANK in its own arm, because a raise is legal and a drop is not.
+
+ORDER IS LOAD-BEARING: the CONTRACT_RELAXATION message joins these names, so reordering
+them reorders a user-facing refusal."""
+
+_MUST_NOT_CONTENT_FIELDS: tuple[str, ...] = ("claim", "check_type", "enum", "spatial")
+"""The same, for ``MustNot`` -- which has no ``depends_on``. (``compile_questions`` passes
+``depends_on=None`` for every negate probe.) Its historical field order differs from the
+atom list above and is preserved for the same reason: it is printed."""
+
+_ALWAYS_STATED: frozenset[str] = frozenset({"claim", "check_type"})
+"""Fields a redeclaration must always carry, so ``None`` is not a legal "inherit" for them.
+
+Every other content field is optional on the schema: a child that omits ``spatial`` /
+``enum`` / ``depends_on`` INHERITS the base's, so only an explicit different value counts as
+a rewrite. That asymmetry is what separates "the child said nothing" from "the child said
+something else", and it is why the comparison below cannot simply be ``!=`` for all five."""
+
+
+def _rewritten_fields(base, child, fields: tuple[str, ...]) -> list[str]:
     """Content fields the child restated differently from the inherited atom.
 
     Omitted optional fields (spatial/enum/depends_on left at None) inherit the base.
     An explicit different value is a rewrite. claim and check_type are always stated.
     """
     changed: list[str] = []
-    if child.claim != base.claim:
-        changed.append("claim")
-    if child.check_type != base.check_type:
-        changed.append("check_type")
-    if child.spatial is not None and child.spatial != base.spatial:
-        changed.append("spatial")
-    if child.enum is not None and child.enum != base.enum:
-        changed.append("enum")
-    if child.depends_on is not None and child.depends_on != base.depends_on:
-        changed.append("depends_on")
+    for name in fields:
+        child_value = getattr(child, name)
+        if name not in _ALWAYS_STATED and child_value is None:
+            continue  # omitted -> inherits the base; not a rewrite
+        if child_value != getattr(base, name):
+            changed.append(name)
     return changed
+
+
+def _rewritten_atom_fields(base, child) -> list[str]:
+    """See ``_rewritten_fields``. Kept as a named function: it is the loader's own vocabulary
+    and both merge sites read it."""
+    return _rewritten_fields(base, child, _ATOM_CONTENT_FIELDS)
 
 
 def _rewritten_must_not_fields(base, child) -> list[str]:
-    changed: list[str] = []
-    if child.claim != base.claim:
-        changed.append("claim")
-    if child.check_type != base.check_type:
-        changed.append("check_type")
-    if child.enum is not None and child.enum != base.enum:
-        changed.append("enum")
-    if child.spatial is not None and child.spatial != base.spatial:
-        changed.append("spatial")
-    return changed
+    return _rewritten_fields(base, child, _MUST_NOT_CONTENT_FIELDS)
 
 
 def _merge_atoms_fail_closed(base_atoms, child_atoms, *, child_id: str):

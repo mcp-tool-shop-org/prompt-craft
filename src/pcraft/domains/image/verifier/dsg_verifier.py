@@ -21,6 +21,7 @@ from collections.abc import Callable
 from ....core.contract.compile_questions import Question
 from ....errors import PromptCraftError
 from .dsg_expand import DSGExpansion, SubProbe, template_expand
+from .region import full_frame_note
 from .vqascore_verifier import DEFAULT_MODEL_ID as _VQA_TIER1_DEFAULT_MODEL_ID
 
 _LOG = logging.getLogger(__name__)
@@ -48,6 +49,10 @@ class DSGVerifier:
         self._answerer = None
         self._unavailable = False
         self.last_expansion: DSGExpansion | None = None
+        # F-2c77d698. What the most recent score owes an atom whose declared region it did not
+        # honour, or None. Written beside last_expansion, cleared in the same place and for the
+        # same reason: a note left over from the previous atom describes the wrong contract.
+        self.last_scope_note: str | None = None
         self.shares_model_with: str | None = (
             "vqascore.clip-flant5.v1" if answerer_model == _VQA_TIER1_DEFAULT_MODEL_ID else None
         )
@@ -97,7 +102,15 @@ class DSGVerifier:
             + ("N/A" if row["score"] is None else f"{row['score']:.2f}")
             for row in rows
         ]
-        return f"{len(rows)} probe(s): " + ", ".join(parts)
+        body = f"{len(rows)} probe(s): " + ", ".join(parts)
+        # F-2c77d698. This tier's whole job is LOCALIZATION, which makes it the most misleading
+        # place to leave a declared region unmentioned: "which probe failed" reads as an answer to
+        # "where", and the probes all ran on the whole frame. The note LEADS for that reason. It is
+        # carried on the instrument rather than taken as an argument because this method's
+        # signature is read by name from harness._detail_for and is already published no-argument.
+        if self.last_scope_note:
+            return f"{self.last_scope_note}; {body}"
+        return body
 
     def expand(self, question: Question) -> DSGExpansion:
         """Run the QG slot. Template by default; injected ``qg`` wins."""
@@ -149,9 +162,13 @@ class DSGVerifier:
             ) from err
 
     def score(self, image_path: str, question: Question) -> float | None:
+        self.last_scope_note = None
         answerer = self._get_answerer()
         if answerer is None:
             return None
+        # F-2c77d698: recorded before the probes run, so a refusal mid-expansion still leaves the
+        # honest statement of what window this tier was working over.
+        self.last_scope_note = full_frame_note(question, self.verifier_id)
         expansion = self.expand(question)
         # F-f5cc9257: this call was unguarded, in deliberate contrast to ``_ask`` directly above,
         # which classifies everything the answerer can throw. A cyclic injected expansion raised a

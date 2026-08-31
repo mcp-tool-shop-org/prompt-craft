@@ -1236,3 +1236,340 @@ def test_the_canary_watches_every_module_this_file_fakes():
     watched = set(_FAKED_MAY_BE_REAL) | set(_FAKED_NEVER_INSTALLED)
     assert faked, "the scan found no fake-module installs at all -- the pattern has drifted"
     assert faked <= watched, f"faked but unwatched: {sorted(faked - watched)}"
+
+
+# ============================================================ F-37f8764e (a real-canon front door)
+# Every contract this product ships is labelled, in its own `_note`, "GENERIC EXAMPLE -- invented
+# for the scaffold, NOT real game canon". The gap between that and a studio binding REAL canon is
+# entirely manual: hand-write JSON with atom ids, claims, check_type per atom, severity per atom,
+# depends_on edges, spatial.kind/ref, identity_ref (plate + method + weight + scope) and hex enum
+# members -- and get the inheritance shape right. MEASURED, the CLI is synth | gate | bind | list |
+# validate | demo | replay | doctor | schema | recipe | compile | sync-rules: `schema` emits a
+# validator and `validate` refuses a bad file, so the front door for the product's own core
+# artifact is a blank file. Half of the scaffold can be MEASURED rather than guessed --
+# palette_verifier.load_rgb is deterministic, GPU-free, and already knows which colours are in a
+# plate, which is exactly the enum an author would otherwise eyeball out of an image editor.
+#
+# The content-awareness is MAPPING DECLARED TRAITS TO ATOMS. Nothing here looks at a plate to
+# decide what is in it; the only pixels read are a colour histogram.
+
+
+def _plate_png(path, colours, size: int = 60):
+    """A plate of equal horizontal bands -- write_solid_png cannot express a palette."""
+    import struct
+    import zlib
+
+    band = size // len(colours)
+    rows = []
+    for y in range(size):
+        rgb = colours[min(y // band, len(colours) - 1)]
+        rows.append(bytes([0]) + bytes(rgb) * size)
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    blob = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+        + chunk(b"IEND", b"")
+    )
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(blob)
+    return p
+
+
+_ASH, _BONE, _BLOOD = (58, 58, 58), (217, 212, 200), (122, 31, 31)
+
+
+def _sheet(tmp_path, **overrides):
+    """A reference sheet: a directory of plates plus one small JSON of NAMED traits."""
+    import json
+
+    root = tmp_path / "sheet"
+    costume = _plate_png(root / "plates" / "costume.png", [_ASH, _BONE, _BLOOD])
+    face = _plate_png(root / "plates" / "face.png", [_ASH, _BLOOD])
+    body = {
+        "faction": "ashen-pact",
+        "character": "ashen-reaver",
+        "faction_plate": "plates/costume.png",
+        "character_plate": "plates/face.png",
+        "traits": [
+            {"id": "tabard", "kind": "costume", "scope": "faction"},
+            {"id": "sigil", "kind": "insignia", "scope": "faction", "depends_on": "tabard"},
+            {"id": "palette", "kind": "palette", "scope": "faction", "plate": "plates/costume.png"},
+            {"id": "face", "kind": "face", "claim": "a visible orcish face with tusks"},
+            {"id": "gait", "kind": "trait"},
+        ],
+        "drift_cues": ["a smooth human face", "a shield"],
+    }
+    body.update(overrides)
+    path = root / "sheet.json"
+    path.write_text(json.dumps(body), encoding="utf-8")
+    assert costume.is_file() and face.is_file()
+    return path
+
+
+def _scaffold(tmp_path, out=None, **overrides):
+    from pcraft.domains.image.scaffold import scaffold_from_reference_sheet
+
+    return scaffold_from_reference_sheet(
+        _sheet(tmp_path, **overrides), contracts_dir=out or (tmp_path / "contracts")
+    )
+
+
+def test_the_scaffold_emits_both_halves_and_they_load_back_through_the_loader(tmp_path):
+    """Emit BOTH, and prove it by the only means that counts: re-read the written files through
+    the SAME ContractStore/_read_contract/resolve() path a hand-written pair goes through. A
+    scaffold whose output does not load is worse than a blank file."""
+    from pcraft.core.contract.loader import ContractStore
+
+    result = _scaffold(tmp_path)
+    assert result.faction_path.is_file() and result.character_path.is_file()
+    store = ContractStore([tmp_path / "contracts"])
+    assert store.ids() == ["char:ashen-reaver", "faction:ashen-pact"]
+    resolved = store.resolve("char:ashen-reaver")
+    assert resolved.lineage == ["faction:ashen-pact", "char:ashen-reaver"]
+    ids = [a.id for a in resolved.must_have]
+    assert ids == ["tabard", "sigil", "palette", "face", "gait"], "faction atoms first, then the child"
+    assert [m.id for m in resolved.must_not] == ["no_smooth_human_face", "no_shield"]
+    assert len(resolved.identity_refs) == 2, "the faction costume plate composes with the face plate"
+
+
+def test_a_seeded_atom_is_visibly_a_stub_and_never_required(tmp_path):
+    """MUST NOT BREAK. A scaffold that emits `severity: required` on an atom nobody reviewed
+    manufactures a gate nobody authored -- the exact failure this whole package exists to catch.
+    And a claim the author did not write is a claim the gate would then enforce."""
+    from pcraft.core.contract.loader import ContractStore
+
+    result = _scaffold(tmp_path)
+    resolved = ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver")
+    assert not resolved.required_atoms(), "nothing an author has not reviewed may block a bind"
+    stubs = {a.id: a for a in resolved.must_have}
+    assert stubs["gait"].claim.startswith("TODO"), "an unwritten claim says so in its own text"
+    assert stubs["face"].claim == "a visible orcish face with tusks", "an authored claim is verbatim"
+    assert set(result.stub_atom_ids) == {"tabard", "sigil", "palette", "gait"}
+
+
+def test_the_stub_shows_the_shape_rather_than_making_the_author_discover_it(tmp_path):
+    """`spatial` and `depends_on` are emitted present-but-empty on a stub with nothing to say, so
+    the fields are visible in the file instead of being found in the JSON Schema."""
+    import json
+
+    _scaffold(tmp_path)
+    data = json.loads((tmp_path / "contracts" / "characters" / "ashen-reaver.character.contract.json").read_text(encoding="utf-8"))
+    gait = next(a for a in data["must_have"] if a["id"] == "gait")
+    assert "spatial" in gait and gait["spatial"] is None
+    assert "depends_on" in gait and gait["depends_on"] is None
+
+
+def test_each_trait_kind_gets_the_image_domains_own_defaults(tmp_path):
+    """THE CONTENT-AWARENESS: a declared trait KIND maps to a check_type and to the window that
+    kind lives in. `insignia` is chest-center because that is where a sigil goes -- the same names
+    conditioning.region_box knows, so a scaffolded region is one the gate can actually check."""
+    from pcraft.core.contract.loader import ContractStore
+
+    _scaffold(tmp_path)
+    atoms = {a.id: a for a in ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver").must_have}
+    assert atoms["tabard"].check_type.value == "vqa"
+    assert atoms["tabard"].spatial.ref == "torso"
+    assert atoms["sigil"].spatial.ref == "chest-center"
+    assert atoms["sigil"].depends_on == "tabard", "a declared edge survives into the DAG"
+    assert atoms["face"].spatial.ref == "head"
+    assert atoms["palette"].check_type.value == "palette"
+    assert atoms["palette"].spatial is None, "a palette atom's window is a separate decision"
+    assert atoms["gait"].spatial is None
+
+
+def test_the_palette_enum_is_measured_from_the_plate_and_the_verifier_accepts_it(tmp_path):
+    """The half that can be MEASURED rather than guessed. And the measurement is worthless if the
+    verifier that will read it refuses the text: an emitted '#00FF00' is not '#00ff00' to the text
+    search `_written_hex` exists to serve, so the emitted members round-trip _colours_or_refuse."""
+    from pcraft.core.contract.loader import ContractStore
+    from pcraft.domains.image.verifier.palette_verifier import _colours_or_refuse
+
+    result = _scaffold(tmp_path)
+    atoms = {a.id: a for a in ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver").must_have}
+    enum = atoms["palette"].enum
+    assert set(enum) == {"#3a3a3a", "#d9d4c8", "#7a1f1f"}, "the three bands actually in the plate"
+    assert enum == [m.lower() for m in enum], "one spelling, so a text search finds it"
+    assert list(result.palette_enum) == enum
+    q = Question(
+        atom_id="palette",
+        text="probe",
+        check_type=CheckType.palette,
+        polarity=Polarity.affirm,
+        severity=Severity.optional,
+        enum=enum,
+    )
+    assert len(_colours_or_refuse(q)) == 3, "the verifier parses every member the scaffold wrote"
+
+
+def test_the_seeded_enum_is_never_mixed_hex_and_text(tmp_path):
+    """CONTRACT_PALETTE_ENUM_MIXED: no single instrument measures both, and that refusal's own hint
+    tells authors the answer is two atoms. A scaffold must not emit the shape it warns about."""
+    from pcraft.core.contract.loader import ContractStore
+
+    atoms = {
+        a.id: a
+        for a in (_scaffold(tmp_path) and ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver").must_have)
+    }
+    assert all(m.startswith("#") for m in atoms["palette"].enum)
+
+
+def test_the_note_says_the_hexes_are_a_measurement_not_canon(tmp_path):
+    """MUST NOT BREAK. Background and anti-aliasing colours land in any naive dominant-colour
+    extraction, so the emitted enum is a fact about the PLATE, never a statement of canon."""
+    import json
+
+    _scaffold(tmp_path)
+    faction = json.loads((tmp_path / "contracts" / "factions" / "ashen-pact.faction.contract.json").read_text(encoding="utf-8"))
+    note = faction["_note"].lower()
+    assert "measured" in note and "plate" in note
+    assert "not canon" in note
+    assert "stub" in note, "and the atoms are stubs until an author reviews them"
+
+
+def test_the_drift_cues_become_must_not_atoms_in_the_authors_own_words(tmp_path):
+    """A must_not claim IS author-written -- they typed the cue -- so it is carried verbatim. Its
+    severity is still `optional`, for the reason the shipped examples give: absence-verification is
+    not measured on this stack, and promotion is the intended direction."""
+    from pcraft.core.contract.loader import ContractStore
+
+    resolved = _scaffold(tmp_path) and ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver")
+    cues = {m.id: m for m in resolved.must_not}
+    assert cues["no_shield"].claim == "a shield", "the id loses the article; the claim never does"
+    assert all(m.severity.value == "optional" for m in cues.values())
+
+
+def test_the_scaffold_refuses_to_write_into_the_packaged_sprite_tree(tmp_path):
+    """MUST NOT BREAK. The shipped examples are the de facto template every contract is copied
+    from; a scaffold that lands beside them (or on top of them) destroys the reference."""
+    from pcraft.domains.image.generator.conditioning import _SPRITE_ROOT
+
+    with pytest.raises(PromptCraftError) as exc:
+        _scaffold(tmp_path, out=_SPRITE_ROOT / "contracts")
+    assert exc.value.code == "INPUT_SCAFFOLD_TARGET"
+    assert "packaged" in (exc.value.hint or "").lower()
+    assert "--contracts-dir" in (exc.value.hint or "")
+
+
+def test_the_scaffold_never_silently_overwrites_an_existing_contract(tmp_path):
+    _scaffold(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        _scaffold(tmp_path)
+    assert exc.value.code == "INPUT_SCAFFOLD_TARGET"
+    assert "overwrite" in (exc.value.hint or "").lower()
+
+
+def test_an_identity_method_no_encoder_implements_is_refused_by_name(tmp_path):
+    """Same allow-list discipline as conditioning._SUPPORTED_METHODS, moved to authoring time: a
+    scaffold that writes `method: ipadapter` produces a contract whose lock is dropped at generate
+    time while the receipt still stamps the resolved plate."""
+    with pytest.raises(PromptCraftError) as exc:
+        _scaffold(tmp_path, identity_method="ipadapter")
+    assert exc.value.code == "GATE_CONDITIONING_UNSUPPORTED"
+    assert "ipadapter" in exc.value.message
+
+
+def test_an_unknown_trait_kind_is_refused_rather_than_defaulted(tmp_path):
+    """A kind nobody wired must not quietly become a generic vqa atom: the author would get an
+    atom with no window and no sign that the kind they wrote meant nothing."""
+    traits = [{"id": "aura", "kind": "vibes"}]
+    with pytest.raises(PromptCraftError) as exc:
+        _scaffold(tmp_path, traits=traits)
+    assert exc.value.code == "INPUT_SCAFFOLD_TRAIT"
+    assert "vibes" in exc.value.message
+    assert "insignia" in (exc.value.hint or ""), "the refusal lists the kinds that DO exist"
+
+
+def test_the_sheet_is_json_and_says_so(tmp_path):
+    """The minimal honest input. This package declares no YAML dependency (pydantic + typer), and
+    the contract format is already JSON, so a .yaml sheet is refused by name rather than parsed by
+    whatever happens to be installed in the operator's environment."""
+    from pcraft.domains.image.scaffold import read_reference_sheet
+
+    sheet = _sheet(tmp_path)
+    renamed = sheet.with_suffix(".yaml")
+    renamed.write_bytes(sheet.read_bytes())
+    with pytest.raises(PromptCraftError) as exc:
+        read_reference_sheet(renamed)
+    assert exc.value.code == "INPUT_SCAFFOLD_SHEET"
+    assert "json" in (exc.value.hint or "").lower()
+
+
+def test_the_skeleton_comes_from_the_core_primitive_when_the_build_carries_one(monkeypatch, tmp_path):
+    """This is the image-domain HALF of the scaffold: the defaults, the trait mapping, the measured
+    palette. The contract SKELETON belongs to core/contract (F-a9d86551), so when that primitive is
+    present it is used, and the result says which one ran -- a fallback nobody can see is a fork."""
+    from pcraft.core.contract.schema import Contract
+    from pcraft.domains.image import scaffold as sc
+
+    called: list[tuple] = []
+
+    def fake_scaffold_contract(level, contract_id, extends=None):
+        called.append((level, contract_id, extends))
+        return Contract(id=contract_id, level=level, extends=extends)
+
+    monkeypatch.setattr(sc, "core_scaffold_primitive", lambda: fake_scaffold_contract)
+    result = _scaffold(tmp_path)
+    assert result.skeleton_source == "core-primitive"
+    assert called == [
+        ("faction", "faction:ashen-pact", None),
+        ("character", "char:ashen-reaver", "faction:ashen-pact"),
+    ]
+
+
+def test_without_the_primitive_the_fallback_is_named_not_hidden(tmp_path):
+    """Until F-a9d86551 lands there is no primitive to call. The skeleton is then built here from
+    the same schema the primitive must use, and the result SAYS so, so 'the fold did not connect'
+    is a visible fact rather than a silent duplicate implementation."""
+    from pcraft.domains.image import scaffold as sc
+
+    result = _scaffold(tmp_path)
+    assert result.skeleton_source in ("core-primitive", "image-domain-fallback")
+    if sc.core_scaffold_primitive() is None:
+        assert result.skeleton_source == "image-domain-fallback"
+
+
+def test_the_scaffold_reads_no_pixels_it_was_not_pointed_at(tmp_path):
+    """The docstring's own claim, measured. 'Content-aware' here means mapping DECLARED traits to
+    atoms; the only plate read is the one a palette trait names, and it is read by a histogram, not
+    by anything that recognises what is in it."""
+    from pcraft.domains.image import scaffold as sc
+
+    read: list[str] = []
+    real = sc.dominant_hex
+
+    def spy(path, **kwargs):
+        read.append(Path(path).name)
+        return real(path, **kwargs)
+
+    original = sc.dominant_hex
+    sc.dominant_hex = spy
+    try:
+        _scaffold(tmp_path)
+    finally:
+        sc.dominant_hex = original
+    assert read == ["costume.png"], "one plate, because one trait named one"
+
+
+def test_every_region_the_scaffold_writes_is_one_the_gate_can_actually_honour(tmp_path):
+    """The join between this wave's two halves. F-2c77d698 made a declared region CHECKABLE and
+    made an unrecognised one a refusal -- so a scaffold that seeded a plausible-sounding window
+    would emit contracts that refuse at gate time. Measured through the compiled DAG, which is what
+    the gate actually receives, rather than against the defaults table this file also owns."""
+    from pcraft.core.contract.compile_questions import compile_questions
+    from pcraft.core.contract.loader import ContractStore
+    from pcraft.domains.image.verifier.region import declared_region, region_window
+
+    _scaffold(tmp_path)
+    dag = compile_questions(ContractStore([tmp_path / "contracts"]).resolve("char:ashen-reaver"))
+    regions = [(q.atom_id, declared_region(q)) for q in dag.questions]
+    assert [r for _id, r in regions if r], "the scaffold seeded no regions at all"
+    for atom_id, region in regions:
+        if region is None:
+            continue
+        assert region_window(64, 64, region, atom_id=atom_id), f"{atom_id} names {region!r}"

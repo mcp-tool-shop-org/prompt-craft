@@ -308,8 +308,38 @@ def open_image(path: str | Path):
     return Image.open(path)
 
 
+SUPPORTED_REGIONS = frozenset(
+    {"head", "face", "torso", "chest", "chest-center", "hands", "weapon", "hand", "fist", "center"}
+)
+"""Region names ``region_box`` recognises BY NAME. Edit this and ``region_box`` together.
+
+F-2c77d698. ``region_box`` answers every name, because its caller until now was the inpaint
+repair, whose ``inpaint_region`` defaults to the string ``"center"`` -- so a trailing "return a
+centre box" arm is correct THERE. It is not correct for a gate: a contract-authored
+``spatial.ref`` is free text, and scoring ``shouldre`` on a guessed centre window produces a
+verdict that reads exactly like a measured one. Consumers that must not guess ask
+``is_supported_region`` first and refuse by name, the same discipline ``_SUPPORTED_METHODS``
+applies to ``identity_ref.method``.
+
+``center`` is listed deliberately: it is the NAME of the box the default arm returns and the
+value ``inpaint_region`` already defaults to, so it is a recognised region rather than a
+fall-through. Every other unlisted name reaches that arm by accident, which is the difference
+this set exists to draw.
+"""
+
+
+def is_supported_region(region: str) -> bool:
+    """Whether ``region_box`` recognises this name, or would merely fall through to its default."""
+    return region.strip().lower() in SUPPORTED_REGIONS
+
+
 def region_box(width: int, height: int, region: str) -> tuple[int, int, int, int]:
-    """Pixel box (left, top, right, bottom) for a named contract region. GPU-free."""
+    """Pixel box (left, top, right, bottom) for a named contract region. GPU-free.
+
+    Deliberately total: an unrecognised name gets the centre box, because the inpaint repair has
+    to paint SOMETHING and ``inpaint_region`` defaults to a name ("center") that lands here. A
+    caller that must not guess -- the gate -- checks ``is_supported_region`` first.
+    """
     if width <= 0 or height <= 0:
         raise PromptCraftError(
             "GATE_CONDITIONING_REF_MISSING",

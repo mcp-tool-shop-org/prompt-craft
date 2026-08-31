@@ -1,4 +1,4 @@
-"""The ``pcraft`` CLI: synth | gate | bind | list | validate | compile | replay | regrade | calibrate | sync-rules | demo | doctor | recipe | schema.
+"""The ``pcraft`` CLI: new | synth | gate | bind | resolve | list | validate | compile | replay | regrade | calibrate | sync-rules | demo | doctor | recipe | schema.
 
 Errors use the structured shape (code/message/hint) and map to exit codes 0/1/2/3/4; raw
 tracebacks are gated behind --debug. ``--json`` on the dumpable commands writes the pydantic
@@ -23,7 +23,7 @@ import sys
 import textwrap
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import typer
 from pydantic import BaseModel, ConfigDict
@@ -62,7 +62,7 @@ except ModuleNotFoundError:  # typer < 0.26 -- click is a real dependency there
 from typer.core import TyperGroup
 
 from .. import package_version, version_coherence
-from ..errors import PromptCraftError, wrap_error
+from ..errors import PromptCraftError, id_list, wrap_error
 from ..gate_report import format_transcript  # local helper (see below)
 
 
@@ -429,6 +429,56 @@ class ValidateReport(BaseModel):
     questions: int
 
 
+class ScaffoldReport(BaseModel):
+    """What ``pcraft new`` wrote, as the LOADER read it back (F-62e7d1f0).
+
+    Every field here is a fact about the file on disk after it was re-read through the same
+    ``ContractStore.resolve`` a hand-written contract goes through -- never a copy of what the
+    scaffold intended. ``stub_atoms`` is the list the human line says out loud: the atoms that
+    still need a real claim and a deliberate severity before this contract gates anything.
+
+    ``extends`` is NOT a field here on purpose: it is absent for a faction and would then have
+    to be emitted as ``null``, which reads as "it extends nothing in particular" rather than
+    "this level has no base". It travels as an ``_emit_model`` extra instead, which omits a key
+    with nothing to say -- the same rule ``receipt_path`` follows.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    level: str
+    path: str
+    lineage: list[str]
+    required: list[str]
+    must_not: list[str]
+    stub_atoms: list[str]
+
+
+class ResolutionReport(BaseModel):
+    """What ``pcraft resolve`` recorded against an escalated receipt (F-2b04f0b8).
+
+    A CLI-owned document, deliberately: the ``Disposition`` FILE's schema belongs to
+    ``core.receipt.disposition``, and this is the invocation's own answer -- which receipt,
+    which verdict, who, and where the entry landed. ``decision`` is the receipt's own field,
+    echoed unchanged, so a machine caller can see for itself that recording a resolution did
+    not rewrite the receipt's verdict.
+
+    ``verdict`` and ``resolution`` are BOTH here and are not redundant: ``verdict`` is the word
+    the operator typed at this CLI (approve/reject) and ``resolution`` is the word written into
+    the entry on disk (accepted/rejected), which is what a downstream reader filters on. A
+    document that carried only one of them would make a caller guess the mapping.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    record_id: str
+    receipt_path: str
+    decision: str
+    verdict: str
+    resolution: str
+    note: str
+    resolved_by: str
+    resolution_path: str
+
+
 class ExtraStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -495,9 +545,218 @@ def synth(
         _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
+BATCH_GLOB_DEFAULT = "*.png"
+"""What ``--batch`` picks up when the operator does not say. Named, not inlined, so the
+default in the signature and the one the help string quotes cannot drift apart."""
+
+# ---------------------------------------------------------------- gate: the multi-image door
+#
+# F-76b0940b / F-8cfaf7ec. `pcraft gate` took exactly one image, so gating a turnaround was N
+# processes -- and each process built the verifier dict fresh, while every verifier caches its
+# scorer on the INSTANCE. N images was therefore N full loads of clip-flant5-xxl plus SigLIP2
+# plus the Tier-2 localizer, for a library that was already shaped for the batch:
+# `harness.evaluate(dag, image_path, verifiers, thresholds, *, generator_family)` takes an
+# ALREADY-CONSTRUCTED verifier dict and a per-call image_path. The CLI was the only thing that
+# was not, so the loop lives here and no new library primitive is needed for it.
+#
+# Three things this must not do, and the code below is arranged around them:
+#
+#   (1) a single `pcraft gate IMAGE` invocation is byte-identical -- same flags, same --json
+#       transcript OBJECT (not an array), same 0/1/2/3/4 exit codes, same order of operations
+#       (preflight before the store is even loaded). Batch mode is entered only when --batch
+#       is given or more than one IMAGE is named, and the single path below is the original
+#       body, unmoved;
+#   (2) the four-way exit contract is not collapsed. The batch gets its OWN stated aggregation
+#       rule (see the command's --help and `_batch_error`), and 4 keeps meaning could-not-run
+#       for the batch AS A WHOLE -- never "one image could not run" merged onto 2;
+#   (3) `preflight_image`'s refusal stays PER IMAGE. One unreadable file is listed by name and
+#       the other N-1 results stand. Only preflight is caught per image: a verifier-discipline
+#       refusal from inside evaluate() (GATE_SAME_FAMILY, GATE_CLIPSCORE_BANNED) is an andon
+#       halt for the whole run and is deliberately left to propagate.
+
+
+class _GateRow(NamedTuple):
+    """One image's outcome: the transcript it produced, or the refusal that stopped it.
+
+    ``error`` is the per-image exit-contract answer (``error_from_transcript``), or the
+    preflight refusal when the file could not be read at all. ``None`` means that image passed.
+    """
+
+    path: Path
+    transcript: Any | None
+    error: PromptCraftError | None
+
+
+_COULD_NOT_RUN_CODES = frozenset({"GATE_UNAVAILABLE", "IO_GATE_INPUT"})
+_UNCONFIRMED_CODES = frozenset({"PARTIAL_UNCONFIRMED", "PARTIAL_TIER_CENSUS"})
+
+
+def _gate_targets(images: list[Path], batch: Path | None, pattern: str) -> list[Path]:
+    """Every image this invocation gates, in a deterministic order, or a refusal.
+
+    Explicit IMAGE arguments come first in the order they were typed, then the directory's
+    matches sorted by name, deduplicated by absolute path so naming a file twice does not
+    gate it twice or count it twice in the summary.
+
+    An EMPTY batch is a refusal, not a pass. A glob that matched nothing and a directory of
+    images that all passed are the same exit 0 to a CI job, and only one of them means the
+    renders were checked -- so a batch with nothing in it says so and exits 1.
+    """
+    targets = list(images)
+    if batch is not None:
+        if not batch.is_dir():
+            raise PromptCraftError(
+                "INPUT_GATE_BATCH",
+                f"--batch {str(batch)!r} is not a directory",
+                hint="Pass --batch at a folder of rendered images, or name the images as "
+                "IMAGE arguments instead.",
+            )
+        found = sorted(p for p in batch.glob(pattern) if p.is_file())
+        if not found and not targets:
+            raise PromptCraftError(
+                "INPUT_GATE_BATCH",
+                f"no files matching {pattern!r} in {batch}",
+                hint="A batch that gated nothing is not a batch that passed, so this "
+                "refuses rather than exiting 0. Check --glob, or point --batch at the "
+                "directory the renders actually landed in.",
+            )
+        targets += found
+    if not targets:
+        raise PromptCraftError(
+            "INPUT_GATE_TARGET",
+            "gate needs at least one IMAGE argument, or --batch DIR",
+            hint="Pass one image to gate it, several to gate them in one run, or --batch "
+            "at a directory of renders.",
+        )
+    seen: set[str] = set()
+    ordered: list[Path] = []
+    for path in targets:
+        key = os.path.normcase(str(Path(path).resolve()))
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(path)
+    return ordered
+
+
+def _batch_summary(rows: list[_GateRow]) -> list[str]:
+    """The one line a reader looks at after N transcripts, plus the unreadable files.
+
+    The counts are the four outcomes the exit contract distinguishes, in the same order the
+    exit-code table lists them, so the summary and the exit code cannot be read as saying
+    different things. The unreadable images get their own row rather than a parenthetical:
+    they are the half of the run that produced no verdict at all, and burying them beside a
+    count is how "one file was missing" becomes invisible in a green log.
+    """
+    passed = [r for r in rows if r.error is None]
+    failed = [r for r in rows if r.error is not None and r.error.code == "GATE_FAIL"]
+    unconfirmed = [r for r in rows if r.error is not None and r.error.code in _UNCONFIRMED_CODES]
+    unrun = [r for r in rows if r.error is not None and r.error.code in _COULD_NOT_RUN_CODES]
+    lines = [
+        f"{len(rows)} images: {len(passed)} passed, {len(failed)} failed, "
+        f"{len(unconfirmed)} unconfirmed, {len(unrun)} could not run"
+    ]
+    if unrun:
+        lines.append("could not run: " + id_list(str(r.path) for r in unrun))
+    return lines
+
+
+def _batch_error(rows: list[_GateRow]) -> PromptCraftError | None:
+    """The batch's aggregate exit contract. ``None`` means every image passed (exit 0).
+
+    THE RULE, stated once here and quoted in the command's --help:
+
+      * a contract that declares no required atom refuses the whole run (exit 1) -- it is the
+        same contract for every image, so no image can change the answer;
+      * could-not-run on ANY image makes the whole run exit 4 only if NOTHING scored;
+      * otherwise the worst SCORED outcome wins -- any failed required atom is 2, else any
+        unconfirmed roll-up is 3, else 0 -- and the images nobody could read are listed
+        rather than folded onto that number.
+
+    The CODES are the single-image ones, deliberately: STABILITY.md tells callers to parse the
+    code, and "a required atom failed" means the same thing whether one image or twenty were
+    graded. Only the MESSAGE is batch-shaped, naming how many and which.
+    """
+    unusable = next(
+        (r.error for r in rows if r.error is not None and r.error.code == "CONTRACT_NO_REQUIRED_ATOM"),
+        None,
+    )
+    if unusable is not None:
+        return unusable
+    scored = [r for r in rows if r.transcript is not None and r.transcript.scored_required()]
+    if not scored:
+        unrun = [r for r in rows if r.error is not None and r.error.code in _COULD_NOT_RUN_CODES]
+        return PromptCraftError(
+            "GATE_UNAVAILABLE",
+            f"no image produced a score on any required atom "
+            f"({len(rows)} image(s), {len(unrun)} of them could not be read or scored)",
+            hint="Nothing was graded, so this batch is could-not-run rather than a failure. "
+            "Install the [image] extra (pip install 'prompt-crafter[image]', or from a "
+            "checkout pip install -e '.[image]') so a verifier can score, and check that "
+            "the images listed above are readable.",
+        )
+    failed = [r for r in rows if r.error is not None and r.error.code == "GATE_FAIL"]
+    if failed:
+        return PromptCraftError(
+            "GATE_FAIL",
+            f"{len(failed)} of {len(rows)} image(s) failed a required atom: "
+            + id_list(str(r.path) for r in failed),
+            hint="Each image's own transcript is printed above, with the atom, its score and "
+            "the band that graded it. Images that could not be read are counted separately "
+            "and never merged onto this code.",
+        )
+    unconfirmed = [r for r in rows if r.error is not None and r.error.code in _UNCONFIRMED_CODES]
+    if unconfirmed:
+        return PromptCraftError(
+            "PARTIAL_UNCONFIRMED",
+            f"{len(unconfirmed)} of {len(rows)} image(s) are unconfirmed after a real score: "
+            + id_list(str(r.path) for r in unconfirmed),
+            hint="This is the human band, not a pass. No image failed outright, so the batch "
+            "takes the worst SCORED outcome, which is this one.",
+        )
+    return None
+
+
+def _batch_documents(rows: list[_GateRow]) -> list[dict]:
+    """The ``--json`` array: one row per image, always keyed by the image it graded.
+
+    ``image_path`` is F-8cfaf7ec's additive field on ``GateTranscript`` and lands in the
+    core-gate-loop domain. This layer fills it in when the transcript does not carry it (or
+    carries the empty default), because the CLI is the thing that CHOSE the path it handed to
+    ``evaluate`` -- so a batch document says which pixels each verdict is about both before
+    and after that field exists, and never disagrees with it once it does.
+
+    An image that could not be read still gets a row. Dropping it would leave a caller
+    counting N-1 rows for N arguments with nothing saying which one went missing -- exactly
+    the ambiguity AssetRecord.image_path was added to end. Those rows carry ``error`` and no
+    verdicts, which is what actually happened.
+    """
+    docs: list[dict] = []
+    for row in rows:
+        if row.transcript is not None:
+            doc = json.loads(row.transcript.model_dump_json())
+            if not doc.get("image_path"):
+                doc["image_path"] = str(row.path)
+        elif row.error is not None:
+            doc = {
+                "image_path": str(row.path),
+                "error": {"code": row.error.code, "message": row.error.message},
+            }
+        else:
+            # Not constructible by the loop that fills `rows` -- an image either produced a
+            # transcript or produced the refusal that stopped it. The row is emitted anyway
+            # rather than dropped: "one row per image" is the property a caller counts on, and
+            # a silently short array is the exact ambiguity this document exists to remove.
+            doc = {"image_path": str(row.path)}
+        docs.append(doc)
+    return docs
+
+
 @app.command()
 def gate(
-    image: Path = typer.Argument(..., help="rendered image to gate"),
+    images: list[Path] = typer.Argument(None, metavar="[IMAGE]...", help="rendered image(s) to gate; name several to gate them in one run"),
+    batch: Path | None = typer.Option(None, "--batch", help="also gate every file matching --glob in this directory"),
+    glob: str = typer.Option(BATCH_GLOB_DEFAULT, "--glob", help="which files --batch picks up"),
     contract: str = typer.Option("char:ashen-reaver", help="contract id whose atoms the gate blocks on"),
     contracts_dir: list[Path] = typer.Option([], "--contracts-dir", help="tree of *.contract.json (repeatable); default: shipped sprite example"),
     thresholds: Path | None = typer.Option(None, "--thresholds", help="threshold table JSON; default: shipped sprite calibration"),
@@ -506,10 +765,10 @@ def gate(
         help="override the generator family the same-family gate guard checks against "
         "(defaults to the registered image domain's own generator.family)",
     ),
-    as_json: bool = typer.Option(False, "--json", help="emit GateTranscript as JSON on stdout"),
+    as_json: bool = typer.Option(False, "--json", help="emit GateTranscript as JSON on stdout (an ARRAY of them for a batch)"),
     debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
 ) -> None:
-    """Run the contract gate on an image you already have. SKIPPED atoms are not a pass.
+    """Run the contract gate on image(s) you already have. SKIPPED atoms are not a pass.
 
     Exit codes:
       0  every required atom passed.
@@ -521,6 +780,19 @@ def gate(
     4 is never folded into 2 -- could-not-check is not checked-clean, and a CI
     branch that merges them reads "the gate ran and failed" for a gate that
     never ran.
+
+    One IMAGE and no --batch is the single-image command it has always been: one
+    transcript, one --json object, those exit codes. Naming several images, or
+    passing --batch DIR, builds the verifiers ONCE and grades every image against
+    them, printing a transcript per image, then a summary line; --json then emits
+    an ARRAY of transcripts, each keyed by the image_path it graded.
+
+    A batch aggregates the same codes by this rule: could-not-run on ANY image
+    makes the whole run exit 4 only if NOTHING scored. Otherwise the worst SCORED
+    outcome wins -- a failed required atom anywhere is 2, else an unconfirmed
+    roll-up anywhere is 3, else 0 -- and the images that could not be read are
+    listed by name instead of being folded onto that code. An empty batch is
+    exit 1, never 0: gating nothing is not gating cleanly.
     """
     import pcraft.domains.image  # noqa: F401  (registers the plugin)
 
@@ -533,19 +805,55 @@ def gate(
         from ..core.gate.exit_contract import error_from_transcript
         from ..core.gate.preflight import preflight_image
 
-        preflight_image(image)
+        targets = _gate_targets(list(images or []), batch, glob)
+        batched = batch is not None or len(targets) > 1
+        if not batched:
+            preflight_image(targets[0])
         _store, resolved, table, _c = load_workspace(
             contracts_dirs=contracts_dir or None, thresholds=thresholds, contract_id=contract
         )
         dag = compile_questions(resolved)
         plugin = get("image")
+        # ONCE, outside the loop. This is the whole performance half of F-8cfaf7ec: the
+        # verifiers cache their scorers on the instance, so constructing the dict per image
+        # is a full model load per image.
         verifiers = plugin.verifiers()
         family = generator_family or plugin.generator().family
-        transcript = harness.evaluate(dag, str(image), verifiers, table, generator_family=family)
-        _say(format_transcript(transcript, dag=dag), as_json=as_json)
+        if not batched:
+            transcript = harness.evaluate(dag, str(targets[0]), verifiers, table, generator_family=family)
+            _say(format_transcript(transcript, dag=dag), as_json=as_json)
+            if as_json:
+                _emit_model(transcript)
+            err = error_from_transcript(transcript)
+            if err is not None:
+                _emit(err, debug)
+            return
+        rows: list[_GateRow] = []
+        for path in targets:
+            try:
+                preflight_image(path)
+            except PromptCraftError as unreadable:
+                # Per image, on purpose (must-not-break 3): one file nobody can open does not
+                # void the other N-1 verdicts. Only THIS refusal is caught here -- a verifier
+                # discipline failure inside evaluate() below is an andon halt and propagates.
+                rows.append(_GateRow(path=path, transcript=None, error=unreadable))
+                continue
+            transcript = harness.evaluate(dag, str(path), verifiers, table, generator_family=family)
+            rows.append(
+                _GateRow(path=path, transcript=transcript, error=error_from_transcript(transcript))
+            )
+        for row in rows:
+            _say(f"image: {row.path}", as_json=as_json)
+            if row.transcript is not None:
+                _say(format_transcript(row.transcript, dag=dag), as_json=as_json)
+            elif row.error is not None:
+                _say(f"  {row.error.code}: {row.error.message}", as_json=as_json)
+            _say("", as_json=as_json)
+        for line in _batch_summary(rows):
+            _say(line, as_json=as_json)
         if as_json:
-            _emit_model(transcript)
-        err = error_from_transcript(transcript)
+            _emit_json(_batch_documents(rows))
+        err = _batch_error(rows)
         if err is not None:
             _emit(err, debug)
     except PromptCraftError as err:
@@ -680,6 +988,298 @@ def validate(
         _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
 
 
+# ------------------------------------------------------------------ new: the scaffold door
+#
+# F-62e7d1f0 (the CLI half of F-37f8764e / F-a9d86551). The product's front door for its own
+# core artifact was a blank file: `pcraft schema` emits the JSON Schema, which is a validator
+# and not a starting point, and `pcraft validate` refuses a bad contract, which only helps
+# once one exists. This verb is thin on purpose -- it prompts for NOTHING, writes where it is
+# told, and then reports what the LOADER said about the file, not what the scaffold intended.
+#
+# The four rules it owes the scaffold spec, each enforced below before the library is reached:
+#   (1) never into the packaged sprite tree -- the shipped examples stay untouched;
+#   (2) never over an existing file -- the same O_EXCL discipline `asset_record.persist` uses,
+#       for the identical reason: a hand-authored contract is not a scaffold's to replace;
+#   (3) a seeded atom is visibly a STUB, said OUT LOUD on stdout rather than buried in a
+#       `_note` inside the file, or the scaffold manufactures a gate nobody authored;
+#   (4) what is emitted loads back through the SAME _read_contract/resolve() path a
+#       hand-written contract does -- never a shortcut around it.
+
+CONTRACT_LEVELS = ("character", "faction")
+"""The two levels the contract schema declares. One tuple: the refusal, the help string and
+the directory name are all derived from it."""
+
+_SLUG = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _is_under(path: Path | str, root: Path | str) -> bool:
+    """Whether ``path`` sits inside ``root``. Never raises; unrelated drives answer False.
+
+    ``resolve()`` rather than a string comparison, so a symlinked or relative ``--contracts-dir``
+    that lands inside the packaged tree is still recognised as being inside it -- the check
+    exists to protect the shipped examples, and a check a relative path walks past protects
+    nothing. Neither side needs to exist yet: the scaffold's target is a file about to be
+    written, and ``resolve()`` is non-strict.
+    """
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _scaffold_target(level: str, contract_id: str, *, contracts_dir: Path, out: Path | None) -> Path:
+    """Where ``pcraft new`` will write, and the refusals that are decided from the path alone.
+
+    ``--out`` wins when given; otherwise the file lands at
+    ``<contracts-dir>/<level>s/<slug>.contract.json``, the layout the shipped example already
+    uses (``factions/`` beside ``characters/``). The slug is the id with everything that is not
+    filename-safe collapsed to a hyphen -- ids carry a colon (``char:rook``), which is a legal
+    path character on POSIX and an alternate-data-stream separator on NTFS.
+
+    The store indexes by the contract's ``id`` FIELD, not by its filename, so the slug is a
+    convenience for the human browsing the tree and never load-bearing.
+    """
+    from ..domains.image.subdomains.sprite import CONTRACTS_DIR as PACKAGED
+
+    if out is not None:
+        target = out
+    else:
+        slug = _SLUG.sub("-", contract_id.split(":", 1)[-1]).strip("-") or "contract"
+        target = contracts_dir / f"{level}s" / f"{slug}.contract.json"
+    if _is_under(target, PACKAGED):
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_TARGET",
+            f"{target} is inside the packaged sprite example ({PACKAGED})",
+            hint="Scaffold into your own tree instead: pass --contracts-dir at the directory "
+            "your contracts live in. The shipped examples are the reference the docs quote "
+            "and stay as they were installed.",
+        )
+    if target.exists():
+        # Decided here as well as at the open() below. The O_EXCL claim is the authority (it
+        # cannot be raced); this one exists so the refusal arrives before the scaffold runs,
+        # naming the file rather than reporting a failed write at the end of the work.
+        raise PromptCraftError(
+            "IO_CONTRACT_EXISTS",
+            f"a contract already exists at {target}; pcraft does not overwrite one",
+            hint="Move or delete it deliberately, pass --out at a different path, or edit the "
+            "file you already have. A scaffold that replaced a hand-written contract would "
+            "destroy authored canon to save a copy step.",
+        )
+    return target
+
+
+def _refuse_reference_sheet(sheet: Path) -> None:
+    """``--reference-sheet`` names a capability that is a different VERB, and says where it is.
+
+    STATED JUDGMENT (wave-13 fold). The finding's approved shape lists this flag, and the
+    capability exists and is good: ``pcraft.domains.image.scaffold.scaffold_from_reference_sheet
+    (sheet, *, contracts_dir, max_colours=4)`` reads a reference-sheet JSON (faction, character,
+    named traits, plates), measures dominant hexes off a ``kind=palette`` plate, and emits an
+    authorable faction+character PAIR.
+
+    It cannot be driven by this verb without lying. That entry point derives BOTH ids from the
+    sheet, writes TWO files, and chooses their names itself -- so ``pcraft new character
+    char:rook --reference-sheet s.json --out x.json`` would have to silently ignore LEVEL, ID
+    and --out, write two files while reporting one, and return a ScaffoldReport that can only
+    describe half of what happened. Silently ignoring arguments the operator typed is the defect
+    class this package exists to catch, so wiring it here is refused and the flag says where the
+    capability actually lives. It wants its own verb (a `pcraft new --from-sheet` or a separate
+    command), which is a slice, not a line -- filed for the coordinator rather than improvised.
+
+    The refusal is INPUT_ (exit 1) and fires before anything is written.
+    """
+    raise PromptCraftError(
+        "INPUT_SCAFFOLD_REFERENCE_SHEET",
+        f"--reference-sheet {str(sheet)!r} is not wired into `pcraft new` yet",
+        hint="The sheet-driven scaffold emits a faction+character PAIR and names both files "
+        "itself, so it cannot honour this command's LEVEL, ID and --out arguments and needs a "
+        "verb of its own. Call pcraft.domains.image.scaffold.scaffold_from_reference_sheet "
+        "(sheet, contracts_dir=...) from Python meanwhile. Without this flag, `pcraft new` "
+        "writes the single starter contract it describes.",
+    )
+
+
+def _write_new_contract(target: Path, text: str) -> Path:
+    """Claim the path with O_EXCL and write it. A collision is an ANSWER, never a deletion."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as err:
+        raise PromptCraftError(
+            "IO_CONTRACT_EXISTS",
+            f"a contract already exists at {target}; pcraft does not overwrite one",
+            hint="Move or delete it deliberately, or pass --out at a different path.",
+            cause=err,
+        ) from err
+    except OSError as err:
+        raise PromptCraftError(
+            "IO_CONTRACT_WRITE",
+            f"could not write contract {target}: {err.strerror or err}",
+            hint="Check that the directory is writable and has space, or pass --out at a "
+            "path you can write to.",
+            cause=err,
+        ) from err
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text if text.endswith("\n") else text + "\n")
+    return target
+
+
+def _stub_atoms(resolved) -> list[str]:
+    """Atoms that are not yet something the gate may block on, read off the LOADED contract.
+
+    Two signals, both facts about the file as the loader read it back rather than a convention
+    the scaffold and this line would have to keep agreeing about:
+
+      * a claim still carrying a TODO marker -- the scaffold never invents a claim the author
+        did not write, so the placeholder is the visible half of that rule;
+      * a severity that is not ``required`` -- ``required_atoms()`` is exactly the set the gate
+        is allowed to block on, so anything outside it gates nothing yet however good its
+        claim is.
+
+    Reported, never repaired. Raising a severity is an authoring decision with evidence behind
+    it (see ``MustNot.severity``'s own note); a CLI that quietly promoted these would be
+    manufacturing the gate this whole verb exists to avoid manufacturing.
+    """
+    from ..core.contract.schema import Severity
+
+    out: list[str] = []
+    for atom in [*resolved.must_have, *resolved.must_not]:
+        claim = getattr(atom, "claim", "") or ""
+        if "TODO" in claim.upper() or getattr(atom, "severity", None) != Severity.required:
+            out.append(atom.id)
+    return out
+
+
+@app.command()
+def new(
+    level: str = typer.Argument(..., metavar="LEVEL", help="character or faction -- the two levels the contract schema declares"),
+    contract_id: str = typer.Argument(..., metavar="ID", help="the contract id to author, e.g. char:rook or faction:rooks"),
+    contracts_dir: Path = typer.Option(Path("contracts"), "--contracts-dir", help="the tree to scaffold INTO and resolve --extends against; never the packaged sprite example"),
+    extends: str = typer.Option(None, "--extends", help="the faction id a character contract inherits from"),
+    reference_sheet: Path = typer.Option(None, "--reference-sheet", help="NOT WIRED HERE: the sheet-driven scaffold emits a faction+character PAIR and names both files itself, so it needs its own verb. Passing this is refused, and the refusal names the entry point"),
+    out: Path = typer.Option(None, "--out", help="write exactly here, instead of the default path <id>.contract.json under the contracts dir's <level>s/ folder"),
+    as_json: bool = typer.Option(False, "--json", help="emit ScaffoldReport as JSON on stdout"),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
+) -> None:
+    """Scaffold a new character or faction contract, then report what the loader made of it.
+
+    Writes a STUB, never a gate. The starter contract declares no required atom --
+    it carries the level, the id and the inheritance, and the claims are yours to
+    write -- so it blocks on nothing until an author fills it in and raises a
+    severity. The last lines printed here say exactly that, naming the file.
+    Nothing is prompted for: this is flags in, one file out.
+
+    The file lands under --contracts-dir (default ./contracts), never inside the
+    packaged sprite example, and an existing file is never overwritten. What was
+    written is then read back through the SAME store a hand-written contract goes
+    through, and that loader's verdict -- lineage, required, must_not -- is what
+    is printed. A scaffold that could not survive its own loader is not a start.
+
+    Exit codes:
+      0  the contract was written and it resolves.
+      1  the level, the id, or the target directory is unusable.
+      2  a contract already exists at that path, or the file could not be written.
+
+    2 rather than 1 for an existing file: the input was fine and the filesystem
+    answered, which is the same reading IO_RECORD_EXISTS has for a receipt.
+    """
+    try:
+        if level not in CONTRACT_LEVELS:
+            raise PromptCraftError(
+                "INPUT_CONTRACT_LEVEL",
+                f"level {level!r} is not one of: {', '.join(CONTRACT_LEVELS)}",
+                hint="A faction is the base class and a character extends one. Those are the "
+                "two levels the schema declares; pass --extends when scaffolding a character.",
+            )
+        if reference_sheet is not None:
+            _refuse_reference_sheet(reference_sheet)
+        target = _scaffold_target(level, contract_id, contracts_dir=contracts_dir, out=out)
+
+        from ..core.contract.scaffold import scaffold_contract, scaffold_json
+        from ..sample import load_store
+
+        # The store is what turns `--extends` from a string into a CHECKED reference: with it,
+        # scaffold_contract refuses a base that is not in the tree and a starter atom colliding
+        # with an inherited id, while the author can still pick another. Loaded only when
+        # --extends was given, because a first scaffold into an empty tree is the normal case
+        # and INPUT_EMPTY_STORE would be a refusal about nothing.
+        base_store = load_store([contracts_dir]) if extends is not None else None
+        contract = scaffold_contract(level, contract_id, extends=extends, store=base_store)
+        # `scaffold_json` is the CANONICAL serializer and the on-disk text has exactly one
+        # owner. Spelling the dump here instead would be a second implementation of the file
+        # format, free to drift from the one the library round-trips its own output through.
+        _write_new_contract(target, scaffold_json(contract))
+
+        # Read back through the real store. Roots stay minimal: the contracts dir is enough
+        # when the file landed inside it, and indexing the same file under two roots is
+        # INPUT_DUPLICATE_CONTRACT_ID by the store's own rule.
+        roots = [contracts_dir] if contracts_dir.is_dir() else []
+        if not any(_is_under(target, root) for root in roots):
+            roots.append(target.parent)
+        resolved = load_store(roots).resolve(contract_id)
+        stubs = _stub_atoms(resolved)
+        report = ScaffoldReport(
+            id=resolved.id,
+            level=resolved.level,
+            path=str(target),
+            lineage=list(resolved.lineage),
+            required=[a.id for a in resolved.required_atoms()],
+            must_not=[m.id for m in resolved.must_not],
+            stub_atoms=stubs,
+        )
+        _say(f"wrote {report.level} {report.id} -> {report.path}", as_json=as_json)
+        _say(f"lineage: {' -> '.join(report.lineage)}", as_json=as_json)
+        _say(f"required: {', '.join(report.required) or 'none'}", as_json=as_json)
+        _say(f"must_not: {', '.join(report.must_not) or 'none'}", as_json=as_json)
+        # Said on the command's own channel, not only in the document: the whole failure this
+        # guards against is an operator who reads "wrote ... -> path", runs `pcraft gate`, and
+        # is told the contract passed when what actually happened is that it asserts nothing.
+        #
+        # Both shapes get a STUB line, because both are the same fact to the reader. MEASURED
+        # against the real primitive: `scaffold_contract(level, id)` seeds NO atoms at all --
+        # the skeleton is level, id, extends and identity_ref, and the claims are the author's
+        # to write -- so the empty case is the ordinary one and printing nothing for it would
+        # leave the loudest run silent. A caller that seeds starter atoms (the domain layers do)
+        # gets the count and the ids instead.
+        _say("", as_json=as_json)
+        if stubs:
+            _say(
+                f"STUB: {len(stubs)} atom(s) need a real claim before this binds; "
+                f"see {report.path}",
+                as_json=as_json,
+            )
+            for line in _wrap(id_list(stubs), _term_width(), "  ", "  "):
+                _say(line, as_json=as_json)
+        else:
+            for line in _wrap(
+                f"STUB: this contract declares no atoms yet, so it asserts nothing. Write the "
+                f"must_have / must_not claims in {report.path} before it binds.",
+                _term_width(),
+                "",
+                "  ",
+            ):
+                _say(line, as_json=as_json)
+        if not report.required:
+            for line in _wrap(
+                "No atom is severity=required yet, so the gate has nothing it may block on: "
+                "`pcraft gate` refuses this contract with CONTRACT_NO_REQUIRED_ATOM until an "
+                "atom is raised. That refusal is the scaffold working, not a defect.",
+                _term_width(),
+                "  ",
+                "  ",
+            ):
+                _say(line, as_json=as_json)
+        if as_json:
+            _emit_model(report, extends=extends)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
 @app.command()
 def demo(
     records_dir: str = typer.Option("records", help="directory the receipt is written to; the path printed at the end is inside it"),
@@ -756,6 +1356,158 @@ def replay(
         )
         if as_json:
             _emit_model(rec)
+    except PromptCraftError as err:
+        _emit(err, debug)
+    except (typer.Exit, typer.Abort):
+        raise
+    except Exception as e:  # noqa: BLE001 - the final backstop; classify, don't swallow
+        _emit(wrap_error(e, "RUNTIME_UNEXPECTED"), debug)
+
+
+# --------------------------------------------------------------- resolve: the disposition door
+#
+# F-2b04f0b8's CLI half, over `core.receipt.disposition.record_disposition`. The loop builds a
+# genuine contrastive checkpoint, persists it inside the receipt, prints it and returns
+# decision='escalated' -- and then the trail stopped: there was no verb and no format for what
+# the Director decided. The `escalation-ticket` compensator already declared its owner as
+# "pipeline (Director resolves)" and its post-rollback state as "ticket closed with a
+# resolution note", and neither the ticket nor the note existed.
+#
+# What this door does NOT do, and must never grow into:
+#   * it does not edit the receipt. Not one field. The entry goes to a `dispositions/`
+#     SUBDIRECTORY of the records dir, which is load-bearing rather than tidy: `receipt_paths`
+#     walks *.json non-recursively, so `regrade_dir`, the index and any caller globbing the
+#     records dir see exactly what they saw before, and an entry can never be handed to
+#     `load()` as a malformed receipt;
+#   * it does not turn a refusal into a pass. Exit 0 here means RECORDED. `bind` and `gate`
+#     still refuse the asset afterwards, because a human's judgment is provenance, not a
+#     retroactive gate result a scripted caller can no longer see;
+#   * it does not accept anything without a reason. --note is required by the parser, because
+#     a resolution with no reasoning is an auto-accept wearing a verdict (UNCERTAINTY_GATED_
+#     HUMANS: the record is EVIDENCE a human decided).
+
+VERDICT_RESOLUTIONS: dict[str, str] = {"approve": "accepted", "reject": "rejected"}
+"""The CLI's verdict words, and the library ``RESOLUTIONS`` value each one records.
+
+Two vocabularies on purpose, mapped in ONE place. ``approve``/``reject`` are what an operator
+types -- imperative, and what the finding's own shape names -- while ``accepted``/``rejected``
+are what goes on disk and what a downstream reader filters on. The library's third value,
+``deferred``, is deliberately NOT reachable from here yet: "I looked and I am not deciding"
+needs a surface of its own (it is a different act from approving, and pretending it is a
+--verdict value would make an operator choose it by accident), so it stays library-only until
+that surface is designed. The mapping is a dict rather than two branches so the CLI cannot
+grow a verdict the library has no value for."""
+
+
+@app.command()
+def resolve(
+    record: Path = typer.Argument(..., metavar="RECEIPT", help="the escalated receipt to record a decision against -- the path `pcraft bind` printed"),
+    verdict: str = typer.Option(..., "--verdict", help="approve or reject -- what the human decided about this asset"),
+    note: str = typer.Option(..., "--note", help="why. Required: a resolution with no reasoning is an auto-accept wearing a verdict"),
+    by: str = typer.Option("director", "--by", help="who decided; recorded in the resolution as its owner"),
+    as_json: bool = typer.Option(False, "--json", help="emit ResolutionReport as JSON on stdout"),
+    debug: bool = typer.Option(False, "--debug", help=_DEBUG_HELP),
+) -> None:
+    """Record a human's decision about an ESCALATED receipt, beside it on disk.
+
+    The receipt is never touched. A receipt already on disk is never replaced, so
+    the decision becomes a NEW entry under `<records-dir>/dispositions/` that
+    references its record_id -- the same rule `pcraft replay`'s drift refusal
+    states as "Do not edit the receipt". The subdirectory is deliberate: every
+    reader that globs the records dir for receipts keeps seeing exactly what it
+    saw before, so a resolution can never be read back as a malformed receipt.
+
+    Exit 0 means the decision was RECORDED. It does not mean the asset passes:
+    the receipt still reads escalated, and `pcraft gate` and `pcraft bind` still
+    refuse it, because making a human's judgment retroactively invisible to a
+    scripted caller is the one thing this record must not do.
+
+    --verdict approve records the library's `accepted`, reject records `rejected`.
+    Its third value, `deferred` ("I looked and I am not deciding yet"), is
+    library-only for now: it is a different act and wants a surface of its own
+    rather than a third word in this flag.
+
+    Exit codes:
+      0  the resolution was written.
+      1  the verdict is not approve/reject, or that receipt is not escalated.
+      2  the receipt is unreadable or is not a receipt, or the resolution could
+         not be written.
+
+    A receipt that already reads bound has nothing to resolve, and that is exit 1
+    (fix the path you passed), never a silent success.
+    """
+    from ..core.receipt.asset_record import load
+    from ..core.receipt.disposition import record_disposition
+
+    try:
+        if verdict not in VERDICT_RESOLUTIONS:
+            raise PromptCraftError(
+                "INPUT_RESOLVE_VERDICT",
+                f"--verdict {verdict!r} is not one of: {', '.join(VERDICT_RESOLUTIONS)}",
+                hint="approve records that a human looked and accepted this asset anyway; "
+                "reject records that they looked and did not. The library also knows "
+                "'deferred', which this flag does not offer yet -- not deciding is a "
+                "different act from deciding and should not be one keystroke away.",
+            )
+        if not note.strip():
+            raise PromptCraftError(
+                "INPUT_RESOLVE_NOTE",
+                "--note is empty; a resolution must say why",
+                hint="Write the reasoning a later reader needs: which atom you looked at and "
+                "what you saw. A blank note makes the record indistinguishable from an "
+                "automatic accept, which is exactly what it exists to be distinguishable from.",
+            )
+        rec = load(record)
+        if rec.decision != "escalated":
+            raise PromptCraftError(
+                "INPUT_RECEIPT_NOT_ESCALATED",
+                f"receipt {rec.record_id} reads decision {rec.decision!r}, not 'escalated', "
+                f"so there is no escalation to resolve",
+                hint="Only an escalated receipt carries a checkpoint a human was asked to "
+                "decide. Point this at the receipt whose run escalated -- `pcraft bind` "
+                "prints the path it wrote at the end of every run.",
+            )
+
+        # `record_disposition` owns the entry, its dispositions/ subdirectory, the O_EXCL claim
+        # on the exact path, and the `disposition-write` compensator gate it requires BEFORE
+        # writing -- the same NAMED_COMPENSATORS discipline `orchestrate.run` applies to
+        # records-write. The registry is left to default, which registers that action; nothing
+        # here re-implements or re-states any of it. The refusals above are this layer's, and
+        # they fire first so the message is shaped for someone at a terminal rather than for a
+        # library caller: the library refuses the same non-escalated receipt as
+        # INPUT_DISPOSITION_TARGET if it is ever reached another way.
+        written = record_disposition(
+            rec,
+            Path(record).parent,
+            resolution=VERDICT_RESOLUTIONS[verdict],
+            resolved_by=by,
+            note=note,
+        )
+        report = ResolutionReport(
+            record_id=rec.record_id,
+            receipt_path=str(record),
+            decision=rec.decision,
+            verdict=verdict,
+            resolution=VERDICT_RESOLUTIONS[verdict],
+            note=note,
+            resolved_by=by,
+            resolution_path=str(written),
+        )
+        _say(
+            f"recorded {report.verdict.upper()} ({report.resolution}) by {report.resolved_by}",
+            as_json=as_json,
+        )
+        _say(f"receipt: {report.receipt_path}", as_json=as_json)
+        _say(f"  decision: {report.decision} (unchanged -- the receipt was not edited)", as_json=as_json)
+        for line in _wrap(report.note, _term_width(), "  note: ", "        "):
+            _say(line, as_json=as_json)
+        _say("", as_json=as_json)
+        # Last, alone on its own line, for the same reason `bind` ends with the receipt path:
+        # a `tail -1` or a line-select yields exactly the path and nothing else.
+        _say("resolution:", as_json=as_json)
+        _say(f"  {report.resolution_path}", as_json=as_json)
+        if as_json:
+            _emit_model(report)
     except PromptCraftError as err:
         _emit(err, debug)
     except (typer.Exit, typer.Abort):

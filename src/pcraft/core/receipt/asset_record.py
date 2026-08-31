@@ -139,6 +139,32 @@ def persist(record: AssetRecord, records_dir: str | Path) -> Path:
     return path
 
 
+def receipt_paths(records_dir: str | Path) -> list[Path]:
+    """Every ``*.json`` receipt directly under ``records_dir``, in sorted order. A pure read.
+
+    ONE walk, owned by the module that WRITES the files it walks. ``persist`` decides what a
+    receipt is called and where it lands, so the answer to "which files in this directory are
+    receipts" belongs beside it -- ``regrade_dir`` (F-dec37d4e) and the receipt index
+    (F-b0e6dde7) both ask it, and two spellings of it would drift the first time either side
+    was edited.
+
+    Not recursive, and that is the load-bearing half. ``persist`` writes receipts FLAT into the
+    records dir; the subdirectories that appear beside them hold generated images, and (since
+    F-2b04f0b8) the ``dispositions/`` entries that resolve escalations. Neither is a receipt,
+    and a recursive walk would hand both to ``load()`` and get a coded refusal for a file that
+    was never claiming to be one.
+
+    A records dir that does not exist yields ``[]`` rather than a refusal: this is the walk, not
+    the policy. A caller for whom "that directory is not there" and "that directory is empty"
+    are different answers -- the listing surface, where a typo must not read as "no receipts" --
+    checks first and says so in its own terms.
+    """
+    d = Path(records_dir)
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob("*.json") if p.is_file())
+
+
 def load(path: str | Path) -> AssetRecord:
     p = Path(path)
     try:

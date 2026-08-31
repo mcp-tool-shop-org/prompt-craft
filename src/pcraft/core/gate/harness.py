@@ -100,6 +100,26 @@ class GateTranscript(BaseModel):
     verdicts: list[AtomVerdict]
     tier_census: TierCensus = Field(default_factory=TierCensus)
     thresholds_version: str = ""
+    image_path: str = ""
+    """The file this transcript graded (F-8cfaf7ec).
+
+    The transcript declared ``contract_id``, ``overall``, ``verdicts``, ``tier_census`` and
+    ``thresholds_version`` and named no image, which was survivable only while one process
+    graded one image and the caller therefore already knew. It stops being survivable the
+    moment N images are gated in one invocation (``core.gate.batch``): a batch ``--json``
+    document then has no slot to say which image each transcript graded, and the reader is
+    left matching by list position.
+
+    ``AssetRecord`` was given ``image_path`` for exactly this reason -- F-f99c78f8: "a bound
+    receipt without it left an operator holding a directory of renders and no mechanical way
+    to say which pixels were certified". The transcript never got the same treatment.
+
+    Additive and defaulted, which is the whole compatibility story under ``extra="forbid"``:
+    absent is the old shape, so a transcript constructed without it (every regression test
+    that builds one by hand) still validates, and nothing was renamed or removed. Stamped by
+    ``evaluate`` from the argument it is already handed, so the one function that KNOWS which
+    file it scored is the one that writes it down -- rather than a wrapper stamping it
+    afterwards, which is how a field ends up disagreeing with the run it describes."""
 
     def failed_required(self) -> list[AtomVerdict]:
         return [v for v in self.verdicts if v.zone is Zone.FAIL and _counts(v)]
@@ -319,6 +339,7 @@ def evaluate(
         verdicts=ordered,
         tier_census=_tier_census(dag, ordered),
         thresholds_version=thresholds.version,
+        image_path=image_path,
     )
 
 

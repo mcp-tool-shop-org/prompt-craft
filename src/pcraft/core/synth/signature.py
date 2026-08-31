@@ -17,7 +17,7 @@ from ...errors import PromptCraftError
 from ..contract.schema import ResolvedContract
 from ..optimize.artifact import CompiledProgram
 from .synthesizer_iface import SynthResult
-from .visual_inventory import RENDER_BOILERPLATE, assert_tokens_trace, build_inventory
+from .visual_inventory import assert_tokens_trace, build_inventory, parse_render_boilerplate
 
 try:  # the real Signature is only defined when the [synth] extra is installed
     import dspy
@@ -60,7 +60,13 @@ class TemplateSynthesizer:
         inventory = build_inventory(resolved, boost_ids=boost_ids)
         depictable = sorted((r for r in inventory if r.depictable), key=lambda r: r.front_load_rank)
         atom_coverage = {r.atom_id: r.token for r in depictable}
-        prompt = ", ".join([r.token for r in depictable] + RENDER_BOILERPLATE)
+        # [!] `encoder_rules` IS READ NOW (F-c6b06c2f). It was accepted and ignored -- the exact
+        # seam plugin.py's DomainPlugin.encoder_rules_path() exists to supply, per domain --
+        # while the trailing tokens came from a module-level constant that is sprite/image
+        # phrasing. Rules that declare no boilerplate block (every shipped rules file, and the
+        # "" this method's own tests pass) still get RENDER_BOILERPLATE, byte for byte.
+        boilerplate = parse_render_boilerplate(encoder_rules)
+        prompt = ", ".join([r.token for r in depictable] + boilerplate)
         # must_not feeds a SOFT negative prior only -- satisfaction is confirmed by the gate on pixels.
         negative_prompt = ", ".join(mn.claim for mn in resolved.must_not)
         return SynthResult(

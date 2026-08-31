@@ -17,6 +17,7 @@ import logging
 
 from ....core.contract.compile_questions import Question
 from ....errors import PromptCraftError
+from .region import full_frame_note
 
 _LOG = logging.getLogger(__name__)
 
@@ -56,6 +57,19 @@ class VQAScoreVerifier:
                     cause=err,
                 ) from err
         return self._scorer
+
+    def score_detail(self, image_path: str, question: Question) -> str | None:
+        """Says so when this tier scored the whole frame for an atom that named a region.
+
+        F-2c77d698, the scope half. The shipped ``face`` atom declares ``spatial.kind=region``
+        ``ref='head'`` and is a ``check_type=vqa`` atom, so it lands here -- and it is answered
+        from anywhere in the frame. Cropping first is mechanically trivial and is NOT done, because
+        the ``vqa`` band (0.80/0.40) was derived on whole images and this repo has measured nothing
+        about P('Yes') on a 35%-of-frame head crop; shipping the crop under the same table would
+        re-decide the atom with ``fingerprint()`` reporting no drift. The gap is disclosed per
+        atom instead, via ``harness._detail_for``.
+        """
+        return full_frame_note(question, self.verifier_id)
 
     def score(self, image_path: str, question: Question) -> float | None:
         scorer = self._get_scorer()

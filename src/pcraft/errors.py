@@ -25,11 +25,14 @@ Could-not-run therefore sits at 4, not 2:
     GATE_UNAVAILABLE  no required atom produced a score              -> exit 4
     IO_GATE_INPUT     path missing / not a file / unreadable         -> exit 4
 
-The third override goes the other way. A receipt written by a NEWER build is
-well formed, not a crash, so it is user input like its contract sibling
-CONTRACT_SCHEMA_UNSUPPORTED -- not an IO_ runtime fault:
+The third and fourth overrides go the other way. A file written by a NEWER
+build is well formed, not a crash, so it is user input like its contract
+sibling CONTRACT_SCHEMA_UNSUPPORTED -- not an IO_ runtime fault. The rule is
+the format's, not the receipt's, so the resolution entry beside the receipt
+(F-2b04f0b8) takes the same override for the same reason:
 
     IO_RECORD_SCHEMA_UNSUPPORTED  receipt schema_version is from the future -> exit 1
+    IO_DISPOSITION_SCHEMA_UNSUPPORTED  a resolution entry from the future   -> exit 1
 
 CORRECTED IN PLACE (F-a2de5ab2). Both tables above had drifted from the maps
 they describe: SYNTH_ was missing from the namespace list, and the
@@ -178,6 +181,10 @@ _EXIT_BY_CODE: Final[dict[str, int]] = {
     # your input"). A receipt that is perfectly well formed and merely written by a newer
     # build is user input, not a runtime fault, so it takes the same 1 the sibling takes.
     "IO_RECORD_SCHEMA_UNSUPPORTED": 1,
+    # F-2b04f0b8: the disposition is a second on-disk format with the same reader contract as
+    # the receipt (a version marker, a supported set, a distinct answer for present-and-newer),
+    # so it gets the same override rather than a new opinion about what "from the future" means.
+    "IO_DISPOSITION_SCHEMA_UNSUPPORTED": 1,
 }
 
 DEFAULT_HINTS: Final[dict[str, str]] = {
@@ -333,6 +340,38 @@ DEFAULT_HINTS: Final[dict[str, str]] = {
     "RUNTIME_VERIFIER_CALL_FAILED": "A verifier raised while scoring. That is a defect, not a "
     "missing score, so it is not recorded as SKIPPED. The message names the instrument and the "
     "input; re-run with --debug for its traceback.",
+    # ---------------------------------------------------------------- F-8cfaf7ec
+    "INPUT_GATE_BATCH_EMPTY": "The batch gate was handed no images, so it decided nothing. Zero "
+    "images that all passed is not a pass. Name at least one image to gate.",
+    # ---------------------------------------------------------------- F-b0e6dde7
+    # A typo'd records dir must not read as 'you have no receipts'. Same split, and the same
+    # wording, as INPUT_CONTRACTS_DIR above: the path is user input, so the refusal is too.
+    "INPUT_RECORDS_DIR": "The path must be an existing directory. A directory that exists and "
+    "holds no receipts is an empty listing, not a refusal; a path that does not exist is this. "
+    "pcraft bind creates the records dir when it writes its first receipt.",
+    # ---------------------------------------------------------------- F-2b04f0b8
+    # The resolution entry beside a receipt: what the Director decided at the escalation
+    # checkpoint. A sibling file, never an edit of the receipt, so its refusals are its own.
+    "INPUT_DISPOSITION_TARGET": "Only an escalated receipt has something for a human to resolve. "
+    "A bound receipt already recorded its decision, and a resolution entry is not a general "
+    "annotation channel. Point at the receipt the checkpoint was printed for.",
+    "INPUT_DISPOSITION_ACTOR": "Name the person who decided. An unattributed resolution is not "
+    "evidence that a human looked at the checkpoint, which is the only thing this record is for.",
+    "INPUT_DISPOSITION_RESOLUTION": "A resolution is exactly one of accepted, rejected or "
+    "deferred. The message names the values this build writes; anything else would be a verdict "
+    "nothing downstream can read.",
+    "IO_DISPOSITION_EXISTS": "A resolution entry already exists at that path and prompt-craft "
+    "will not overwrite one, for the same reason it will not overwrite a receipt. Record the new "
+    "decision under its own timestamp; decisions accumulate rather than replacing each other.",
+    "IO_DISPOSITION_WRITE": "Check that the records dir is writable and has space. The receipt "
+    "itself is untouched either way: a resolution is always a new file beside it.",
+    "IO_DISPOSITION_READ": "The path does not exist, or the file is not valid JSON. Resolution "
+    "entries live in the dispositions/ directory beside the receipts they resolve.",
+    "IO_DISPOSITION_INVALID": "The file is JSON but does not match the resolution schema. Re-run "
+    "the verb that records a decision rather than hand-editing the entry, or pass --debug.",
+    "IO_DISPOSITION_SCHEMA_UNSUPPORTED": "This resolution entry was written by a NEWER "
+    "prompt-craft than the one reading it. Upgrade prompt-craft to read it. The file is well "
+    "formed, not corrupt, so do not delete it and re-decide.",
 }
 
 

@@ -6,11 +6,24 @@ the gate chose Y. GPU-free.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from pcraft.core.contract.compile_questions import Polarity, compile_questions
 from pcraft.core.contract.schema import Severity
 from pcraft.core.gate.checkpoint import build_checkpoint
 from pcraft.core.gate.harness import AtomVerdict, GateTranscript, TierCensus
 from pcraft.core.gate.thresholds import Zone
+from pcraft.core.receipt.asset_record import load as load_record
+from pcraft.core.receipt.asset_record import receipt_paths
+from pcraft.core.receipt.disposition import (
+    DISPOSITIONS_DIRNAME,
+    dispositions_for,
+    load_disposition,
+    record_disposition,
+)
+from pcraft.errors import PromptCraftError
 from pcraft.sample import load_sprite_example, run_mock_loop
 
 
@@ -437,3 +450,250 @@ def test_the_head_line_still_carries_the_decision_inputs(tmp_path):
     first = heads[0]
     assert result.checkpoint.lines[0].atom_id in first
     assert result.checkpoint.lines[0].zone in first
+
+
+# --------------------------------------------------------------------------------------
+# F-2b04f0b8 -- the other half of the checkpoint. The loop builds a genuine contrastive
+# checkpoint, persists it in the receipt, prints it and returns decision='escalated'. Then
+# the trail stops: there was no verb and no format for what the Director decided, so the
+# Director's judgment was the one input to the pipeline that never became provenance.
+#
+# The product's own model named the gap: the `escalation-ticket` compensator declares owner
+# "pipeline (Director resolves)" and post-rollback state "ticket closed with a resolution
+# note" -- and there was no ticket, no note, and no place to put one.
+#
+# The design ruling: a SIBLING record beside the receipt, never a mutation of it.
+# --------------------------------------------------------------------------------------
+
+_AT = "2026-08-31T09:00:00Z"
+
+
+def _escalated(tmp_path):
+    result = _escalating_run(tmp_path)
+    assert result.decision == "escalated" and result.record is not None
+    return result
+
+
+def test_a_disposition_never_touches_the_receipt_it_resolves(tmp_path):
+    """persist()'s "a receipt already on disk is never replaced" rule (F-a99ec99e) and
+    STABILITY.md's schema_version "1" promise both hold: the resolution is a NEW file
+    referencing record_id, and STATE_REPLAY_DRIFT's own hint ends "Do not edit the receipt"."""
+    result = _escalated(tmp_path)
+    receipt = tmp_path / f"{result.record.record_id}.json"
+    before = receipt.read_bytes()
+
+    record_disposition(
+        result.record, tmp_path, resolution="accepted", resolved_by="director",
+        note="looked at the plate; the tabard reads", resolved_at=_AT,
+    )
+
+    assert receipt.read_bytes() == before, "the receipt is the record of a decision, not a draft"
+    reloaded = load_record(receipt)
+    assert reloaded.decision == "escalated"
+    assert reloaded.schema_version == "1"
+
+
+def test_a_disposition_is_invisible_to_every_reader_of_the_records_dir(tmp_path):
+    """The sibling must not land where regrade_dir / the index would try to load it as a
+    receipt, and must not be able to collide with persist()'s O_EXCL target."""
+    from pcraft.core.gate.regrade import regrade_dir
+    from pcraft.sample import load_sprite_example
+
+    result = _escalated(tmp_path)
+    before = [str(p) for p in receipt_paths(tmp_path)]
+    written = record_disposition(
+        result.record, tmp_path, resolution="accepted", resolved_by="director",
+        resolved_at=_AT,
+    )
+
+    assert written.parent.name == DISPOSITIONS_DIRNAME
+    assert written.parent.parent == tmp_path
+    assert [str(p) for p in receipt_paths(tmp_path)] == before
+    _s, _r, table, _c = load_sprite_example()
+    assert len(regrade_dir(tmp_path, table)) == 1, "the sweep still sees exactly one receipt"
+
+
+def test_a_second_decision_accumulates_rather_than_replacing_the_first(tmp_path):
+    """The same rule _record_id was widened for: a human who looks twice leaves two entries,
+    and neither write can destroy the other."""
+    result = _escalated(tmp_path)
+    first = record_disposition(
+        result.record, tmp_path, resolution="deferred", resolved_by="director",
+        resolved_at="2026-08-31T09:00:00Z",
+    )
+    second = record_disposition(
+        result.record, tmp_path, resolution="accepted", resolved_by="director",
+        resolved_at="2026-08-31T11:30:00Z",
+    )
+    assert first != second
+    assert first.exists() and second.exists()
+
+    entries = dispositions_for(tmp_path, result.record.record_id)
+    assert [d.resolution for d in entries] == ["deferred", "accepted"]
+    assert load_disposition(first).resolution == "deferred"
+
+
+def test_the_same_decision_at_the_same_instant_is_a_refusal_not_an_overwrite(tmp_path):
+    result = _escalated(tmp_path)
+    record_disposition(result.record, tmp_path, resolution="accepted",
+                       resolved_by="director", resolved_at=_AT)
+    with pytest.raises(PromptCraftError) as exc:
+        record_disposition(result.record, tmp_path, resolution="rejected",
+                           resolved_by="director", resolved_at=_AT)
+    assert exc.value.code == "IO_DISPOSITION_EXISTS"
+
+
+def test_recording_a_disposition_requires_its_named_compensator(tmp_path):
+    """NAMED_COMPENSATORS, no skip: an irreversible write is not performed unless a named undo
+    with an owner is registered FIRST, exactly like records-write and bind-to-canon."""
+    from pcraft.core.loop.compensators import CompensatorRegistry, default_registry
+
+    result = _escalated(tmp_path)
+    assert "disposition-write" in default_registry().actions()
+    comp = default_registry().get("disposition-write")
+    assert comp.owner and comp.post_state
+
+    with pytest.raises(PromptCraftError) as exc:
+        record_disposition(result.record, tmp_path, resolution="accepted",
+                           resolved_by="director", resolved_at=_AT,
+                           compensators=CompensatorRegistry())
+    assert exc.value.code == "STATE_NO_COMPENSATOR"
+    assert not (tmp_path / DISPOSITIONS_DIRNAME).exists(), "the check runs BEFORE the write"
+
+
+def test_a_bound_receipt_has_nothing_for_a_human_to_resolve(tmp_path):
+    """UNCERTAINTY_GATED_HUMANS: the resolution path is evidence a human decided at the
+    checkpoint, not a general-purpose annotation channel."""
+    from pcraft.sample import run_mock_loop
+
+    bound = run_mock_loop(records_dir=str(tmp_path))
+    assert bound.decision == "bound"
+    with pytest.raises(PromptCraftError) as exc:
+        record_disposition(bound.record, tmp_path, resolution="accepted",
+                           resolved_by="director", resolved_at=_AT)
+    assert exc.value.code == "INPUT_DISPOSITION_TARGET"
+
+
+def test_a_decision_with_no_human_on_it_is_refused(tmp_path):
+    """A resolution path must not become a way to auto-accept. An unattributed disposition is
+    not evidence that a human decided anything."""
+    result = _escalated(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        record_disposition(result.record, tmp_path, resolution="accepted",
+                           resolved_by="   ", resolved_at=_AT)
+    assert exc.value.code == "INPUT_DISPOSITION_ACTOR"
+
+
+def test_an_unknown_resolution_is_refused(tmp_path):
+    result = _escalated(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        record_disposition(result.record, tmp_path, resolution="approved-ish",
+                           resolved_by="director", resolved_at=_AT)
+    assert exc.value.code == "INPUT_DISPOSITION_RESOLUTION"
+
+
+def test_the_timestamp_is_injectable_so_the_trail_is_deterministic(tmp_path):
+    """PIN_PER_STEP's reason, applied here: a stamp drawn from a wall clock does not replay."""
+    result = _escalated(tmp_path)
+    path = record_disposition(result.record, tmp_path, resolution="accepted",
+                              resolved_by="director", resolved_at=_AT)
+    entry = load_disposition(path)
+    assert entry.resolved_at == _AT
+    assert entry.record_id == result.record.record_id
+    assert entry.contract_hash == result.record.contract_hash
+    assert entry.thresholds_fingerprint == result.record.thresholds_fingerprint
+    assert entry.checkpoint_digest, "a disposition names the artifact the human was shown"
+
+
+def test_the_disposition_pins_the_checkpoint_the_human_actually_read(tmp_path):
+    """"I accepted this" is only provenance if it says what "this" was."""
+    from pcraft.core.receipt.disposition import checkpoint_digest
+
+    result = _escalated(tmp_path)
+    path = record_disposition(result.record, tmp_path, resolution="accepted",
+                              resolved_by="director", resolved_at=_AT)
+    assert load_disposition(path).checkpoint_digest == checkpoint_digest(result.record)
+
+
+def test_the_index_joins_a_disposition_to_the_receipt_it_resolves(tmp_path):
+    from pcraft.core.receipt.index import RecordQuery, scan
+
+    result = _escalated(tmp_path)
+    record_disposition(result.record, tmp_path, resolution="accepted",
+                       resolved_by="director", note="the tabard reads", resolved_at=_AT)
+
+    index = scan(tmp_path)
+    row = index.rows[0]
+    assert row.record_id == result.record.record_id
+    assert [d.resolution for d in row.dispositions] == ["accepted"]
+    assert row.latest_resolution == "accepted"
+    assert index.query(RecordQuery(resolution="accepted")) == [row]
+    assert index.query(RecordQuery(resolution="rejected")) == []
+    assert index.summary().by_resolution == {"accepted": 1}
+
+
+def test_an_unattached_disposition_is_reported_rather_than_dropped(tmp_path):
+    """The scan never aborts and never silently omits. A disposition naming a receipt this
+    directory does not hold is a fact the operator has to be told."""
+    from pcraft.core.receipt.index import scan
+
+    result = _escalated(tmp_path)
+    written = record_disposition(result.record, tmp_path, resolution="accepted",
+                                 resolved_by="director", resolved_at=_AT)
+    data = json.loads(written.read_text(encoding="utf-8"))
+    data["record_id"] = "a-receipt-that-is-not-here"
+    written.write_text(json.dumps(data), encoding="utf-8")
+
+    index = scan(tmp_path)
+    assert index.rows[0].dispositions == []
+    assert len(index.stray_dispositions) == 1
+    assert index.stray_dispositions[0].endswith(written.name)
+
+
+def test_a_damaged_disposition_does_not_abort_the_scan(tmp_path):
+    from pcraft.core.receipt.index import scan
+
+    result = _escalated(tmp_path)
+    d = tmp_path / DISPOSITIONS_DIRNAME
+    d.mkdir(exist_ok=True)
+    (d / "broken.json").write_text("{", encoding="utf-8")
+
+    index = scan(tmp_path)
+    assert index.rows[0].record_id == result.record.record_id
+    assert len(index.stray_dispositions) == 1
+
+
+def test_a_disposition_from_the_future_is_refused_by_its_own_code(tmp_path):
+    """The same reader contract the receipt has: well formed and newer is not corrupt."""
+    result = _escalated(tmp_path)
+    path = record_disposition(result.record, tmp_path, resolution="accepted",
+                              resolved_by="director", resolved_at=_AT)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["schema_version"] = "99"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PromptCraftError) as exc:
+        load_disposition(path)
+    assert exc.value.code == "IO_DISPOSITION_SCHEMA_UNSUPPORTED"
+    assert exc.value.exit_code == 1, "a file from the future is user input, exit 1"
+
+
+def test_a_disposition_changes_neither_the_decision_literal_nor_the_exit_code(tmp_path):
+    """OrchestrationResult.decision is a Literal narrowed on purpose (F-a250372c) and the
+    covered exit-code contract must hold: "a human accepted this" must never become exit 0
+    from `bind`, because that would make the gate's refusal retroactively invisible."""
+    from pcraft.core.gate.exit_contract import error_from_transcript
+    from pcraft.core.loop.orchestrate import OrchestrationResult
+
+    result = _escalated(tmp_path)
+    before = error_from_transcript(result.record.gate_transcript)
+    record_disposition(result.record, tmp_path, resolution="accepted",
+                       resolved_by="director", resolved_at=_AT)
+
+    assert set(OrchestrationResult.model_fields["decision"].annotation.__args__) == {
+        "bound", "escalated"
+    }
+    reloaded = load_record(tmp_path / f"{result.record.record_id}.json")
+    assert reloaded.decision == "escalated"
+    after = error_from_transcript(reloaded.gate_transcript)
+    assert after.code == before.code and after.exit_code == before.exit_code != 0

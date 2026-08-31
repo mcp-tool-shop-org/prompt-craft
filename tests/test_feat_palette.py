@@ -14,6 +14,7 @@ import pytest
 
 import pcraft.domains.image  # noqa: F401
 from pcraft.core.contract.compile_questions import CheckType, Polarity, Question, Severity
+from pcraft.core.contract.schema import Spatial, SpatialKind
 from pcraft.core.plugin import get
 from pcraft.domains.image.generator.reference_lock import assemble
 from pcraft.domains.image.verifier import palette_verifier as pv
@@ -785,3 +786,218 @@ def test_many_small_idat_chunks_still_parse():
         + chunk(b"IEND", b"")
     )
     assert pv._png_complete_rows(data) == (10, 10, 10)
+
+
+# ================================================================ F-2c77d698 (region-localized)
+# `Atom.spatial` with kind=region is documented in core/contract/schema.py as "a named image region
+# (torso, head, hands, chest-center)" and "a CHECKABLE image region" -- and MEASURED across src/,
+# nothing checked it: compile_questions copies it onto the Question, loader uses it for the
+# no-relaxation comparison, orchestrate reads it only to pick an INPAINT region, and ZERO verifier
+# modules referenced `question.spatial` at all. So the shipped `sigil` atom (spatial region=
+# chest-center) was answered from anywhere in the frame: a sigil painted on the shoulder satisfied
+# chest-center. The window is computable GPU-free -- `conditioning.region_box` already returns the
+# exact pixel box, and it is the SAME function the inpaint repair uses, so the window the gate
+# checks is the window the repair paints.
+#
+# THE HONEST FIRST TARGET is the deterministic histogram. The three model-backed verifiers keep
+# scoring the full frame until a region calibration is measured for them, and they SAY SO rather
+# than partially honouring the field in silence.
+
+
+def _grid_png(path, rows: list[list[tuple[int, int, int]]]):
+    """A PNG with arbitrary per-pixel colours -- write_solid_png cannot express a region."""
+    height = len(rows)
+    width = len(rows[0])
+    raw = b"".join(bytes([0]) + b"".join(bytes(px) for px in row) for row in rows)
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    blob = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(blob)
+    return p
+
+
+_ASH = (58, 58, 58)  # #3a3a3a
+_WHITE = (255, 255, 255)  # #ffffff -- the sigil colour
+
+
+def _sigil_on_the_shoulder(path, size: int = 64):
+    """The finding's own example, as pixels: a white patch high-left, nothing in chest-center.
+
+    100 white pixels out of 4096 is 2.4% of the frame -- six times _MIN_FRAC -- so the FULL-FRAME
+    histogram calls the colour present. `region_box(64, 64, 'chest-center')` is (9, 19, 54, 44),
+    which the patch (rows 0-9, cols 0-9) does not touch at all.
+    """
+    rows = [[_ASH for _ in range(size)] for _ in range(size)]
+    for y in range(10):
+        for x in range(10):
+            rows[y][x] = _WHITE
+    return _grid_png(path, rows)
+
+
+def _region_q(region: str, enum: list[str] | None, kind: str = "region") -> Question:
+    return Question(
+        atom_id="sigil",
+        text="Does this image show a white triple-bar sigil on the tabard?",
+        check_type=CheckType.palette,
+        polarity=Polarity.affirm,
+        severity=Severity.required,
+        spatial=Spatial(kind=SpatialKind(kind), ref=region),
+        enum=enum,
+    )
+
+
+def test_a_region_atom_is_scored_over_its_region_not_the_whole_frame(tmp_path):
+    """The defect, as one pair of numbers: the same plate, the same enum, the same verifier."""
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    whole_frame = PaletteVerifier().score(path, _q(["#ffffff"]))
+    assert whole_frame == pytest.approx(1.0), "the colour IS in the frame -- just not where declared"
+    in_region = PaletteVerifier().score(path, _region_q("chest-center", ["#ffffff"]))
+    assert in_region == pytest.approx(0.0), "a sigil on the shoulder does not satisfy chest-center"
+
+
+def test_an_atom_with_no_spatial_is_scored_exactly_as_before(tmp_path):
+    """MUST NOT BREAK. `_presence` measures a fraction of TOTAL pixels against _MIN_FRAC, so a crop
+    changes what 'present' MEANS. The shipped palette atom carries no spatial, so it must not move:
+    the crop is gated on the field being present, and the receipt says which window was scored."""
+    ash = write_solid_png(tmp_path / "ash.png", _ASH)
+    v = PaletteVerifier()
+    assert v.score(str(ash), _q(["#3a3a3a", "#d9d4c8", "#7a1f1f"])) == pytest.approx(0.3333)
+    assert v.verifier_id_for(_q(["#3a3a3a"])) == "palette.hist.v1", "the full-frame id does not move"
+    assert v.last_region is None
+    assert "region" not in (v.breakdown_detail() or "")
+
+
+def test_a_pose_spatial_is_not_a_region_and_never_crops(tmp_path):
+    """kind=pose names a ControlNet guide image, not a checkable window. The shipped `weapon` atom
+    carries one, and cropping to a filename would be nonsense -- it is a documented no-op."""
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    q = _region_q("poses/two-hand-weapon.openpose.png", ["#ffffff"], kind="pose")
+    v = PaletteVerifier()
+    assert v.score(path, q) == pytest.approx(1.0), "scored full-frame, exactly as before"
+    assert v.last_region is None
+    assert v.verifier_id_for(q) == "palette.hist.v1"
+
+
+def test_an_unrecognised_region_is_refused_by_name_not_scored_on_a_guessed_window(tmp_path):
+    """Region names are contract-authored free text and `region_box` silently returns a CENTRE box
+    for anything it does not recognise -- so an atom declaring `shouldre` would have been scored on
+    a window nobody asked for, and the receipt would have read like an ordinary verdict. Same
+    discipline as conditioning._SUPPORTED_METHODS: a name nobody wired is refused BY NAME."""
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    with pytest.raises(PromptCraftError) as exc:
+        PaletteVerifier().score(path, _region_q("shouldre", ["#ffffff"]))
+    assert exc.value.code == "CONTRACT_SPATIAL_REGION_UNKNOWN"
+    assert "shouldre" in exc.value.message
+    assert "sigil" in exc.value.message, "name the atom the author has to go and edit"
+    hint = exc.value.hint or ""
+    assert "chest-center" in hint, "the refusal lists the windows that DO exist"
+
+
+def test_the_region_delegate_moves_the_version_and_never_the_band(tmp_path):
+    """A score from a crop is NOT on the full-frame scale, so it may not be stamped with the id of
+    the instrument that produced full-frame numbers -- that is the silent re-decide
+    STATE_REPLAY_DRIFT exists to make visible. The '<band>.<instrument>.<version>' convention is
+    load-bearing: the band segment must not move (harness._band_key keys zoning on it), only the
+    version."""
+    v = PaletteVerifier()
+    region_id = v.verifier_id_for(_region_q("chest-center", ["#ffffff"]))
+    assert region_id != v.verifier_id_for(_q(["#ffffff"])), "one id for two scales is the defect"
+    assert region_id.split(".")[0] == "palette", "the band segment is what zoning reads"
+    assert region_id == "palette.hist.v2"
+    assert v.version_for(_region_q("chest-center", ["#ffffff"])) == "v2"
+
+
+def test_the_router_reports_the_region_delegate_and_keeps_the_band(tmp_path):
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    router = Tier0Router()
+    router.score(path, _region_q("chest-center", ["#ffffff"]))
+    assert router.last_delegate["verifier_id"] == "palette.hist.v2"
+    assert router.last_delegate["family"] == "palette-hist"
+    assert router.verifier_id == "palette.hist.v2"
+    assert router.band_key == "palette", "zoning must not silently fall through to `default`"
+
+
+def test_the_receipt_says_which_box_was_scored(tmp_path, sprite_example):
+    """Route the crop through the existing detail seam (harness._detail_for) so a verdict scored
+    over a region SAYS so. A cropped number sitting on a full-frame line with nothing distinguishing
+    it is the whole hazard."""
+    from pcraft.core.contract.compile_questions import QuestionDAG
+    from pcraft.core.gate import harness
+
+    _s, _resolved, thresholds, _c = sprite_example
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    dag = QuestionDAG(contract_id="char:test", questions=[_region_q("chest-center", ["#ffffff"])])
+    transcript = harness.evaluate(
+        dag, path, {0: Tier0Router()}, thresholds, generator_family="flux"
+    )
+    verdict = transcript.verdicts[0]
+    assert verdict.verifier_id == "palette.hist.v2"
+    assert verdict.band_key == "palette"
+    detail = verdict.detail or ""
+    assert "chest-center" in detail, "the receipt names the region the contract declared"
+    assert "(9, 19, 54, 44)" in detail, "and the pixel box that was actually measured"
+    assert "palette.hist.v2" in transcript.model_dump_json()
+
+
+def test_the_gate_window_is_the_same_function_the_repair_paints(tmp_path):
+    """`orchestrate` hands the same region name to `conditioning.region_box` to pick the INPAINT
+    box. Deriving the gate's window from a second copy would let the two drift, so the checked
+    window and the repainted window are one function."""
+    from pcraft.domains.image.generator.conditioning import region_box
+    from pcraft.domains.image.verifier.region import region_window
+
+    for name in ("head", "torso", "chest-center", "hands", "fist"):
+        assert region_window(64, 64, name, atom_id="a") == region_box(64, 64, name)
+
+
+def test_the_model_backed_verifiers_say_they_scored_the_full_frame(tmp_path):
+    """Refusal of scope, on the receipt rather than only in a comment. VQAScore / SigLIP2 hand the
+    full-frame path straight to their model, and cropping would move them onto an unmeasured scale
+    -- so the honest state is 'still full-frame, and the transcript says which atoms that cost'."""
+    from pcraft.domains.image.verifier.siglip2_screen import SigLIP2Screen
+    from pcraft.domains.image.verifier.vqascore_verifier import VQAScoreVerifier
+
+    region = _region_q("chest-center", None)
+    for verifier in (SigLIP2Screen(), VQAScoreVerifier()):
+        note = verifier.score_detail("x.png", region)
+        assert note, f"{verifier.verifier_id} silently ignored a declared region"
+        assert "chest-center" in note
+        assert "full frame" in note.lower()
+        assert verifier.score_detail("x.png", _q(["#ffffff"])) is None, "no region, nothing to say"
+
+
+def test_the_router_carries_the_screens_full_frame_note_too(tmp_path):
+    """The harness asks the DECIDING instrument, which for a Tier-0 siglip2 atom is the router. A
+    note the router swallows is a note nobody reads."""
+    path = str(_sigil_on_the_shoulder(tmp_path / "shoulder.png"))
+    router = Tier0Router()
+
+    class _Recorder:
+        family = "siglip2"
+        verifier_id = "siglip2.screen.v1"
+        version = "so400m-patch14-384"
+        tier = 0
+
+        def score(self, image_path, question):
+            return 0.5
+
+        def score_detail(self, image_path, question):
+            from pcraft.domains.image.verifier.region import full_frame_note
+
+            return full_frame_note(question, self.verifier_id)
+
+    router._siglip = _Recorder()
+    q = _region_q("chest-center", ["gold heraldry"])
+    router.score(path, q)
+    detail = router.score_detail(path, q)
+    assert detail and "chest-center" in detail and "full frame" in detail.lower()

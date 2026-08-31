@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from pcraft.core.contract.compile_questions import compile_questions
 from pcraft.core.contract.schema import Severity
 from pcraft.core.gate import harness
+from pcraft.core.gate.batch import COULD_NOT_RUN, error_from_batch, evaluate_batch
 from pcraft.core.gate.thresholds import Zone
-from pcraft.testing import ScriptedVerifier, passing_verifiers
+from pcraft.errors import PromptCraftError
+from pcraft.testing import ScriptedVerifier, passing_verifiers, write_solid_png
 
 
 def test_parent_fail_forces_child_na(sprite_example):
@@ -393,3 +397,229 @@ def test_the_localization_detail_name_is_accepted_too(sprite_example):
 
     t = _evaluate_with(_Localizer(), resolved, thresholds)
     assert {x.atom_id: x for x in t.verdicts}["palette"].detail == "looked at the torso region"
+
+
+# --------------------------------------------------------------------------------------
+# F-8cfaf7ec -- batch gating: N images against ONE contract in one invocation, with ONE
+# verifier construction and one transcript per image.
+#
+# `pcraft gate` takes exactly one image, so gating a turnaround or a chapter's plates is N
+# processes -- and each process pays a fresh load of clip-flant5-xxl plus SigLIP2 plus the
+# Tier-2 localizer, because every verifier caches its scorer on the INSTANCE and the instance
+# dies with the process. The library was already shaped for this: `evaluate` takes an
+# ALREADY-CONSTRUCTED verifier dict and a per-call image_path.
+# --------------------------------------------------------------------------------------
+
+
+def _images(tmp_path, n):
+    return [str(write_solid_png(tmp_path / f"plate{i}.png")) for i in range(n)]
+
+
+def test_a_transcript_names_the_image_it_graded(sprite_example):
+    """The structural blocker the finding measured: GateTranscript declared contract_id, overall,
+    verdicts, tier_census and thresholds_version and NO image_path, so a batch --json document had
+    no covered slot to say which image each transcript graded. AssetRecord was given image_path for
+    exactly this reason (F-f99c78f8); the transcript never got the same treatment."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(dag, "plate.png", passing_verifiers(), thresholds,
+                         generator_family="stable-diffusion")
+    assert t.image_path == "plate.png"
+
+
+def test_the_image_path_field_is_additive_so_the_old_shape_still_validates():
+    """extra='forbid' stays; absent is the old shape. The same additive rule AssetRecord's
+    F-f99c78f8 fields established."""
+    from pcraft.core.gate.harness import GateTranscript
+
+    t = GateTranscript(contract_id="c", overall=Zone.PASS, verdicts=[])
+    assert t.image_path == ""
+
+
+def test_batch_gates_every_image_and_keeps_each_transcript(sprite_example, tmp_path):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    paths = _images(tmp_path, 3)
+    report = evaluate_batch(dag, paths, passing_verifiers(), thresholds,
+                            generator_family="stable-diffusion")
+    assert [r.image_path for r in report.results] == paths
+    assert all(r.transcript is not None for r in report.results)
+    assert [r.transcript.image_path for r in report.results] == paths
+    assert report.exit_code() == 0
+    assert error_from_batch(report) is None
+
+
+def test_one_unreadable_image_does_not_void_the_other_results(sprite_example, tmp_path):
+    """preflight_image's per-image IO_GATE_INPUT refusal stays PER IMAGE. One missing file must
+    not void the other N-1 verdicts -- "the first bad file ends the report" is the exact failure
+    the N-processes workaround already has."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    good = _images(tmp_path, 2)
+    paths = [good[0], str(tmp_path / "does-not-exist.png"), good[1]]
+
+    report = evaluate_batch(dag, paths, passing_verifiers(), thresholds,
+                            generator_family="stable-diffusion")
+    assert len(report.results) == 3
+    assert report.results[0].transcript is not None and report.results[0].passed
+    assert report.results[2].transcript is not None and report.results[2].passed
+    missing = report.results[1]
+    assert missing.transcript is None
+    assert missing.code == "IO_GATE_INPUT"
+    assert missing.exit_code == COULD_NOT_RUN
+
+
+def test_could_not_run_is_never_merged_onto_a_fail(sprite_example, tmp_path):
+    """The 4-way exit contract must not be collapsed. A batch carrying BOTH a confirmed required
+    failure and an image that could not be read must not report 2 -- that is exactly "some image
+    could not run" laundered into "the gate ran and refused"."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    good = _images(tmp_path, 1)
+    paths = [good[0], str(tmp_path / "gone.png")]
+
+    report = evaluate_batch(dag, paths, passing_verifiers(scores={"weapon": 0.05}), thresholds,
+                            generator_family="stable-diffusion")
+    assert report.results[0].code == "GATE_FAIL"
+    assert report.results[1].code == "IO_GATE_INPUT"
+    assert report.exit_code() == COULD_NOT_RUN, "a could-not-run image must never be reported as 2"
+    assert report.any_unrunnable() and not report.all_unrunnable()
+    err = error_from_batch(report)
+    assert err is not None and err.exit_code == COULD_NOT_RUN
+
+
+def test_a_batch_where_nothing_ran_says_so_as_a_whole(sprite_example, tmp_path):
+    """`4` keeps meaning could-not-run for the batch AS A WHOLE, and the report can tell that
+    apart from "some image could not run" mechanically rather than by reading prose."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    paths = [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
+
+    report = evaluate_batch(dag, paths, passing_verifiers(), thresholds,
+                            generator_family="stable-diffusion")
+    assert report.all_unrunnable()
+    assert report.exit_code() == COULD_NOT_RUN
+    assert "none of the 2" in error_from_batch(report).message
+
+
+def test_an_unconfirmed_batch_keeps_its_own_code(sprite_example, tmp_path):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    paths = _images(tmp_path, 2)
+
+    report = evaluate_batch(dag, paths, passing_verifiers(scores={"weapon": 0.60}), thresholds,
+                            generator_family="stable-diffusion")
+    assert {r.code for r in report.results} == {"PARTIAL_UNCONFIRMED"}
+    assert report.exit_code() == 3
+    assert error_from_batch(report).code == "PARTIAL_UNCONFIRMED"
+
+
+def test_a_single_image_batch_answers_exactly_what_the_single_image_gate_answers(
+    sprite_example, tmp_path
+):
+    """The batch is a new door, not a new gate: for one image its per-image result carries the
+    same transcript and the same coded refusal `pcraft gate` produces today."""
+    from pcraft.core.gate.exit_contract import error_from_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    path = _images(tmp_path, 1)[0]
+    verifiers = passing_verifiers(scores={"weapon": 0.05})
+
+    single = harness.evaluate(dag, path, verifiers, thresholds, generator_family="stable-diffusion")
+    single_err = error_from_transcript(single)
+    report = evaluate_batch(dag, [path], verifiers, thresholds, generator_family="stable-diffusion")
+
+    assert report.results[0].transcript.model_dump() == single.model_dump()
+    assert report.results[0].code == single_err.code
+    assert report.results[0].message == single_err.message
+    assert report.exit_code() == single_err.exit_code
+
+
+def test_the_external_verifier_guards_run_for_every_image_not_once_per_batch(
+    sprite_example, tmp_path, monkeypatch
+):
+    """EXTERNAL_VERIFIER: forbid_clipscore + assert_distinct_families run inside evaluate()
+    (F-461c4198) and must still run for EVERY image. Hoisting them out of the loop is the
+    optimisation this test exists to forbid."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    calls = []
+    real = harness.assert_distinct_families
+
+    def counting(gen, fams):
+        calls.append(gen)
+        return real(gen, fams)
+
+    monkeypatch.setattr(harness, "assert_distinct_families", counting)
+    evaluate_batch(dag, _images(tmp_path, 4), passing_verifiers(), thresholds,
+                   generator_family="stable-diffusion")
+    assert len(calls) == 4, "the guard must fire per image, not once for the batch"
+
+
+def test_the_verifiers_are_constructed_once_for_the_whole_batch(sprite_example, tmp_path):
+    """The finding's actual cost: each verifier caches its scorer on the INSTANCE, so N processes
+    pay N full model loads. One already-constructed dict over N images pays one."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+
+    class _LazyLoader(ScriptedVerifier):
+        loads = 0
+
+        def score(self, image_path, question):
+            if getattr(self, "_scorer", None) is None:
+                type(self).loads += 1
+                self._scorer = object()
+            return super().score(image_path, question)
+
+    v = _LazyLoader(family="clip-flant5", tier=1)
+    evaluate_batch(dag, _images(tmp_path, 5), {1: v}, thresholds,
+                   generator_family="stable-diffusion")
+    assert _LazyLoader.loads == 1, "the scorer must load once for the batch, not once per image"
+
+
+def test_a_contract_defect_refuses_the_whole_batch_once(sprite_example, tmp_path):
+    """A cyclic depends_on is a property of the CONTRACT, identical for every image. Containing it
+    per image would print the same authoring refusal N times and still refuse."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    ids = [q.atom_id for q in dag.questions]
+    dag.questions[0].depends_on = ids[1]
+    dag.questions[1].depends_on = ids[0]
+
+    with pytest.raises(PromptCraftError) as exc:
+        evaluate_batch(dag, _images(tmp_path, 3), passing_verifiers(), thresholds,
+                       generator_family="stable-diffusion")
+    assert exc.value.code == "CONTRACT_CYCLIC_DEPENDS_ON"
+
+
+def test_a_same_family_gate_refuses_the_whole_batch(sprite_example, tmp_path):
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    with pytest.raises(PromptCraftError) as exc:
+        evaluate_batch(dag, _images(tmp_path, 2), passing_verifiers(), thresholds,
+                       generator_family="clip-flant5")
+    assert exc.value.code == "GATE_SAME_FAMILY"
+
+
+def test_an_empty_batch_is_a_refusal_not_an_empty_pass(sprite_example):
+    """Zero images that all passed is not a pass; it is a caller who named no work."""
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    with pytest.raises(PromptCraftError) as exc:
+        evaluate_batch(dag, [], passing_verifiers(), thresholds,
+                       generator_family="stable-diffusion")
+    assert exc.value.code == "INPUT_GATE_BATCH_EMPTY"
+    assert exc.value.exit_code == 1
+
+
+def test_a_regraded_transcript_still_names_its_image(sprite_example):
+    """Re-zoning is about the table, not about which pixels were graded -- so the offline
+    re-grade must carry image_path through rather than dropping it on the floor."""
+    from pcraft.core.gate.regrade import regrade_transcript
+
+    _s, resolved, thresholds, _c = sprite_example
+    dag = compile_questions(resolved)
+    t = harness.evaluate(dag, "plate.png", passing_verifiers(), thresholds,
+                         generator_family="stable-diffusion")
+    assert regrade_transcript(t, thresholds, dag=dag).image_path == "plate.png"

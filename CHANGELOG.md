@@ -11,6 +11,36 @@ has never been able to prove. The `[image]` path has now executed once on the 50
 
 ## [Unreleased]
 
+Feature tranche 2 (dogfood swarm, Director-approved slices S5-S7 + small items,
+2026-08-31; suite 984 -> 1153):
+
+### Added
+
+- **Contract authoring at volume** (S5): a scaffold primitive emitting loadable minimal
+  contracts (round-trip proven through the real loader), the `pcraft new` verb using the
+  canonical serializer, an image-domain content-aware layer (reference-sheet traits to a
+  faction+character pair -- declared traits, not pixels, and it says so), atom-level
+  contract diff, a contract lint beyond validation, `ContractStore.explain` /
+  `questions_preview`, and the coordinator-authored handbook tutorial **"Binding real
+  canon"** walking a reference sheet to an enforced pair.
+- **Production throughput** (S6): batch gating (`evaluate_batch` -- one verifier
+  construction for N images, per-image transcripts, aggregation precedence `4,2,3,0` so a
+  could-not-run image can never be laundered into "ran and failed"; the `gate` command
+  accepts multiple images/a directory), a read-only receipt index/query over a records
+  dir, and `GateTranscript` gains an additive `image_path`.
+- **The human loop closes** (S7): an escalated receipt's disposition is recordable --
+  `pcraft resolve <receipt> --verdict approve|reject --note ...` writes a NEW file under
+  `records/dispositions/` (the receipt is never edited; old readers and `replay` are
+  untouched; the write requires the named `disposition-write` compensator, and
+  COMPENSATORS.md carries its row) -- and **region-localized verification** lands: an
+  atom's `spatial.kind=region` reaches the compiled question, the deterministic palette
+  verifier crops to the named region (`palette.hist.v2` on cropped scores; unknown region
+  names refuse by name), and the model-backed verifiers say full-frame per atom rather
+  than pretending.
+- Smaller: `encoder_rules` threading with an opt-in render-boilerplate block (absent =
+  byte-identical prompts), `must_not.depends_on` validation parity, and the
+  region pass-through pinned by contract tests in both directions.
+
 Feature tranche 1 (dogfood swarm, Director-approved slices S1-S4, 2026-08-31; suite
 883 -> 984):
 

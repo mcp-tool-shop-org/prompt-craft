@@ -62,6 +62,17 @@ def default_registry() -> CompensatorRegistry:
                              "receipt deleted by id; provenance index re-indexed"))
     reg.register(Compensator("escalation-ticket", _noop, "pipeline (Director resolves)",
                              "ticket closed with a resolution note"))
+    # F-2b04f0b8. The line above declares owner "pipeline (Director resolves)" and a post-state
+    # of "ticket closed with a resolution note" -- and until this entry there was no note, no
+    # place to put one, and no verb that produced one, so the compensator described a state the
+    # product could not reach. Recording the Director's answer is its own irreversible action
+    # (something downstream may act on "a human accepted this"), so it takes its own named undo
+    # rather than borrowing the ticket's. The receipt is deliberately absent from the post-state:
+    # a resolution is always a NEW file beside the receipt, so undoing one restores the receipt
+    # to nothing, because the receipt was never changed.
+    reg.register(Compensator("disposition-write", _noop, "pipeline (Director resolves)",
+                             "resolution entry deleted by record id and timestamp; the receipt "
+                             "is untouched and the escalation is open again"))
     reg.register(Compensator("encoder-rules-regen", _noop, "sync script",
                              "encoder_craft.md restored from git (generated + committed)"))
     return reg

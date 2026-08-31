@@ -12,6 +12,14 @@ dropped member narrows the atom's declared check with nothing on the receipt say
 mixes hex and text belongs to no single instrument and is refused too
 (``CONTRACT_PALETTE_ENUM_MIXED``). See ``_colours_or_refuse``.
 
+An atom that declares WHERE it must hold is measured THERE (F-2c77d698): ``spatial.kind=region``
+crops to ``conditioning.region_box`` -- the same box the inpaint repair paints -- before counting
+pixels, and the verdict says which window it came off. This is the one verifier in the domain that
+can honour a region honestly today, because it has no model whose calibration a crop would move.
+An atom with NO ``spatial`` is measured over the whole frame exactly as before: ``_presence``
+compares a fraction of the MEASURED WINDOW against ``_MIN_FRAC``, so cropping by default would
+silently redefine "present" for the shipped palette atom. See ``region.py``.
+
 family = ``palette-hist`` so this is never the generator's family.
 """
 
@@ -23,6 +31,7 @@ from pathlib import Path
 
 from ....core.contract.compile_questions import Question
 from ....errors import PromptCraftError
+from .region import crop_pixels, declared_region, describe_window, region_window
 
 _NEAR = 36  # Euclidean RGB: mid-grey must not count as blood-red
 _MIN_FRAC = 0.004  # ~0.4% of pixels is enough to count a colour as present
@@ -34,20 +43,58 @@ class PaletteVerifier:
     verifier_id = "palette.hist.v1"
     version = "v1"
 
+    # F-2c77d698. A score measured over a DECLARED REGION is not on the full-frame scale --
+    # ``_presence`` compares a hit fraction of the measured window against ``_MIN_FRAC``, so
+    # cropping changes what "present" means. Two windows therefore mean two instrument identities,
+    # and the receipt must be able to tell them apart: stamping a cropped number with the id that
+    # has always meant "full frame" would re-decide region atoms under a threshold table whose
+    # ``fingerprint()`` hashes only band values and would report NO drift.
+    #
+    # Only the VERSION segment moves. ``"<band>.<instrument>.<version>"`` is the convention
+    # Tier0Router's docstring calls load-bearing and ``harness._band_key`` actually keys zoning on,
+    # so ``palette`` stays exactly where it is: a region score is graded on the palette band, and
+    # THAT is the part still owed a measurement. The shipped table already says its palette band is
+    # a placeholder ("Recalibrate against ~50-100 labelled sprites per check_type"), and the
+    # workflow that would fit a separate region band now exists -- ``core/gate/holdout.py`` fits a
+    # band per band key from labelled rows. What does not exist is labelled REGION-SCORED rows, and
+    # a band invented without them is the thing that field warns against. So the window rides the
+    # receipt (``describe_window``) until someone measures it, and a reader can always see which
+    # scale a number came off.
+    region_verifier_id = "palette.hist.v2"
+    region_version = "v2"
+
     def __init__(self) -> None:
         # F-1675985a. The per-colour hit vector behind the most recent score, or None when the most
         # recent call produced no score (a text enum, an empty image, a refusal). Reset at the top
         # of every score() rather than only written on success: a vector left over from the previous
         # atom is the F-64b4f422 defect (a field that looks live and answers about something else).
         self.last_breakdown: list[dict] | None = None
+        # The window the most recent score measured, or None for a full-frame score. Reset in the
+        # same place and for the same reason as the breakdown above.
+        self.last_region: dict | None = None
+
+    def verifier_id_for(self, question: Question) -> str:
+        """Who will produce this atom's score: the full-frame histogram, or the region one.
+
+        Answered from the QUESTION rather than from the last call, so ``Tier0Router`` can record
+        the delegate BEFORE scoring -- which it does deliberately, since the harness also reads
+        ``verifier_id`` to name who raised or who was unavailable, and a delegate left over from
+        the previous atom would put the wrong instrument on that line too.
+        """
+        return self.region_verifier_id if declared_region(question) else self.verifier_id
+
+    def version_for(self, question: Question) -> str:
+        """The version half of ``verifier_id_for``. Same derivation, same reason."""
+        return self.region_version if declared_region(question) else self.version
 
     def score(self, image_path: str, question: Question) -> float | None:
         self.last_breakdown = None
+        self.last_region = None
         colours = _colours_or_refuse(question)
         if not colours:
             return None
         try:
-            pixels = load_rgb(image_path)
+            pixels, width, height = load_rgb_sized(image_path)
         except PromptCraftError:
             raise
         except Exception as err:
@@ -66,6 +113,19 @@ class PaletteVerifier:
             ) from err
         if not pixels:
             return None
+        # F-2c77d698. Gated on the field being PRESENT, never applied by default: the shipped
+        # palette atom carries no spatial, and cropping it would silently redefine "present" for
+        # the one verifier in this domain that is supposed to be deterministic.
+        region = declared_region(question)
+        if region is not None:
+            box = region_window(width, height, region, atom_id=question.atom_id)
+            pixels = crop_pixels(pixels, width, height, box)
+            self.last_region = {"region": region, "box": box, "frame": (width, height)}
+            if not pixels:
+                # An image too small to contain the declared window (a 1-pixel-tall plate has no
+                # head). SKIPPED, the same answer the empty-image arm above gives: the atom did not
+                # fail, it could not be measured, and the harness records that distinctly.
+                return None
         hits = [_presence(pixels, rgb) for rgb in colours]
         # Echoed as AUTHORED, for the reason CONTRACT_PALETTE_ENUM_MIXED already echoes the written
         # members: the operator has to find these strings in the contract, and '#00FF00' is not
@@ -96,14 +156,24 @@ class PaletteVerifier:
         expected = ", ".join(entry["hex"] for entry in self.last_breakdown)
         short = [entry for entry in self.last_breakdown if entry["hit"] < 1.0]
         if not short:
-            return f"expected {expected}; all present"
-        named = ", ".join(
-            f"{entry['hex']} "
-            + ("absent" if entry["hit"] <= 0.0 else "below the presence floor")
-            + f" (hit {entry['hit']:.2f})"
-            for entry in short
-        )
-        return f"expected {expected}; {named}"
+            body = f"expected {expected}; all present"
+        else:
+            named = ", ".join(
+                f"{entry['hex']} "
+                + ("absent" if entry["hit"] <= 0.0 else "below the presence floor")
+                + f" (hit {entry['hit']:.2f})"
+                for entry in short
+            )
+            body = f"expected {expected}; {named}"
+        # F-2c77d698: the window LEADS. "expected #ffffff; #ffffff absent" over a crop and the same
+        # sentence over the whole frame are different claims, and the reader has to know which one
+        # they are holding before the colours mean anything.
+        if self.last_region is not None:
+            window = describe_window(
+                self.last_region["region"], self.last_region["box"], *self.last_region["frame"]
+            )
+            return f"{window}; {body}"
+        return body
 
 
 class Tier0Router:
@@ -200,29 +270,52 @@ class Tier0Router:
         """
         if self.last_delegate is None:
             return None
-        if self.last_delegate["verifier_id"] != self._palette.verifier_id:
+        # Gated on the FAMILY, not on a literal id (F-2c77d698): the histogram now answers to two
+        # ids, one per window, and comparing against a single one of them would report "SigLIP2
+        # produced this" for every region-scored palette atom. The family is the delegate's stable
+        # identity -- palette-hist is the histogram whichever window it measured.
+        if self.last_delegate["family"] != self._palette.family:
             return None
         return self._palette.last_breakdown
 
-    def score_detail(self) -> str | None:
+    def score_detail(self, image_path: str | None = None, question: Question | None = None) -> str | None:
         """The operator-facing sentence for the most recent score, or None if there is none.
 
         The reader ``last_breakdown`` needs so it is not the stranded field F-64b4f422 named on
         ``last_delegate``: this is where a palette FAIL becomes "expected #3a3a3a, #d9d4c8, #7a1f1f;
-        #7a1f1f absent (hit 0.00)" instead of only a mean. Scope note, stated rather than implied:
-        stamping this onto the gate transcript needs a field on ``core.gate.harness.AtomVerdict``
-        (``extra='forbid'``, and its ``reason`` is composed harness-side) -- that half is core/gate's
-        and is deliberately not reached around from here. The value is on the router, which is the
-        object the harness and the plugin already hold.
+        #7a1f1f absent (hit 0.00)" instead of only a mean. The other half of that seam has since
+        landed on the core side: ``AtomVerdict.detail`` exists and ``harness._detail_for`` looks
+        this method up by name, so the value now reaches the transcript. It still lives on the
+        router, which is the object the harness and the plugin already hold.
+
+        F-2c77d698: the two OPTIONAL arguments exist because ``_detail_for`` prefers the
+        ``(image_path, question)`` signature and falls back to the no-argument one. Both are
+        accepted and the no-argument call keeps answering exactly as it did. The question is what
+        lets a SigLIP2-decided atom carry the screen's own note instead of dropping it: the harness
+        asks the DECIDING instrument, and for a Tier-0 atom that is this router.
         """
         if self.last_breakdown is None:
-            return None
+            # Not the histogram's verdict. If SigLIP2 decided it, its refusal-of-scope note is the
+            # only thing anyone can say about a region it did not honour, so pass the question on.
+            if question is None:
+                return None
+            detail = getattr(self._siglip, "score_detail", None)
+            return detail(image_path, question) if callable(detail) else None
         return self._palette.breakdown_detail()
 
-    def _record(self, delegate) -> None:
+    def _record(self, delegate, question: Question) -> None:
+        """Snapshot who is about to score. Region-aware, because the histogram has two ids.
+
+        ``verifier_id_for`` / ``version_for`` are asked of the QUESTION, so this stays a
+        before-the-call record (see ``score``) rather than becoming an after-the-fact read of
+        whatever the delegate last did. A delegate without those methods -- SigLIP2, or an
+        injected stand-in -- answers from its class attributes exactly as before.
+        """
+        resolve_id = getattr(delegate, "verifier_id_for", None)
+        resolve_version = getattr(delegate, "version_for", None)
         self.last_delegate = {
-            "verifier_id": delegate.verifier_id,
-            "version": delegate.version,
+            "verifier_id": resolve_id(question) if callable(resolve_id) else delegate.verifier_id,
+            "version": resolve_version(question) if callable(resolve_version) else delegate.version,
             "family": delegate.family,
         }
 
@@ -231,7 +324,7 @@ class Tier0Router:
             # Recorded BEFORE the call, not after: the harness also reads verifier_id to name who
             # raised or who was unavailable, and a delegate left over from the previous atom would
             # put the wrong instrument on that line too.
-            self._record(self._palette)
+            self._record(self._palette, question)
             score = self._palette.score(image_path, question)
             if score is not None:
                 return score
@@ -247,7 +340,7 @@ class Tier0Router:
         # F-00cfd3f8: recorded BEFORE the call on this arm too, so the fall-through verdict carries
         # the SigLIP2 family value -- siglip2.screen.v1, band_key 'siglip2'. This is the whole
         # channel instrument-aware zoning keys on: cross the delegate and the band crosses with it.
-        self._record(self._siglip)
+        self._record(self._siglip, question)
         return self._siglip.score(image_path, question)
 
 
@@ -399,6 +492,59 @@ def load_rgb(path: str | Path) -> list[tuple[int, int, int]]:
     im = Image.open(path).convert("RGB")
     flattened = getattr(im, "get_flattened_data", None)
     return list(flattened() if callable(flattened) else im.getdata())
+
+
+def load_rgb_sized(path: str | Path) -> tuple[list[tuple[int, int, int]], int, int]:
+    """``load_rgb`` plus the grid those pixels came from -- what a region crop needs.
+
+    F-2c77d698. ``load_rgb`` returns a FLAT row-major list, which is everything ``_presence``
+    needs and not enough to locate a rectangle inside. The size is read from the PNG's own IHDR
+    (29 bytes, no decode) so this costs nothing on the branch that already read the file, and
+    falls back to Pillow for the formats only Pillow reads.
+
+    The two answers are cross-checked by ``crop_pixels``, which refuses when the decoded count
+    disagrees with the declared size rather than cropping a rectangle out of the wrong grid --
+    the same completeness discipline both readers above already apply.
+    """
+    pixels = load_rgb(path)
+    width, height = image_size(path)
+    return pixels, width, height
+
+
+def image_size(path: str | Path) -> tuple[int, int]:
+    """``(width, height)``, from the PNG header when possible and Pillow otherwise."""
+    declared = _png_declared_size(path)
+    if declared is not None:
+        return declared
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError as err:
+        raise PromptCraftError(
+            "DEP_IMAGE_MISSING",
+            f"reading the size of {path} needs Pillow (the stdlib reader handles PNG only)",
+        ) from err
+    with Image.open(path) as im:
+        return (int(im.width), int(im.height))
+
+
+def _png_declared_size(path: str | Path) -> tuple[int, int] | None:
+    """Width/height off the IHDR, or None if this is not a PNG we can read a header from.
+
+    Reads 33 bytes: the 8-byte signature plus the IHDR chunk's length/type/first-8-bytes. No
+    decode, no allocation sized by a header field the caller controls (F-e9ad9f5d's lesson,
+    applied to a function that only ever needs two integers).
+    """
+    try:
+        with Path(path).open("rb") as fh:
+            head = fh.read(33)
+    except OSError:
+        return None
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    width, height = struct.unpack(">II", head[16:24])
+    if width <= 0 or height <= 0:
+        return None
+    return (int(width), int(height))
 
 
 # IHDR colour type -> samples per pixel. Used only to size a scanline; the Pillow branch reads every

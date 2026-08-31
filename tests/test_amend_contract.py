@@ -1557,3 +1557,794 @@ def test_the_sweep_reaches_a_file_in_a_new_subpackage(tmp_path):
 
     # and the reach is worth having: the sweep's own detector flags what lives down there.
     assert _non_ascii_offenders(nested, label="ollama.py") == ["ollama.py:1: U+2014"]
+
+
+# ===========================================================================
+# WAVE 13 FEATURES (swarm-1788165870-6880) -- four library-level additions.
+#
+# Every one is READ-ONLY or CONSTRUCTIVE: none of them decides anything the loader
+# already decides, and none of them changes an exit code. The CLI verbs that will
+# call them belong to cli-surface, exactly as FEAT-005's ids()/source_path() shipped
+# as library methods that `pcraft doctor` later called.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# F-a9d86551 -- authoring a new contract must not start with "copy an example file"
+#
+# Measured before this module: grep across src/pcraft/ and tests/ for
+# scaffold|new_contract|interview|new-contract returned zero contract-authoring hits, and
+# none of the 12 CLI commands writes a *.contract.json. The two shipped examples were the
+# de facto template. The proof obligation is a ROUND TRIP: whatever the scaffold emits has
+# to load back through the SAME _read_contract/resolve() path a hand-written file takes --
+# never a shortcut around the relaxation / duplicate-id / cycle checks.
+# ---------------------------------------------------------------------------
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_scaffolded_faction_round_trips_through_the_real_loader(tmp_path):
+    """The finding's whole ask in one test: scaffold -> serialize -> ContractStore -> resolve."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    contract = scaffold_contract(
+        "faction",
+        "faction:new-pact",
+        must_have=[("tabard", "a grey tabard worn over the torso")],
+        must_not=[("no_gun", "a firearm")],
+    )
+    _write(tmp_path / "new.faction.contract.json", scaffold_json(contract))
+
+    store = ContractStore([tmp_path])
+    assert store.ids() == ["faction:new-pact"]
+    resolved = store.resolve("faction:new-pact")
+    assert [a.id for a in resolved.must_have] == ["tabard"]
+    assert [m.id for m in resolved.must_not] == ["no_gun"]
+    # and the derived half compiles, with zero hand edits
+    assert len(compile_questions(resolved).questions) == 2
+
+
+def test_the_scaffolded_file_declares_the_schema_this_build_reads():
+    """A file without `$schema` loads too, but one that announces the WRONG id is refused --
+    so the scaffold has to emit the supported id rather than leave the field out."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+    from pcraft.core.contract.schema import CONTRACT_SCHEMA_ID
+
+    emitted = json.loads(scaffold_json(scaffold_contract("faction", "faction:x")))
+    assert emitted["$schema"] == CONTRACT_SCHEMA_ID
+    assert "note" not in emitted, "the authoring comment field is spelled `_note` on disk"
+
+
+def test_a_scaffolded_character_inherits_its_factions_atoms(tmp_path):
+    """The composing case the finding names: one faction, many characters."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    _write(
+        tmp_path / "f.faction.contract.json",
+        scaffold_json(
+            scaffold_contract("faction", "faction:base", must_have=[("tabard", "a grey tabard")])
+        ),
+    )
+    store = ContractStore([tmp_path])
+    child = scaffold_contract(
+        "character",
+        "char:one",
+        extends="faction:base",
+        must_have=[("face", "a visible orcish face")],
+        store=store,
+    )
+    _write(tmp_path / "c.character.contract.json", scaffold_json(child))
+
+    resolved = ContractStore([tmp_path]).resolve("char:one")
+    assert [a.id for a in resolved.must_have] == ["tabard", "face"]
+    assert resolved.lineage == ["faction:base", "char:one"]
+
+
+def test_the_scaffold_refuses_a_starter_atom_that_collides_with_an_inherited_id(tmp_path):
+    """Read via the store rather than hand-typed. A fresh placeholder under an inherited id is
+    CONTRACT_RELAXATION at load time -- a refusal about relaxation, for what is actually a
+    name collision. Say so at scaffold time, where the author can still pick another id."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    _write(
+        tmp_path / "f.faction.contract.json",
+        scaffold_json(
+            scaffold_contract("faction", "faction:base", must_have=[("tabard", "a grey tabard")])
+        ),
+    )
+    store = ContractStore([tmp_path])
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract(
+            "character",
+            "char:one",
+            extends="faction:base",
+            must_have=[("tabard", "something else entirely")],
+            store=store,
+        )
+    assert exc.value.code == "INPUT_SCAFFOLD_INHERITED_ID"
+    assert exc.value.exit_code == 1
+    assert "tabard" in exc.value.message
+
+
+def test_the_scaffold_reports_the_ids_a_character_would_inherit(tmp_path):
+    from pcraft.core.contract.scaffold import inherited_atom_ids, scaffold_contract, scaffold_json
+
+    _write(
+        tmp_path / "f.faction.contract.json",
+        scaffold_json(
+            scaffold_contract(
+                "faction",
+                "faction:base",
+                must_have=[("tabard", "a grey tabard")],
+                must_not=[("no_gun", "a firearm")],
+            )
+        ),
+    )
+    store = ContractStore([tmp_path])
+    assert inherited_atom_ids(store, "faction:base") == ["tabard", "no_gun"]
+
+
+def test_the_scaffold_refuses_a_level_the_loader_cannot_act_on():
+    """`level` is a bare `str` on the schema, so "charcter" constructs happily and then
+    behaves as a faction in _walk_extends (its `extends` is silently never followed)."""
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract("charcter", "char:typo")
+    assert exc.value.code == "INPUT_SCAFFOLD_LEVEL"
+    assert exc.value.exit_code == 1
+
+
+def test_the_scaffold_refuses_extends_on_a_faction():
+    """_walk_extends stops on level == "faction" BEFORE reading extends, so a faction that
+    declares one is inheriting nothing and being told nothing about it."""
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract("faction", "faction:a", extends="faction:b")
+    assert exc.value.code == "INPUT_SCAFFOLD_FACTION_EXTENDS"
+
+
+def test_the_scaffold_refuses_a_blank_atom_id_in_the_domain_shape():
+    """The schema already refuses it -- as a pydantic ValidationError. The scaffold is a
+    library entry point like _read_contract, so it owes the same structured refusal."""
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract("faction", "faction:a", must_have=[("   ", "a claim")])
+    assert exc.value.code == "INPUT_SCAFFOLD_INVALID"
+    assert exc.value.exit_code == 1
+
+
+def test_the_scaffold_does_not_skip_the_duplicate_id_guard():
+    """Must-not from the finding: never a shortcut around the loader's own checks."""
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract("faction", "faction:a", must_have=[("x", "one"), ("x", "two")])
+    assert exc.value.code == "CONTRACT_DUPLICATE_ATOM_ID"
+
+
+def test_the_scaffold_accepts_atoms_as_objects_and_as_mappings():
+    """Three input forms, one normalizer: an Atom, a (id, claim) pair, a mapping. The CLI's
+    interview loop and the image domain's content-aware layer produce different ones."""
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    contract = scaffold_contract(
+        "faction",
+        "faction:a",
+        must_have=[
+            Atom(id="a1", claim="one", check_type=CheckType.siglip2),
+            ("a2", "two"),
+            {"id": "a3", "claim": "three", "check_type": "palette", "enum": ["#ffffff"]},
+        ],
+    )
+    assert [a.id for a in contract.must_have] == ["a1", "a2", "a3"]
+    assert contract.must_have[0].check_type is CheckType.siglip2
+    assert contract.must_have[1].check_type is CheckType.vqa  # the scaffold's default
+    assert contract.must_have[2].enum == ["#ffffff"]
+
+
+def test_the_scaffold_refuses_an_atom_form_it_cannot_read():
+    from pcraft.core.contract.scaffold import scaffold_contract
+
+    with pytest.raises(PromptCraftError) as exc:
+        scaffold_contract("faction", "faction:a", must_have=[42])
+    assert exc.value.code == "INPUT_SCAFFOLD_ATOM_FORM"
+
+
+def test_a_scaffolded_contract_with_an_identity_plate_round_trips(tmp_path):
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    contract = scaffold_contract(
+        "faction", "faction:a", identity_plate="plates/a.png", note="scaffolded"
+    )
+    _write(tmp_path / "a.faction.contract.json", scaffold_json(contract))
+    resolved = ContractStore([tmp_path]).resolve("faction:a")
+    assert [r.plate for r in resolved.identity_refs] == ["plates/a.png"]
+    emitted = json.loads((tmp_path / "a.faction.contract.json").read_text(encoding="utf-8"))
+    assert emitted["_note"] == "scaffolded"
+
+
+def test_the_scaffolded_json_is_ascii_and_newline_terminated():
+    """It is written to a file and printed to a console; the cp437 doctrine applies."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    text = scaffold_json(scaffold_contract("faction", "faction:a"))
+    text.encode("ascii", errors="strict")
+    assert text.endswith("\n")
+
+
+# ---------------------------------------------------------------------------
+# F-ea94c287 -- "what changed between two contracts", in atom terms
+#
+# contract_hash() answers "did anything change" and is deliberately all-or-nothing.
+# Nothing unpacked WHICH field moved, so a faction edit propagating to six characters
+# could only be inspected by re-running validate on each and eyeballing the lists.
+# The diff is READ-ONLY reporting: it never decides whether a change is a relaxation
+# (that stays loader.py's fail-closed job) and it never replaces the hash.
+# ---------------------------------------------------------------------------
+
+
+def _resolved(*, contract_id="c", must_have=(), must_not=()) -> ResolvedContract:
+    return ResolvedContract(
+        id=contract_id,
+        level="character",
+        lineage=[contract_id],
+        identity_refs=[],
+        must_have=list(must_have),
+        must_not=list(must_not),
+    )
+
+
+def test_the_diff_names_added_and_removed_atoms():
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(must_have=[Atom(id="y", claim="two", check_type=CheckType.vqa)])
+    diff = diff_contracts(a, b)
+    assert diff.must_have.added == ["y"]
+    assert diff.must_have.removed == ["x"]
+    assert diff.must_have.changed == []
+
+
+def test_the_diff_names_the_specific_field_that_moved():
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(must_have=[Atom(id="x", claim="two", check_type=CheckType.siglip2)])
+    diff = diff_contracts(a, b)
+    changed = diff.must_have.changed
+    assert [c.atom_id for c in changed] == ["x"]
+    assert [f.field for f in changed[0].fields] == ["claim", "check_type"]
+    assert changed[0].fields[0].before == "one"
+    assert changed[0].fields[0].after == "two"
+
+
+def test_the_diff_reports_a_severity_change_the_rewrite_check_handles_separately():
+    """`severity` is not one of loader._rewritten_atom_fields' content fields -- the loader
+    compares it by RANK, in its own arm. A report about what moved needs both."""
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(
+        must_have=[
+            Atom(id="x", claim="one", check_type=CheckType.vqa, severity=Severity.optional)
+        ]
+    )
+    diff = diff_contracts(a, b)
+    fields = diff.must_have.changed[0].fields
+    assert [f.field for f in fields] == ["severity"]
+    assert (fields[0].before, fields[0].after) == ("required", "optional")
+
+
+def test_the_diff_reports_a_spatial_change_as_json_not_as_a_model():
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(
+        must_have=[
+            Atom(
+                id="x",
+                claim="one",
+                check_type=CheckType.vqa,
+                spatial=Spatial(kind=SpatialKind.region, ref="torso"),
+            )
+        ]
+    )
+    diff = diff_contracts(a, b)
+    change = diff.must_have.changed[0].fields[0]
+    assert change.field == "spatial"
+    assert change.before is None
+    assert change.after == {"kind": "region", "ref": "torso"}
+    json.dumps(diff.model_dump(mode="json"))  # the whole report is JSON-able
+
+
+def test_the_diff_walks_must_not_by_id_too():
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_not=[MustNot(id="no_gun", claim="a firearm")])
+    b = _resolved(must_not=[MustNot(id="no_gun", claim="a firearm", severity=Severity.optional)])
+    diff = diff_contracts(a, b)
+    assert diff.must_have.added == diff.must_have.removed == []
+    assert [c.atom_id for c in diff.must_not.changed] == ["no_gun"]
+
+
+def test_an_identical_pair_diffs_to_nothing_and_says_so():
+    from pcraft.core.contract.diff import diff_contracts
+
+    atom = Atom(id="x", claim="one", check_type=CheckType.vqa)
+    diff = diff_contracts(_resolved(must_have=[atom]), _resolved(must_have=[atom]))
+    assert diff.is_empty()
+    assert diff.describe() == []
+
+
+def test_the_diff_carries_both_hashes_so_a_drift_refusal_can_name_both_sides():
+    """The named consequence in the finding: the contract-hash-drift refusal prints neither
+    hash. The diff is the object that can supply both plus the delta between them."""
+    from pcraft.core.contract.diff import diff_contracts
+    from pcraft.core.contract.hash import contract_hash
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(must_have=[Atom(id="x", claim="two", check_type=CheckType.vqa)])
+    diff = diff_contracts(a, b)
+    assert diff.left_hash == contract_hash(a)
+    assert diff.right_hash == contract_hash(b)
+    assert diff.left_hash != diff.right_hash
+    assert not diff.is_empty()
+
+
+def test_the_diff_description_is_ascii_and_names_each_moved_field():
+    from pcraft.core.contract.diff import diff_contracts
+
+    a = _resolved(must_have=[Atom(id="x", claim="one", check_type=CheckType.vqa)])
+    b = _resolved(
+        must_have=[
+            Atom(id="x", claim="two", check_type=CheckType.vqa),
+            Atom(id="y", claim="new", check_type=CheckType.vqa),
+        ]
+    )
+    lines = diff_contracts(a, b).describe()
+    blob = "\n".join(lines)
+    blob.encode("ascii", errors="strict")
+    assert any("y" in ln and ln.strip().startswith("+") for ln in lines)
+    assert any("claim" in ln for ln in lines)
+
+
+def test_the_diff_field_set_cannot_drift_from_the_atoms_it_reports_on():
+    """The drift guard the finding asks for, stated against the schema rather than against
+    loader.py's list: every mutable field of Atom/MustNot is a field the diff can report.
+    Adding a field to the schema without teaching the diff about it goes red here."""
+    from pcraft.core.contract.diff import ATOM_DIFF_FIELDS, MUST_NOT_DIFF_FIELDS
+
+    assert set(ATOM_DIFF_FIELDS) == set(Atom.model_fields) - {"id"}
+    assert set(MUST_NOT_DIFF_FIELDS) == set(MustNot.model_fields) - {"id"}
+
+
+def test_the_diff_shares_the_loaders_content_field_set():
+    """The other half of the same guard: the diff's fields are the loader's content fields
+    plus severity, so the two cannot disagree about what 'changed' means."""
+    from pcraft.core.contract.diff import ATOM_DIFF_FIELDS, MUST_NOT_DIFF_FIELDS
+    from pcraft.core.contract.loader import _ATOM_CONTENT_FIELDS, _MUST_NOT_CONTENT_FIELDS
+
+    assert set(ATOM_DIFF_FIELDS) == set(_ATOM_CONTENT_FIELDS) | {"severity"}
+    assert set(MUST_NOT_DIFF_FIELDS) == set(_MUST_NOT_CONTENT_FIELDS) | {"severity"}
+
+
+def test_the_refactored_rewrite_check_still_refuses_every_content_rewrite():
+    """Collateral: _rewritten_atom_fields now reads the shared constant. Its per-field
+    semantics -- claim/check_type always compared, the optional three only when the child
+    states them -- must be unchanged, in ORDER as well as membership (the refusal joins them)."""
+    from pcraft.core.contract.loader import _rewritten_atom_fields
+
+    base = Atom(
+        id="x",
+        claim="one",
+        check_type=CheckType.vqa,
+        spatial=Spatial(kind=SpatialKind.region, ref="torso"),
+        enum=["a"],
+    )
+    rewritten = Atom(
+        id="x",
+        claim="two",
+        check_type=CheckType.siglip2,
+        spatial=Spatial(kind=SpatialKind.region, ref="head"),
+        enum=["b"],
+        depends_on="q",
+    )
+    assert _rewritten_atom_fields(base, rewritten) == [
+        "claim",
+        "check_type",
+        "spatial",
+        "enum",
+        "depends_on",
+    ]
+    # an omitted optional field still INHERITS rather than reading as a rewrite
+    silent = Atom(id="x", claim="one", check_type=CheckType.vqa)
+    assert _rewritten_atom_fields(base, silent) == []
+
+
+# ---------------------------------------------------------------------------
+# F-ae0e76f8 -- the SOFT authoring signals `validate` has no pass for
+#
+# validate and ResolvedContract's own validators enforce hard structural invariants and
+# nothing else. lint_contract is strictly ADVISORY: it never raises, never affects an exit
+# code, and a caller may print or ignore it. Measured against the shipped example, which is
+# where two of the four rules fire.
+# ---------------------------------------------------------------------------
+
+
+def _codes(advisories) -> list[str]:
+    return [a.code for a in advisories]
+
+
+def test_lint_flags_an_atom_with_no_spatial_beside_a_sibling_that_has_one():
+    """The finding's measured case: example.character's must_not atoms carry no spatial while
+    must_have siblings of the same check_type prove the field is meaningful here."""
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[
+            Atom(
+                id="face",
+                claim="a face",
+                check_type=CheckType.vqa,
+                spatial=Spatial(kind=SpatialKind.region, ref="head"),
+            )
+        ],
+        must_not=[MustNot(id="no_human_face", claim="a smooth human face")],
+    )
+    flagged = [a for a in lint_contract(resolved) if a.code == "LINT_MISSING_SPATIAL"]
+    assert [a.atom_id for a in flagged] == ["no_human_face"]
+
+
+def test_lint_does_not_flag_missing_spatial_when_no_sibling_declares_one():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[Atom(id="a", claim="one", check_type=CheckType.vqa)],
+        must_not=[MustNot(id="b", claim="two")],
+    )
+    assert "LINT_MISSING_SPATIAL" not in _codes(lint_contract(resolved))
+
+
+def test_lint_flags_a_palette_atom_whose_enum_names_no_hex():
+    """F-00cfd3f8's exact defect class, caught at authoring time: a palette atom whose enum
+    names a colour by word falls through to a differently-calibrated verifier band."""
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[
+            Atom(id="p", claim="a scheme", check_type=CheckType.palette, enum=["crimson"])
+        ]
+    )
+    flagged = [a for a in lint_contract(resolved) if a.code == "LINT_PALETTE_ENUM_NOT_HEX"]
+    assert [a.atom_id for a in flagged] == ["p"]
+
+
+def test_lint_accepts_a_palette_atom_that_carries_hex():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[
+            Atom(
+                id="p",
+                claim="a scheme",
+                check_type=CheckType.palette,
+                enum=["#7a1f1f", "bone-white"],
+            )
+        ]
+    )
+    assert "LINT_PALETTE_ENUM_NOT_HEX" not in _codes(lint_contract(resolved))
+
+
+def test_lint_flags_a_palette_atom_with_no_enum_at_all():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(must_have=[Atom(id="p", claim="a scheme", check_type=CheckType.palette)])
+    assert "LINT_PALETTE_ENUM_NOT_HEX" in _codes(lint_contract(resolved))
+
+
+def test_lint_flags_a_must_not_list_that_is_entirely_optional():
+    """MustNot.severity's own note: promotion is the intended direction. A must_not list
+    where nothing blocks is a set of checks that run, report, and stop nothing."""
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_not=[
+            MustNot(id="a", claim="one", severity=Severity.optional),
+            MustNot(id="b", claim="two", severity=Severity.optional),
+        ]
+    )
+    flagged = [a for a in lint_contract(resolved) if a.code == "LINT_MUST_NOT_ALL_OPTIONAL"]
+    assert len(flagged) == 1
+    assert flagged[0].atom_id is None  # a contract-level advisory, not an atom-level one
+
+
+def test_lint_does_not_flag_a_must_not_list_with_one_blocking_entry():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_not=[
+            MustNot(id="a", claim="one", severity=Severity.optional),
+            MustNot(id="b", claim="two", severity=Severity.required),
+        ]
+    )
+    assert "LINT_MUST_NOT_ALL_OPTIONAL" not in _codes(lint_contract(resolved))
+
+
+def test_lint_does_not_flag_an_empty_must_not_list():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(must_have=[Atom(id="a", claim="one", check_type=CheckType.vqa)])
+    assert "LINT_MUST_NOT_ALL_OPTIONAL" not in _codes(lint_contract(resolved))
+
+
+def test_lint_flags_a_colour_word_in_a_claim_that_is_not_a_palette_check():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[Atom(id="x", claim="a crimson tabard", check_type=CheckType.vqa)]
+    )
+    flagged = [a for a in lint_contract(resolved) if a.code == "LINT_COLOUR_CLAIM_NOT_PALETTE"]
+    assert [a.atom_id for a in flagged] == ["x"]
+
+
+def test_lint_matches_a_colour_word_inside_a_hyphenated_compound():
+    """The shipped vocabulary is compound: 'blood-red', 'bone-white', 'royal-blue'."""
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[Atom(id="x", claim="a blood-red tabard", check_type=CheckType.vqa)]
+    )
+    assert "LINT_COLOUR_CLAIM_NOT_PALETTE" in _codes(lint_contract(resolved))
+
+
+def test_lint_does_not_flag_a_colour_word_on_a_palette_atom():
+    from pcraft.core.contract.lint import lint_contract
+
+    resolved = _resolved(
+        must_have=[
+            Atom(id="x", claim="a crimson scheme", check_type=CheckType.palette, enum=["#7a1f1f"])
+        ]
+    )
+    assert lint_contract(resolved) == []
+
+
+def test_lint_never_raises_and_never_carries_an_exit_code():
+    """The hard must-not: these are warnings, not refusals. validate/bind/gate keep their
+    pass/fail semantics exactly as they were."""
+    from pcraft.core.contract.lint import LintAdvisory, lint_contract
+
+    resolved = _resolved(
+        must_have=[Atom(id="p", claim="a crimson scheme", check_type=CheckType.palette)],
+        must_not=[MustNot(id="a", claim="one", severity=Severity.optional)],
+    )
+    advisories = lint_contract(resolved)
+    assert advisories, "the fixture is meant to trip several rules"
+    for advisory in advisories:
+        assert isinstance(advisory, LintAdvisory)
+        assert not isinstance(advisory, BaseException)
+        assert advisory.hint  # advice, exactly as a refusal carries
+        assert not hasattr(advisory, "exit_code")
+
+
+def test_lint_advisory_codes_are_not_error_codes():
+    """A LINT_ code must never be mistaken for a PromptCraftError code: it maps to no exit
+    code and appears in no error table."""
+    from pcraft.core.contract.lint import LINT_CODES
+    from pcraft.errors import DEFAULT_HINTS
+
+    assert all(code.startswith("LINT_") for code in LINT_CODES)
+    assert not (set(LINT_CODES) & set(DEFAULT_HINTS))
+
+
+def test_lint_is_deterministic_and_ascii_on_the_shipped_example(sprite_example):
+    from pcraft.core.contract.lint import lint_contract
+
+    _s, resolved, _t, _c = sprite_example
+    first = lint_contract(resolved)
+    assert [a.model_dump() for a in first] == [a.model_dump() for a in lint_contract(resolved)]
+    for advisory in first:
+        (advisory.message + advisory.hint).encode("ascii", errors="strict")
+
+
+def test_the_shipped_example_trips_the_advisories_the_finding_measured(sprite_example):
+    """Named explicitly: the finding measured example.character's must_not atoms carrying no
+    spatial, and both shipped contracts' must_not lists being entirely optional."""
+    from pcraft.core.contract.lint import lint_contract
+
+    _s, resolved, _t, _c = sprite_example
+    codes = _codes(lint_contract(resolved))
+    assert "LINT_MISSING_SPATIAL" in codes
+    assert "LINT_MUST_NOT_ALL_OPTIONAL" in codes
+
+
+# ---------------------------------------------------------------------------
+# F-ea403b5a -- explain() and questions_preview(), the half of FEAT-005 that did not ship
+#
+# ids() and source_path() shipped; explain() and questions_preview() did not. An author
+# composing a character via `extends` had no way to ask "what does char:X require after
+# inheritance, and which atoms came from the faction" without reading the loader's private
+# _by_id/_merge_atoms_fail_closed, or diffing two validate runs by eye.
+#
+# explain() is a READ-ONLY view over decisions resolve() already made. It never decides.
+# ---------------------------------------------------------------------------
+
+
+def _two_level_store(tmp_path) -> ContractStore:
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    _write(
+        tmp_path / "f.faction.contract.json",
+        scaffold_json(
+            scaffold_contract(
+                "faction",
+                "faction:base",
+                must_have=[
+                    ("tabard", "a grey tabard"),
+                    {"id": "sigil", "claim": "a sigil", "severity": "optional"},
+                ],
+                must_not=[("no_gun", "a firearm")],
+            )
+        ),
+    )
+    _write(
+        tmp_path / "c.character.contract.json",
+        scaffold_json(
+            scaffold_contract(
+                "character",
+                "char:one",
+                extends="faction:base",
+                must_have=[("face", "an orcish face")],
+            )
+        ),
+    )
+    return ContractStore([tmp_path])
+
+
+def test_explain_tags_each_atom_with_the_contract_that_declared_it(tmp_path):
+    store = _two_level_store(tmp_path)
+    explained = store.explain("char:one")
+    assert explained.contract_id == "char:one"
+    assert explained.lineage == ["faction:base", "char:one"]
+    by_id = {a.atom_id: a for a in explained.atoms}
+    assert by_id["tabard"].origin == "faction:base"
+    assert by_id["tabard"].inherited is True
+    assert by_id["face"].origin == "char:one"
+    assert by_id["face"].inherited is False
+
+
+def test_explain_separates_inherited_ids_from_the_ones_added_here(tmp_path):
+    store = _two_level_store(tmp_path)
+    explained = store.explain("char:one")
+    assert explained.inherited_ids() == ["tabard", "sigil", "no_gun"]
+    assert explained.own_ids() == ["face"]
+
+
+def test_explain_reports_a_severity_raised_relative_to_the_base(tmp_path):
+    """The one thing a child MAY change about an inherited atom. Reported, not decided:
+    the loader already refused every direction but up."""
+    from pcraft.core.contract.scaffold import scaffold_contract, scaffold_json
+
+    _two_level_store(tmp_path)
+    _write(
+        tmp_path / "c.character.contract.json",
+        scaffold_json(
+            scaffold_contract(
+                "character",
+                "char:one",
+                extends="faction:base",
+                must_have=[
+                    {"id": "sigil", "claim": "a sigil", "severity": "required"},
+                    ("face", "an orcish face"),
+                ],
+            )
+        ),
+    )
+    explained = ContractStore([tmp_path]).explain("char:one")
+    sigil = explained.by_id("sigil")
+    assert sigil.origin == "faction:base"
+    assert sigil.base_severity is Severity.optional
+    assert sigil.severity is Severity.required
+    assert sigil.severity_raised is True
+    assert sigil.redeclared_by == ["char:one"]
+    # and an atom nobody restated says so
+    assert explained.by_id("tabard").severity_raised is False
+    assert explained.by_id("tabard").redeclared_by == []
+
+
+def test_explain_covers_exactly_the_atoms_resolve_produces(tmp_path):
+    """explain() is a view over resolve(), never a second opinion about it."""
+    store = _two_level_store(tmp_path)
+    resolved = store.resolve("char:one")
+    explained = store.explain("char:one")
+    assert [a.atom_id for a in explained.atoms] == (
+        [a.id for a in resolved.must_have] + [m.id for m in resolved.must_not]
+    )
+    assert [a.severity for a in explained.atoms] == (
+        [a.severity for a in resolved.must_have] + [m.severity for m in resolved.must_not]
+    )
+
+
+def test_explain_tags_polarity_so_a_negation_is_not_read_as_a_requirement(tmp_path):
+    store = _two_level_store(tmp_path)
+    by_id = {a.atom_id: a for a in store.explain("char:one").atoms}
+    assert by_id["tabard"].polarity == "must_have"
+    assert by_id["no_gun"].polarity == "must_not"
+
+
+def test_explain_refuses_the_same_way_resolve_does_on_a_broken_contract(tmp_path):
+    """It runs the real resolve() first, so every fail-closed check fires exactly as it would
+    for `pcraft validate` -- explain() never reports on a contract the loader would refuse."""
+    _write(
+        tmp_path / "c.character.contract.json",
+        json.dumps(
+            {
+                "$schema": "prompt-craft/contract.v1",
+                "id": "char:orphan",
+                "level": "character",
+                "extends": "faction:nowhere",
+                "must_have": [],
+            }
+        ),
+    )
+    store = ContractStore([tmp_path])
+    with pytest.raises(PromptCraftError) as exc:
+        store.explain("char:orphan")
+    assert exc.value.code == "CONTRACT_MISSING_BASE"
+
+
+def test_explain_on_an_unknown_id_is_the_stores_own_refusal(tmp_path):
+    store = _two_level_store(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        store.explain("char:ghost")
+    assert exc.value.code == "INPUT_UNKNOWN_CONTRACT"
+
+
+def test_the_explain_description_is_ascii_and_names_the_lineage(tmp_path):
+    store = _two_level_store(tmp_path)
+    lines = store.explain("char:one").describe()
+    blob = "\n".join(lines)
+    blob.encode("ascii", errors="strict")
+    assert "faction:base" in blob
+    assert "face" in blob
+
+
+def test_questions_preview_is_resolve_plus_compile_and_nothing_else(tmp_path):
+    """A named entry point, not new logic: `pcraft validate` reports a bare `questions: N`
+    count today and can eventually dump the real DAG without duplicating the compile call."""
+    store = _two_level_store(tmp_path)
+    preview = store.questions_preview("char:one")
+    expected = compile_questions(store.resolve("char:one"))
+    assert preview.model_dump() == expected.model_dump()
+    assert preview.contract_id == "char:one"
+
+
+def test_questions_preview_refuses_an_unknown_contract(tmp_path):
+    store = _two_level_store(tmp_path)
+    with pytest.raises(PromptCraftError) as exc:
+        store.questions_preview("char:ghost")
+    assert exc.value.code == "INPUT_UNKNOWN_CONTRACT"
+
+
+def test_explain_has_no_write_path():
+    """Explicitly out of scope per the FEAT-005 recommendation this completes: no save path."""
+    import inspect
+
+    from pcraft.core.contract import explain as explain_module
+
+    source = inspect.getsource(explain_module)
+    for forbidden in ("write_text", "open(", "unlink", "mkdir"):
+        assert forbidden not in source, f"explain must stay read-only; found {forbidden!r}"
+
+
+def test_the_new_store_methods_work_on_the_shipped_example(sprite_example):
+    store, resolved, _t, _c = sprite_example
+    explained = store.explain(resolved.id)
+    assert explained.lineage == resolved.lineage
+    assert store.questions_preview(resolved.id).contract_id == resolved.id

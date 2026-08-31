@@ -44,7 +44,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from ..contract.compile_questions import Polarity, QuestionDAG, Severity
-from ..receipt.asset_record import AssetRecord
+from ..receipt.asset_record import AssetRecord, receipt_paths
 from ..receipt.asset_record import load as load_record
 from .exit_contract import error_from_transcript
 
@@ -229,6 +229,11 @@ def regrade_transcript(
         verdicts=verdicts,
         tier_census=census,
         thresholds_version=candidate.version,
+        # F-8cfaf7ec: carried, not dropped. A candidate table can move a zone; it cannot change
+        # which pixels were scored, and a re-graded transcript that had forgotten its own image
+        # would be unable to answer the one question a corpus sweep is asked next -- which
+        # render this row is about.
+        image_path=transcript.image_path,
     )
 
 
@@ -279,17 +284,22 @@ def regrade_records(
 
 
 def regrade_dir(records_dir: str | Path, candidate: ThresholdTable) -> list[RegradeReport]:
-    """Every ``*.json`` receipt directly under ``records_dir``, in sorted order.
+    """Every receipt directly under ``records_dir``, in sorted order.
 
-    Not recursive on purpose: ``persist`` writes receipts flat into the records dir, and the
-    subdirectories that appear beside them hold generated images, not receipts.
+    The walk itself is ``asset_record.receipt_paths`` (F-b0e6dde7), which is where it belongs:
+    ``persist`` owns the convention for what a receipt is called and where it lands, so the
+    module that writes them owns the question of which files in a directory are them. This
+    function had its own copy of the glob and the receipt index would have made a third.
 
     A file this cannot read is a REFUSAL, not a skip -- ``asset_record.load``'s coded errors
     propagate. Silently omitting an unreadable receipt would make the sweep's answer quietly
-    incomplete, which is the failure mode a corpus report exists to prevent.
+    incomplete, which is the failure mode a corpus report exists to prevent. That is a
+    deliberate difference from the INDEX, which reports an unreadable receipt as a row and keeps
+    going: a re-grade computes a number over a corpus and a missing member corrupts it, while a
+    listing's whole job is to tell you what is in the directory, including the parts that do not
+    load.
     """
-    paths = sorted(p for p in Path(records_dir).glob("*.json") if p.is_file())
-    return regrade_records([load_record(p) for p in paths], candidate)
+    return regrade_records([load_record(p) for p in receipt_paths(records_dir)], candidate)
 
 
 __all__ = [

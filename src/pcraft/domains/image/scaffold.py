@@ -1,0 +1,704 @@
+"""A real-canon front door: a reference sheet in, an authorable faction+character pair out.
+
+F-37f8764e. Every contract this product ships is labelled, in its own ``_note``, "GENERIC EXAMPLE
+-- invented for the scaffold, NOT real game canon", and the distance between that and a studio
+binding REAL canon was entirely manual: hand-write JSON with atom ids, claims, ``check_type`` per
+atom, ``severity`` per atom, ``depends_on`` edges, ``spatial.kind/ref``, ``identity_ref`` (plate +
+method + weight + scope) and hex ``enum`` members, and get the inheritance shape right. MEASURED,
+the CLI is synth | gate | bind | list | validate | demo | replay | doctor | schema | recipe |
+compile | sync-rules: ``schema`` emits a validator and ``validate`` refuses a bad file, so the
+front door for the product's own core artifact was a blank file. That matters more here than in
+most tools, because the contract is what everything else is derived from -- the questions, the
+prompt, the negative, the conditioning, the repair ladder's choices, the receipt -- so an author
+who gets it thin gets a thin gate, quietly.
+
+WHAT "CONTENT-AWARE" MEANS HERE, stated so it cannot be read as more than it is. This maps
+DECLARED TRAITS to atoms: an author names a trait and its KIND, and this module knows what an
+insignia is checked with (``vqa``) and where an insignia lives (``chest-center``, one of the names
+``conditioning.region_box`` actually knows, so a scaffolded region is one the gate can check). It
+does NOT look at a plate and decide what is in it. The only pixels read anywhere here are a colour
+histogram over a plate a ``kind=palette`` trait explicitly names -- ``palette_verifier.load_rgb``
+plus a bucketed count, deterministic, GPU-free, no model, nothing that recognises anything.
+Inferring traits FROM pixels is a future capability and is not in this file.
+
+WHAT IT REFUSES TO INVENT. A seeded atom is visibly a STUB: its claim is a ``TODO`` sentence unless
+the author wrote one in the sheet, and its severity is ``optional``, always. A scaffold that emits
+``severity: required`` on an atom nobody has reviewed manufactures a gate nobody authored, which is
+the failure this whole package exists to catch. The consequence is deliberate and is stated in the
+emitted ``_note``: a freshly scaffolded pair declares no required atom, so it cannot block a bind
+until an author has been through it.
+
+THE SPLIT WITH core/contract. The contract SKELETON -- level, id, extends, and the placeholders an
+inherited faction contributes -- belongs to ``core/contract`` (its own sibling feature). This module
+calls that primitive when the build carries one and says which skeleton it used on the result, so a
+fold that did not connect is a visible fact rather than a silent second implementation. See
+``core_scaffold_primitive``.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from ...core.contract.loader import resolve
+from ...core.contract.schema import (
+    CONTRACT_SCHEMA_ID,
+    Atom,
+    CheckType,
+    Contract,
+    IdentityRef,
+    MustNot,
+    Severity,
+    Spatial,
+    SpatialKind,
+)
+from ...errors import PromptCraftError
+from .generator.conditioning import is_packaged_ref, unsupported_identity_methods
+from .verifier.palette_verifier import _MIN_FRAC, _NEAR, load_rgb
+
+# ------------------------------------------------------------------ the image domain's defaults
+
+_TRAIT_DEFAULTS: dict[str, tuple[CheckType, str | None]] = {
+    # kind -> (check_type, the region it lives in)
+    "palette": (CheckType.palette, None),
+    "face": (CheckType.vqa, "head"),
+    "costume": (CheckType.vqa, "torso"),
+    "insignia": (CheckType.vqa, "chest-center"),
+    "prop": (CheckType.vqa, "hands"),
+    "trait": (CheckType.vqa, None),
+}
+"""What each declared trait kind becomes. THIS TABLE IS THE CONTENT-AWARENESS.
+
+Two decisions per kind, both of which an author would otherwise have to make from the schema:
+which instrument checks it, and which window it lives in. The region names are the ones
+``conditioning.region_box`` recognises (and ``verifier.region`` refuses outside), so a scaffolded
+``spatial`` is one the gate can honour rather than a plausible word.
+
+``palette`` deliberately carries NO region: ``_presence`` measures a fraction of the window it is
+given, so cropping a palette atom changes what "present" means, and that is a decision an author
+makes rather than one a scaffold makes for them.
+
+An unlisted kind is refused by name (``_trait_defaults``) rather than quietly demoted to the
+generic ``trait`` row: the demotion would hand back an atom with no window, and no signal anywhere
+that the kind on the sheet was never mapped.
+"""
+
+_STUB_CLAIM = "TODO: describe what must be VISIBLE for {trait_id} -- one checkable statement"
+
+_NOTE_COMMON = (
+    "SCAFFOLDED STUB -- generated by pcraft's image-domain scaffold from a reference sheet, "
+    "NOT reviewed canon. Every atom here is `optional`, so this pair blocks nothing until an "
+    "author reads it: write the real claim, then raise severity to `required` for the ones that "
+    "must block a bind. A claim that still starts with TODO is one nobody has written yet."
+)
+
+_NOTE_PALETTE = (
+    " The palette atom's enum was MEASURED off the named plate by a colour histogram (the same "
+    "reader the palette verifier uses); it is a fact about that plate and is NOT canon -- "
+    "background and anti-aliasing colours land in any dominant-colour extraction, so delete the "
+    "ones that are not the costume."
+)
+
+_NOTE_MUST_NOT = (
+    " The must_not atoms carry your own drift-cue wording and stay `optional` for the reason the "
+    "shipped examples give: absence-verification is not measured on this stack, so these checks "
+    "run and report without blocking. Promotion is the intended direction -- raise them when the "
+    "verifier is calibrated for absence."
+)
+
+
+# ------------------------------------------------------------------------------- the input shape
+
+
+@dataclass(frozen=True)
+class Trait:
+    """One named trait off the sheet. ``claim`` is None when the author did not write one."""
+
+    id: str
+    kind: str
+    scope: str
+    claim: str | None = None
+    depends_on: str | None = None
+    plate: str | None = None
+
+
+@dataclass(frozen=True)
+class ReferenceSheet:
+    """A directory of plates plus one small JSON of named traits. That is the whole input.
+
+    JSON and not YAML on purpose: this package's declared dependencies are pydantic and typer, the
+    contract format it emits is already JSON, and a sheet parsed by whatever YAML happens to be in
+    the operator's environment is a dependency nobody declared. ``read_reference_sheet`` refuses a
+    ``.yaml`` path by name rather than guessing.
+    """
+
+    root: Path
+    faction: str
+    character: str
+    faction_plate: Path
+    character_plate: Path
+    identity_method: str
+    traits: tuple[Trait, ...]
+    drift_cues: tuple[str, ...] = field(default=())
+
+    @property
+    def faction_id(self) -> str:
+        return f"faction:{self.faction}"
+
+    @property
+    def character_id(self) -> str:
+        return f"char:{self.character}"
+
+
+@dataclass(frozen=True)
+class ScaffoldResult:
+    """What was written, and -- for the parts that were measured or delegated -- where from."""
+
+    faction_path: Path
+    character_path: Path
+    faction_id: str
+    character_id: str
+    skeleton_source: str
+    stub_atom_ids: tuple[str, ...]
+    palette_enum: tuple[str, ...]
+    palette_measured_from: str | None
+
+
+# --------------------------------------------------------------------------- the core primitive
+
+_CORE_SCAFFOLD_LOCATIONS = (
+    ("pcraft.core.contract.scaffold", "scaffold_contract"),
+    ("pcraft.core.contract", "scaffold_contract"),
+    ("pcraft.core.contract.loader", "scaffold_contract"),
+)
+
+
+def core_scaffold_primitive() -> Callable | None:
+    """``core/contract``'s ``scaffold_contract(level, id, extends=None) -> Contract``, if present.
+
+    Looked up lazily and by name across the locations that feature's own recommendation allows,
+    because the two halves are authored in parallel: this module owns the image domain's DEFAULTS
+    (which instrument checks a kind, which window it lives in, what a plate's colours are), and the
+    skeleton belongs to core. When the primitive is absent, ``_skeleton`` builds the same shape from
+    the schema both halves must use anyway, and ``ScaffoldResult.skeleton_source`` says which ran --
+    a fallback nobody can see would be a fork.
+    """
+    import importlib
+
+    for module_name, attr in _CORE_SCAFFOLD_LOCATIONS:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        candidate = getattr(module, attr, None)
+        if callable(candidate):
+            return candidate
+    return None
+
+
+def _skeleton(level: str, contract_id: str, extends: str | None) -> tuple[Contract, str]:
+    """An empty contract of the right shape, from the core primitive when this build has one.
+
+    Two call shapes are tried for the same reason ``harness._detail_for`` tries two: the
+    implementation lives in another package, and one wrong guess would silently drop to the
+    fallback rather than fail loudly.
+    """
+    primitive = core_scaffold_primitive()
+    if primitive is not None:
+        for call in (
+            lambda: primitive(level, contract_id, extends),
+            lambda: primitive(level, contract_id, extends=extends),
+        ):
+            try:
+                built = call()
+            except TypeError:
+                continue
+            if isinstance(built, Contract):
+                return built, "core-primitive"
+            break
+    return Contract(id=contract_id, level=level, extends=extends), "image-domain-fallback"
+
+
+# ----------------------------------------------------------------------------- reading the sheet
+
+
+def read_reference_sheet(path: str | Path) -> ReferenceSheet:
+    """Parse a reference sheet. Every refusal names the key that is wrong."""
+    sheet_path = Path(path)
+    if sheet_path.suffix.lower() != ".json":
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            f"reference sheet {sheet_path} is not a .json file",
+            hint="The sheet is JSON. This package declares no YAML dependency (pydantic and typer "
+            "are the whole runtime), and the contracts it emits are JSON too -- so a sheet is read "
+            "by the stdlib, not by whatever YAML happens to be installed. Rename it to .json.",
+        )
+    try:
+        data = json.loads(sheet_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as err:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            f"could not read reference sheet {sheet_path}",
+            hint="The sheet is a JSON object with keys: faction, character, faction_plate, "
+            "character_plate, traits (a list of {id, kind}), and optionally drift_cues.",
+            cause=err,
+        ) from err
+    if not isinstance(data, dict):
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            f"reference sheet {sheet_path} is not a JSON object",
+            hint="The top level is an object with a faction, a character, their plates and a "
+            "traits list -- not a bare list or string.",
+        )
+
+    root = sheet_path.parent
+    faction = _required_name(data, "faction", sheet_path)
+    character = _required_name(data, "character", sheet_path)
+    traits = tuple(_trait(raw, sheet_path) for raw in _required_list(data, "traits", sheet_path))
+    cues = tuple(str(c).strip() for c in (data.get("drift_cues") or []) if str(c).strip())
+    return ReferenceSheet(
+        root=root,
+        faction=faction,
+        character=character,
+        faction_plate=_plate(root, data.get("faction_plate"), "faction_plate"),
+        character_plate=_plate(root, data.get("character_plate"), "character_plate"),
+        identity_method=str(data.get("identity_method") or "ip_adapter").strip(),
+        traits=traits,
+        drift_cues=cues,
+    )
+
+
+def _required_name(data: dict, key: str, sheet_path: Path) -> str:
+    value = str(data.get(key) or "").strip()
+    if not value:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            f"reference sheet {sheet_path} declares no {key!r}",
+            hint="`faction` and `character` name the two halves -- they become the contract ids "
+            "faction:<faction> and char:<character>, which is how `extends` resolves.",
+        )
+    return value
+
+
+def _required_list(data: dict, key: str, sheet_path: Path) -> list:
+    value = data.get(key)
+    if not isinstance(value, list) or not value:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            f"reference sheet {sheet_path} declares no {key!r}",
+            hint="`traits` is a non-empty list of {id, kind} objects. A contract with no atoms "
+            "gates nothing, so there is nothing to scaffold from.",
+        )
+    return value
+
+
+def _trait(raw, sheet_path: Path) -> Trait:
+    if not isinstance(raw, dict):
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_TRAIT",
+            f"reference sheet {sheet_path} declares a trait that is not an object: {raw!r}",
+            hint="Each trait is {id, kind} plus optional claim, scope, depends_on, plate.",
+        )
+    trait_id = str(raw.get("id") or "").strip()
+    if not trait_id:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_TRAIT",
+            f"reference sheet {sheet_path} declares a trait with no id",
+            hint="A trait id becomes an atom id: it is what depends_on points at and what every "
+            "refusal quotes back at the author, so it cannot be blank.",
+        )
+    claim = raw.get("claim")
+    return Trait(
+        id=trait_id,
+        kind=str(raw.get("kind") or "trait").strip().lower(),
+        scope=str(raw.get("scope") or "character").strip().lower(),
+        claim=str(claim).strip() if claim is not None and str(claim).strip() else None,
+        depends_on=str(raw["depends_on"]).strip() if raw.get("depends_on") else None,
+        plate=str(raw["plate"]).strip() if raw.get("plate") else None,
+    )
+
+
+def _plate(root: Path, value, key: str) -> Path:
+    if not value:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_PLATE",
+            f"reference sheet declares no {key!r}",
+            hint="Identity is CONDITIONING, never tokens: both halves name a reference plate "
+            "(the faction's costume, the character's face) and the contract binds them.",
+        )
+    path = (root / str(value)).resolve()
+    if not path.is_file():
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_PLATE",
+            f"{key} {str(value)!r} is not a readable file under {root}",
+            hint="Plate paths in the sheet are relative to the sheet itself, so the reference "
+            "sheet directory can be moved as one thing.",
+        )
+    return path
+
+
+def _trait_defaults(trait: Trait) -> tuple[CheckType, str | None]:
+    defaults = _TRAIT_DEFAULTS.get(trait.kind)
+    if defaults is None:
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_TRAIT",
+            f"trait {trait.id!r} declares kind {trait.kind!r}, which this domain does not map",
+            hint="Known kinds: " + ", ".join(sorted(_TRAIT_DEFAULTS)) + ". An unmapped kind is "
+            "refused rather than demoted to a generic trait, because the demotion would hand back "
+            "an atom with no window and no sign that the kind was never mapped.",
+        )
+    return defaults
+
+
+# --------------------------------------------------------------------- the measured palette enum
+
+_BUCKET = 16
+
+
+def dominant_hex(plate: str | Path, *, max_colours: int = 4) -> list[str]:
+    """The plate's dominant colours as ``#rrggbb``, measured by the histogram, never guessed.
+
+    The half of a palette atom that can be MEASURED rather than eyeballed out of an image editor.
+    Three properties are borrowed from the verifier that will read the result, so the emitted enum
+    is meaningful to it rather than merely well-formed:
+
+    * a candidate under ``_MIN_FRAC`` of the plate is dropped -- ``_presence`` can never call it
+      present, so emitting it would seed an atom that cannot pass;
+    * two candidates closer than ``_NEAR`` are one colour to that verifier, so the nearer duplicate
+      is dropped rather than emitted twice;
+    * members are lowercase ``#rrggbb`` and round-trip ``_colours_or_refuse``, because '#00FF00' is
+      not '#00ff00' to the text search ``_written_hex`` exists to serve.
+
+    Colours are bucketed to 16 levels per channel and each bucket reports the MEAN of its own
+    pixels, so an anti-aliased edge collapses into the colour it is an edge of instead of producing
+    a hundred near-identical members. The bucket is narrower than ``_NEAR`` by construction, so
+    bucketing never merges two colours the verifier would tell apart.
+    """
+    pixels = load_rgb(plate)
+    if not pixels:
+        return []
+    totals: dict[tuple[int, int, int], list[int]] = {}
+    for r, g, b in pixels:
+        bucket = (r // _BUCKET, g // _BUCKET, b // _BUCKET)
+        acc = totals.get(bucket)
+        if acc is None:
+            totals[bucket] = [1, r, g, b]
+        else:
+            acc[0] += 1
+            acc[1] += r
+            acc[2] += g
+            acc[3] += b
+    ranked = sorted(totals.items(), key=lambda kv: (-kv[1][0], kv[0]))
+    chosen: list[tuple[int, int, int]] = []
+    for _bucket, (count, red, green, blue) in ranked:
+        if len(chosen) >= max_colours:
+            break
+        if count / len(pixels) < _MIN_FRAC:
+            break  # ranked by count, so everything after this is smaller too
+        mean = (round(red / count), round(green / count), round(blue / count))
+        if any(_distance(mean, seen) < _NEAR for seen in chosen):
+            continue
+        chosen.append(mean)
+    return [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in chosen]
+
+
+def _distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    return sum((x - y) ** 2 for x, y in zip(a, b, strict=True)) ** 0.5
+
+
+# ------------------------------------------------------------------------------------- the emit
+
+
+def scaffold_from_reference_sheet(
+    sheet: str | Path | ReferenceSheet,
+    *,
+    contracts_dir: str | Path,
+    max_colours: int = 4,
+) -> ScaffoldResult:
+    """Emit an authorable faction+character pair into the operator's own contracts directory.
+
+    BOTH halves, always. The inheritance shape is the subtle part of this schema -- a character may
+    add or raise but never drop, relax, or rewrite an inherited atom -- and a scaffold that emitted
+    one half would leave the author to discover the other by trial and refusal.
+
+    NOTHING IS WRITTEN until the emitted BYTES have been parsed back into ``Contract`` models and
+    resolved through the same ``resolve()`` a hand-written pair goes through. A scaffold whose
+    output does not load is worse than a blank file, and proving it in memory means no half-written
+    pair has to be cleaned up off the operator's disk.
+
+    Plates are POINTED AT, absolutely, never copied. Copying would make this an irreversible write
+    into a tree the operator curates, and a RELATIVE path would be resolved by ``conditioning
+    .resolve_ref`` against the working directory of whoever runs ``pcraft`` rather than against the
+    contract's own folder -- so it would work from one directory and silently fall through to the
+    packaged plate search from another.
+    """
+    sheet = sheet if isinstance(sheet, ReferenceSheet) else read_reference_sheet(sheet)
+    out = Path(contracts_dir)
+    _refuse_packaged_target(out)
+    _refuse_unwired_identity(sheet)
+
+    faction_path = out / "factions" / f"{_slug(sheet.faction)}.faction.contract.json"
+    character_path = out / "characters" / f"{_slug(sheet.character)}.character.contract.json"
+    _refuse_existing(faction_path, character_path)
+
+    seeded = _seed_atoms(sheet, max_colours=max_colours)
+
+    faction, faction_source = _skeleton("faction", sheet.faction_id, None)
+    faction = faction.model_copy(
+        update={
+            "note": _NOTE_COMMON + (_NOTE_PALETTE if seeded.palette_enum else ""),
+            "must_have": seeded.faction_atoms,
+            "must_not": [],
+            "identity_ref": IdentityRef(
+                plate=sheet.faction_plate.as_posix(),
+                method=sheet.identity_method,
+                scope="costume",
+            ),
+        }
+    )
+    character, character_source = _skeleton("character", sheet.character_id, sheet.faction_id)
+    character = character.model_copy(
+        update={
+            "note": _NOTE_COMMON + (_NOTE_MUST_NOT if sheet.drift_cues else ""),
+            "must_have": seeded.character_atoms,
+            "must_not": [_negation(cue) for cue in sheet.drift_cues],
+            "identity_ref": IdentityRef(
+                plate=sheet.character_plate.as_posix(),
+                method=sheet.identity_method,
+                scope="face",
+            ),
+        }
+    )
+
+    faction_text = _serialize(faction)
+    character_text = _serialize(character)
+    _prove_it_loads(faction_text, character_text, sheet)
+
+    faction_path.parent.mkdir(parents=True, exist_ok=True)
+    character_path.parent.mkdir(parents=True, exist_ok=True)
+    faction_path.write_text(faction_text, encoding="utf-8")
+    character_path.write_text(character_text, encoding="utf-8")
+
+    return ScaffoldResult(
+        faction_path=faction_path,
+        character_path=character_path,
+        faction_id=sheet.faction_id,
+        character_id=sheet.character_id,
+        # One source for the pair: both calls run against the same build, so a disagreement would
+        # be a defect in this function rather than a fact about the build.
+        skeleton_source=faction_source if faction_source == character_source else "mixed",
+        stub_atom_ids=tuple(seeded.stub_ids),
+        palette_enum=tuple(seeded.palette_enum),
+        palette_measured_from=seeded.palette_measured_from,
+    )
+
+
+@dataclass
+class _Seeded:
+    faction_atoms: list[Atom]
+    character_atoms: list[Atom]
+    stub_ids: list[str]
+    palette_enum: list[str]
+    palette_measured_from: str | None
+
+
+def _seed_atoms(sheet: ReferenceSheet, *, max_colours: int) -> _Seeded:
+    """Every declared trait becomes an atom, on the half its ``scope`` names."""
+    out = _Seeded([], [], [], [], None)
+    for trait in sheet.traits:
+        check_type, region = _trait_defaults(trait)
+        enum = None
+        if check_type is CheckType.palette:
+            plate = _trait_plate(sheet, trait)
+            # Called through the module global on purpose: the histogram is the ONE thing in this
+            # file that touches pixels, so it stays a named, observable seam.
+            enum = dominant_hex(plate, max_colours=max_colours)
+            if not enum:
+                raise PromptCraftError(
+                    "INPUT_SCAFFOLD_PLATE",
+                    f"no colour covers {_MIN_FRAC:.1%} of plate {plate} for trait {trait.id!r}",
+                    hint="A palette atom's enum is measured off the plate, and nothing on this one "
+                    "is present enough for the verifier to ever call it present. Point the trait at "
+                    "the costume plate, or drop the palette trait and write the colours by hand.",
+                )
+            if not out.palette_enum:
+                out.palette_enum = list(enum)
+                out.palette_measured_from = plate
+        if trait.claim is None:
+            out.stub_ids.append(trait.id)
+        atom = Atom(
+            id=trait.id,
+            claim=trait.claim or _STUB_CLAIM.format(trait_id=trait.id),
+            check_type=check_type,
+            # NEVER `required` on an unreviewed atom. See the module docstring.
+            severity=Severity.optional,
+            depends_on=trait.depends_on,
+            spatial=Spatial(kind=SpatialKind.region, ref=region) if region else None,
+            enum=enum,
+        )
+        target = out.faction_atoms if trait.scope == "faction" else out.character_atoms
+        target.append(atom)
+    return out
+
+
+def _trait_plate(sheet: ReferenceSheet, trait: Trait) -> str:
+    """Which plate a palette trait measures: the one it names, or its own half's identity plate."""
+    if trait.plate:
+        return str(_plate(sheet.root, trait.plate, f"traits[{trait.id}].plate"))
+    return str(sheet.faction_plate if trait.scope == "faction" else sheet.character_plate)
+
+
+def _negation(cue: str) -> MustNot:
+    """A drift cue, carried in the author's own words.
+
+    Unlike a seeded must_have claim this is NOT invented: the operator typed the cue into the
+    sheet, so carrying it is transcription. The severity still stays ``optional``, for the reason
+    the shipped examples give -- absence-verification is not measured on this stack.
+
+    Only the ID is normalized, and only by dropping a leading article: an id is what ``depends_on``
+    points at and what every refusal quotes back, so ``no_shield`` earns its place over
+    ``no_a_shield``. The CLAIM is never touched -- it is the text the probe is built from.
+    """
+    return MustNot(
+        id=f"no_{_slug(_without_article(cue), sep='_')}",
+        claim=cue,
+        check_type=CheckType.vqa,
+        severity=Severity.optional,
+    )
+
+
+def _without_article(text: str) -> str:
+    body = text.strip()
+    for article in ("a ", "an ", "the "):
+        if body.lower().startswith(article) and body[len(article) :].strip():
+            return body[len(article) :]
+    return body
+
+
+def _slug(text: str, *, sep: str = "-") -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", sep, text.strip().lower()).strip(sep)
+    return cleaned or "unnamed"
+
+
+def _refuse_packaged_target(out: Path) -> None:
+    if not is_packaged_ref(out):
+        return
+    raise PromptCraftError(
+        "INPUT_SCAFFOLD_TARGET",
+        f"refusing to scaffold into the packaged sprite tree at {out}",
+        hint="The packaged tree holds the shipped example contracts, which are the de facto "
+        "template every new contract is copied from, and on an installed build it sits inside "
+        "site-packages. Scaffold into your own --contracts-dir instead; the shipped examples stay "
+        "untouched.",
+    )
+
+
+def _refuse_existing(*paths: Path) -> None:
+    existing = [p for p in paths if p.exists()]
+    if not existing:
+        return
+    raise PromptCraftError(
+        "INPUT_SCAFFOLD_TARGET",
+        "refusing to overwrite existing contract(s): " + ", ".join(str(p) for p in existing),
+        hint="A scaffold seeds a starting point; it never overwrites work an author has already "
+        "done. Move or delete the file, or scaffold under a different id.",
+    )
+
+
+def _refuse_unwired_identity(sheet: ReferenceSheet) -> None:
+    """The ``_SUPPORTED_METHODS`` allow-list, applied at authoring time instead of at generate.
+
+    A contract naming a method no encoder implements passes validation, is resolved and
+    existence-checked, and then has its lock dropped while the receipt still stamps the resolved
+    plate (F-916e73b6). Refusing here means the scaffold never writes that contract in the first
+    place, and the rule is read off ``conditioning`` rather than restated, so the two cannot drift.
+    """
+    unsupported = unsupported_identity_methods(
+        {"identity_refs": [{"plate": str(sheet.faction_plate), "method": sheet.identity_method}]}
+    )
+    if not unsupported:
+        return
+    raise PromptCraftError(
+        "GATE_CONDITIONING_UNSUPPORTED",
+        f"reference sheet names identity method(s) {unsupported}: no encoder is wired for that",
+        hint="Set identity_method to ip_adapter, lora, or instantid. method=none skips the lock, "
+        "and method=reference is the Cloud recipe (`pcraft recipe`).",
+    )
+
+
+def _serialize(contract: Contract) -> str:
+    """The emitted JSON. Optional keys are omitted -- except the two an author has to SEE.
+
+    ``spatial`` and ``depends_on`` are written even when empty, on every seeded must_have atom.
+    They are the two fields the finding's own measurement showed authors do not discover: the
+    shipped character contract's must_not atoms carry no ``spatial`` while its must_have siblings
+    prove the field is meaningful, and a missing ``depends_on`` edge is the difference between
+    "verify the colour of an axe" and "verify the colour of an axe that isn't there". A key present
+    with a null value teaches the shape; a key absent teaches nothing.
+    """
+    body: dict = {"$schema": CONTRACT_SCHEMA_ID, "id": contract.id, "level": contract.level}
+    if contract.extends:
+        body["extends"] = contract.extends
+    if contract.note:
+        body["_note"] = contract.note
+    body["must_have"] = [_atom_json(a) for a in contract.must_have]
+    body["must_not"] = [_must_not_json(m) for m in contract.must_not]
+    if contract.identity_ref is not None:
+        ref = contract.identity_ref
+        body["identity_ref"] = {
+            "plate": ref.plate,
+            "method": ref.method,
+            "weight": ref.weight,
+            "scope": ref.scope,
+        }
+    return json.dumps(body, indent=2, ensure_ascii=True) + "\n"
+
+
+def _atom_json(atom: Atom) -> dict:
+    out: dict = {
+        "id": atom.id,
+        "claim": atom.claim,
+        "check_type": atom.check_type.value,
+        "severity": atom.severity.value,
+        # Present-but-empty on purpose. See _serialize.
+        "depends_on": atom.depends_on,
+        "spatial": {"kind": atom.spatial.kind.value, "ref": atom.spatial.ref}
+        if atom.spatial
+        else None,
+    }
+    if atom.enum:
+        out["enum"] = list(atom.enum)
+    return out
+
+
+def _must_not_json(item: MustNot) -> dict:
+    return {
+        "id": item.id,
+        "claim": item.claim,
+        "check_type": item.check_type.value,
+        "severity": item.severity.value,
+    }
+
+
+def _prove_it_loads(faction_text: str, character_text: str, sheet: ReferenceSheet) -> None:
+    """Parse the emitted BYTES back and resolve them, before anything reaches the disk.
+
+    Deliberately re-parses the serialized text rather than reusing the models it came from: a
+    serializer defect is exactly what this guard exists to catch, and validating the object that
+    produced the text would not see it. ``resolve`` is the same function the loader calls, so
+    inheritance, duplicate ids, the relaxation rule and the depends_on DAG are all checked by the
+    code that owns them -- never a second copy living here.
+    """
+    faction = Contract.model_validate(json.loads(faction_text))
+    character = Contract.model_validate(json.loads(character_text))
+    if faction.id != sheet.faction_id or character.id != sheet.character_id:  # pragma: no cover
+        raise PromptCraftError(
+            "INPUT_SCAFFOLD_SHEET",
+            "the scaffolded pair does not carry the ids the sheet asked for",
+            hint="This is a defect in the scaffold, not in the sheet. Report it together with the "
+            "sheet that produced it.",
+        )
+    resolve(character, {faction.id: faction, character.id: character}.get)

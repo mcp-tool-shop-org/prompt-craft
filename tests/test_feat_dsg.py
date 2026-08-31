@@ -283,3 +283,51 @@ def test_shipped_expansions_all_survive_the_new_guards():
     for q in vqa:
         exp = template_expand(q)
         assert len(exp.topological()) == len(exp.probes)
+
+
+# ================================================================ F-2c77d698 (region-localized)
+# Tier-2's whole job is LOCALIZATION, which makes it the worst place to leave a declared region
+# unmentioned: "which probe failed" reads as an answer to "where", and every probe ran on the whole
+# frame. The image domain's deterministic histogram now crops to `spatial.kind=region`; this tier
+# does not, because the `vqa` band (0.80/0.40) was derived on whole images and nothing here has
+# measured P('Yes') on a 35%-of-frame crop. So the scope is refused out loud, per atom, rather than
+# honoured in part and in silence.
+
+
+def _region_q(region: str) -> Question:
+    from pcraft.core.contract.schema import Spatial, SpatialKind
+
+    q = _q("Does this image show a visible orcish face with tusks?", atom_id="face")
+    return q.model_copy(update={"spatial": Spatial(kind=SpatialKind.region, ref=region)})
+
+
+def test_dsg_says_it_localized_over_the_full_frame_when_the_atom_named_a_region(monkeypatch):
+    _install_fake_answerer(monkeypatch, 0.9)
+    v = DSGVerifier()
+    assert v.score("x.png", _region_q("head")) is not None
+    detail = v.localization_detail() or ""
+    assert "head" in detail, "the atom declared WHERE and the localizer did not say it ignored it"
+    assert "full frame" in detail.lower()
+    assert "probe(s)" in detail, "and the probe trail it already carried is still there"
+
+
+def test_an_atom_with_no_region_gets_the_probe_trail_and_nothing_invented(monkeypatch):
+    """The disclosure must be rare enough to notice. Inventing a scope line for the ordinary case
+    would bury the atoms that actually lost something."""
+    _install_fake_answerer(monkeypatch, 0.9)
+    v = DSGVerifier()
+    assert v.score("x.png", _q("Does this image show a grey-ash tabard?")) is not None
+    detail = v.localization_detail() or ""
+    assert detail.startswith("3 probe(s):") or detail.startswith("2 probe(s):"), detail
+    assert "full frame" not in detail.lower()
+
+
+def test_the_scope_note_does_not_survive_into_the_next_atom(monkeypatch):
+    """last_delegate's lesson (F-64b4f422) applied to the new field: a note left over from the
+    previous atom describes the wrong contract, which is worse than no note."""
+    _install_fake_answerer(monkeypatch, 0.9)
+    v = DSGVerifier()
+    v.score("x.png", _region_q("head"))
+    assert v.last_scope_note
+    v.score("x.png", _q("Does this image show a grey-ash tabard?"))
+    assert v.last_scope_note is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -759,3 +760,520 @@ def test_calibrate_refuses_an_unreadable_manifest_without_a_traceback(tmp_path):
     )
     assert "IO_HOLDOUT_READ" in text, text
     assert not (tmp_path / "v2.json").exists(), "a refused calibrate must write no table"
+
+
+# ================================================== wave-13 S1 CLI surface: three new doors
+# F-76b0940b (`gate` gets a multi-image door), F-62e7d1f0 (`pcraft new`, the contract
+# scaffold verb) and F-2b04f0b8's CLI half (`pcraft resolve`, the disposition verb for an
+# escalated receipt). Same three-way split the regrade/calibrate block above established:
+#
+#   * the argument contract this file OWNS -- green now, decided before any sibling
+#     library is reached;
+#   * the SEAM (entry points and keyword names the command bodies call) -- expected red
+#     until fold, and the first thing to go green when the sibling lands;
+#   * real GPU-free run-throughs where the machinery already exists. `gate --batch` is
+#     entirely on this side of the seam -- the CLI builds the verifiers once and loops
+#     `harness.evaluate`, which already takes a per-call image_path -- so its behaviour
+#     tests are green here and stay green.
+#
+# EXPECTED RED IN THIS WORKTREE for the fold tests -- do not weaken, skip, or xfail them.
+
+
+def _pngs(tmp_path, *names):
+    from pcraft.testing import write_solid_png
+
+    return [write_solid_png(tmp_path / name) for name in names]
+
+
+# --------------------------------------------------------------------------- F-76b0940b
+# One verifier construction, N images, one aggregate answer. The single-image invocation
+# is byte-identical: its flags, its --json transcript shape and its 0/1/2/3/4 exit codes
+# are covered by STABILITY.md and none of them move.
+
+
+def test_gate_still_takes_one_image_and_emits_one_transcript_document(tmp_path):
+    """The must-not-break. One IMAGE, no --batch: a single object, not an array."""
+    [image] = _pngs(tmp_path, "one.png")
+    result = runner.invoke(app, ["gate", str(image), "--json"])
+    data = json.loads(result.stdout)
+    assert isinstance(data, dict), f"the single-image document became an array: {data!r}"
+    assert data["contract_id"] == "char:ashen-reaver"
+    assert result.exit_code in {2, 3}, (result.stdout or "") + (result.stderr or "")
+
+
+def test_gate_with_no_image_and_no_batch_still_explains_itself():
+    """`gate` used to get this refusal from Click. It is ours now, and it must still
+    exit 1 and still name the argument (tests/test_amend_cli.py pins both)."""
+    result = runner.invoke(app, ["gate"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "IMAGE" in text, text
+    assert "--batch" in text, text
+
+
+def test_gate_accepts_several_images_and_names_each_one(tmp_path):
+    images = _pngs(tmp_path, "a.png", "b.png")
+    result = runner.invoke(app, ["gate", *[str(p) for p in images]])
+    text = (result.stdout or "") + (result.stderr or "")
+    for image in images:
+        assert image.name in text, text
+    assert "2 images" in text, f"no batch summary line: {text!r}"
+
+
+def test_gate_batch_reads_a_directory(tmp_path):
+    _pngs(tmp_path / "plates", "a.png", "b.png", "c.png")
+    result = runner.invoke(app, ["gate", "--batch", str(tmp_path / "plates")])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "3 images" in text, text
+
+
+def test_gate_batch_glob_selects_what_it_says_it_selects(tmp_path):
+    _pngs(tmp_path / "plates", "a.png", "b.png")
+    (tmp_path / "plates" / "notes.txt").write_text("not an image", encoding="utf-8")
+    result = runner.invoke(
+        app, ["gate", "--batch", str(tmp_path / "plates"), "--glob", "*.png"]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "2 images" in text, text
+    assert "notes.txt" not in text, text
+
+
+def test_an_empty_batch_is_a_refusal_never_a_pass(tmp_path):
+    """Gating nothing is not gating cleanly. Exit 0 here would tell a CI job that a
+    directory of renders passed when the glob matched none of them."""
+    (tmp_path / "plates").mkdir()
+    result = runner.invoke(app, ["gate", "--batch", str(tmp_path / "plates")])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_GATE_BATCH" in text, text
+
+
+def test_a_batch_dir_that_is_not_a_directory_is_refused_by_name(tmp_path):
+    [image] = _pngs(tmp_path, "one.png")
+    result = runner.invoke(app, ["gate", "--batch", str(image)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_GATE_BATCH" in text, text
+
+
+def test_one_unreadable_image_does_not_void_the_other_results(tmp_path):
+    """F-8cfaf7ec's must-not-break (3), on this side of the seam: preflight is per image.
+    The worst SCORED outcome still decides, and the file nobody could read is named."""
+    [good] = _pngs(tmp_path, "good.png")
+    missing = tmp_path / "gone.png"
+    result = runner.invoke(app, ["gate", str(good), str(missing)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code in {2, 3}, (
+        f"one unreadable file collapsed the whole batch onto could-not-run: {text!r}"
+    )
+    assert "gone.png" in text, f"the unreadable image was not named: {text!r}"
+    assert "good.png" in text, text
+
+
+def test_a_batch_where_nothing_scored_is_could_not_run(tmp_path):
+    """The other half of the ruling: exit 4 only when NOTHING scored."""
+    result = runner.invoke(
+        app, ["gate", str(tmp_path / "gone-a.png"), str(tmp_path / "gone-b.png")]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 4, text
+    assert "GATE_UNAVAILABLE" in text or "IO_GATE_INPUT" in text, text
+
+
+def test_a_batch_where_every_image_passes_exits_0(tmp_path, monkeypatch):
+    from pcraft.domains.image import ImagePlugin
+    from pcraft.testing import passing_verifiers
+
+    monkeypatch.setattr(ImagePlugin, "verifiers", lambda self: passing_verifiers())
+    images = _pngs(tmp_path, "a.png", "b.png")
+    result = runner.invoke(app, ["gate", *[str(p) for p in images]])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    assert "2 passed" in text, text
+
+
+def test_a_batch_builds_its_verifiers_once_not_once_per_image(tmp_path, monkeypatch):
+    """The whole reason the door exists (F-8cfaf7ec): each verifier caches its scorer on
+    the INSTANCE, so N constructions is N model loads. MEASURED here by counting."""
+    from pcraft.domains.image import ImagePlugin
+    from pcraft.testing import passing_verifiers
+
+    calls = {"n": 0}
+
+    def counted(self):
+        calls["n"] += 1
+        return passing_verifiers()
+
+    monkeypatch.setattr(ImagePlugin, "verifiers", counted)
+    images = _pngs(tmp_path, "a.png", "b.png", "c.png")
+    result = runner.invoke(app, ["gate", *[str(p) for p in images]])
+    assert result.exit_code == 0, (result.stdout or "") + (result.stderr or "")
+    assert calls["n"] == 1, f"built the verifier dict {calls['n']} times for 3 images"
+
+
+def test_the_batch_json_is_an_array_keyed_by_image_path(tmp_path):
+    """`--json` emits an array; every row says which pixels it graded.
+
+    `image_path` on GateTranscript itself is F-8cfaf7ec's field and lands in the sibling
+    core-gate-loop worktree. The CLI knows the path it passed to `evaluate` either way, so
+    the key is present here before and after that fold -- this asserts the DOCUMENT, which
+    is what a machine caller reads.
+    """
+    images = _pngs(tmp_path, "a.png", "b.png")
+    result = runner.invoke(app, ["gate", *[str(p) for p in images], "--json"])
+    rows = json.loads(result.stdout)
+    assert isinstance(rows, list) and len(rows) == 2, rows
+    assert {Path(r["image_path"]).name for r in rows} == {"a.png", "b.png"}
+    assert all(r["contract_id"] == "char:ashen-reaver" for r in rows)
+
+
+def test_an_unreadable_image_gets_a_row_in_the_json_array_too(tmp_path):
+    """Silently dropping it would leave a caller counting rows and finding N-1."""
+    [good] = _pngs(tmp_path, "good.png")
+    result = runner.invoke(
+        app, ["gate", str(good), str(tmp_path / "gone.png"), "--json"]
+    )
+    rows = json.loads(result.stdout)
+    assert len(rows) == 2, rows
+    bad = next(r for r in rows if Path(r["image_path"]).name == "gone.png")
+    assert bad["error"]["code"] == "IO_GATE_INPUT", bad
+    assert "verdicts" not in bad, "an image that was never read has no verdicts"
+
+
+def test_gate_help_states_the_batch_aggregation_rule():
+    """The ruling in the command's own words: a scripted caller must be able to learn the
+    rule from --help, not from a swarm transcript."""
+    import typer as _typer
+
+    body = _typer.main.get_command(app).commands["gate"].help or ""
+    assert "--batch" in body, body
+    lowered = body.lower()
+    assert "nothing scored" in lowered, f"the exit-4 condition is not stated: {body!r}"
+    assert "worst" in lowered, f"the worst-scored-outcome rule is not stated: {body!r}"
+
+
+# --------------------------------------------------------------------------- F-62e7d1f0
+# `pcraft new` -- the CLI door onto core-contract-synth's scaffold primitive. A thin verb:
+# it prompts nothing, writes where it is told, refuses to overwrite, and prints the
+# LOADER's own verdict on what it just wrote.
+
+
+def test_new_is_registered_and_names_both_levels():
+    import typer as _typer
+
+    commands = _typer.main.get_command(app).commands
+    assert "new" in commands, sorted(commands)
+    body = (commands["new"].help or "").lower()
+    assert "character" in body and "faction" in body, body
+
+
+def test_new_refuses_a_level_that_is_not_character_or_faction(tmp_path):
+    result = runner.invoke(
+        app, ["new", "monster", "mon:grendel", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_CONTRACT_LEVEL" in text, text
+    assert not list(tmp_path.rglob("*.contract.json")), "a refused scaffold wrote a file"
+
+
+def test_new_refuses_to_write_into_the_packaged_sprite_tree():
+    """F-37f8764e's must-not-break (3): scaffold into the operator's tree, never over the
+    shipped examples. Decided before the scaffold library is reached, so it is green now."""
+    from pcraft.domains.image.subdomains.sprite import CONTRACTS_DIR
+
+    result = runner.invoke(
+        app, ["new", "character", "char:intruder", "--contracts-dir", str(CONTRACTS_DIR)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_SCAFFOLD_TARGET" in text, text
+    assert not (CONTRACTS_DIR / "characters" / "intruder.contract.json").exists()
+
+
+def test_new_refuses_to_overwrite_a_contract_that_already_exists(tmp_path):
+    """The same O_EXCL discipline `asset_record.persist` uses, for the identical reason:
+    a hand-authored contract is not something a scaffold gets to replace."""
+    target = tmp_path / "characters" / "y.contract.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"id": "char:y", "level": "character"}', encoding="utf-8")
+    before = target.read_bytes()
+
+    result = runner.invoke(app, ["new", "character", "char:y", "--out", str(target)])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 2, text
+    assert "IO_CONTRACT_EXISTS" in text, text
+    assert target.read_bytes() == before, "the refused scaffold overwrote the file anyway"
+
+
+def test_new_wraps_the_scaffold_entry_point_the_command_calls():
+    """The seam, restated here rather than imported, so a rename goes red in MY file.
+
+    Both names matter to the command body: `scaffold_contract` builds the Contract and
+    `scaffold_json` is the CANONICAL on-disk text, so the CLI never spells the file format a
+    second time. `store` is asserted because passing it is what turns `--extends` from a
+    string into a checked reference.
+    """
+    import inspect
+
+    from pcraft.core.contract import scaffold as lib
+
+    assert callable(lib.scaffold_contract)
+    assert callable(lib.scaffold_json)
+    params = list(inspect.signature(lib.scaffold_contract).parameters)
+    assert params[:2] == ["level", "contract_id"], params
+    assert {"extends", "store"} <= set(params), params
+
+
+def test_new_writes_a_contract_that_loads_back_through_the_store(tmp_path):
+    """The whole promise of the verb: what it emits round-trips through the SAME loader a
+    hand-written contract does, and the command prints the loader's own verdict."""
+    result = runner.invoke(
+        app, ["new", "faction", "faction:rooks", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, f"the unclassified backstop, not a scaffold: {text!r}"
+    assert result.exit_code == 0, text
+    written = list(tmp_path.rglob("*.contract.json"))
+    assert len(written) == 1, written
+    listed = runner.invoke(app, ["list", "--contracts-dir", str(tmp_path), "--json"])
+    assert listed.exit_code == 0, (listed.stdout or "") + (listed.stderr or "")
+    assert "faction:rooks" in {c["id"] for c in json.loads(listed.stdout)["contracts"]}
+
+
+def test_new_extends_is_a_checked_reference_not_a_string(tmp_path):
+    """Passing `store` to the primitive is what makes a bogus --extends a refusal here rather
+    than a CONTRACT_MISSING_BASE surprise the next time anything resolves the tree."""
+    seed = runner.invoke(app, ["new", "faction", "faction:rooks", "--contracts-dir", str(tmp_path)])
+    assert seed.exit_code == 0, (seed.stdout or "") + (seed.stderr or "")
+
+    result = runner.invoke(
+        app,
+        ["new", "character", "char:rook", "--extends", "faction:nope",
+         "--contracts-dir", str(tmp_path)],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code != 0, text
+    assert "faction:nope" in text, text
+    assert not (tmp_path / "characters").exists(), "a refused scaffold wrote a file anyway"
+
+
+def test_new_says_out_loud_that_what_it_wrote_is_a_stub(tmp_path):
+    """F-37f8764e's must-not-break (1) as a CLI obligation: what a scaffold emits is visibly a
+    STUB or it manufactures a gate nobody authored. Said on the command's own output, not
+    buried in a `_note` inside the file.
+
+    MEASURED against the real primitive: `scaffold_contract(level, id)` seeds NO atoms -- the
+    skeleton is level/id/extends and the claims are the author's to write -- so the line has to
+    cover the empty case, which is the ordinary one, and not only a seeded one.
+    """
+    result = runner.invoke(
+        app, ["new", "faction", "faction:rooks", "--contracts-dir", str(tmp_path)]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, text
+    assert "STUB" in text, f"the scaffold did not say what it wrote is a stub: {text!r}"
+    written = list(tmp_path.rglob("*.contract.json"))
+    assert str(written[0]) in text, "the STUB line must name the file to go and edit"
+    assert "CONTRACT_NO_REQUIRED_ATOM" in text, (
+        "the operator must be told that `pcraft gate` will refuse this contract until an atom "
+        f"is raised to required, not left to discover it: {text!r}"
+    )
+
+
+def test_new_refuses_a_reference_sheet_and_names_where_that_capability_lives(tmp_path):
+    """STATED JUDGMENT at the wave-13 fold. The sheet-driven scaffold
+    (pcraft.domains.image.scaffold.scaffold_from_reference_sheet) derives both ids from the
+    sheet, writes a faction+character PAIR and names both files itself, so driving it from this
+    verb would mean silently ignoring LEVEL, ID and --out and reporting one file of two. It is
+    refused by name instead, and the refusal says where the capability actually is.
+    """
+    sheet = tmp_path / "sheet.json"
+    sheet.write_text("{}", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        ["new", "faction", "faction:rooks", "--contracts-dir", str(tmp_path / "c"),
+         "--reference-sheet", str(sheet)],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_SCAFFOLD_REFERENCE_SHEET" in text, text
+    assert "scaffold_from_reference_sheet" in text, (
+        f"the refusal must name the entry point that does have this capability: {text!r}"
+    )
+    assert not list(tmp_path.rglob("*.contract.json")), "a refused scaffold wrote a file"
+
+
+def test_new_json_is_a_document_that_names_the_path_it_wrote(tmp_path):
+    result = runner.invoke(
+        app,
+        ["new", "faction", "faction:rooks", "--contracts-dir", str(tmp_path), "--json"],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, text
+    data = json.loads(result.stdout)
+    assert data["id"] == "faction:rooks"
+    assert data["level"] == "faction"
+    assert Path(data["path"]).is_file()
+    assert data["stub_atoms"] == [], data
+    assert "extends" not in data, "an absent optional key is omitted, never emitted as null"
+
+
+# --------------------------------------------------------------------------- F-2b04f0b8
+# `pcraft resolve` -- the Director's decision against an ESCALATED receipt, recorded by
+# `core.receipt.disposition.record_disposition` as an entry under the records dir's
+# `dispositions/` SUBDIRECTORY. The receipt itself is never touched: persist()'s O_EXCL rule
+# and STATE_REPLAY_DRIFT's own "Do not edit the receipt" both say so, and the subdirectory is
+# what keeps every non-recursive *.json receipt scan seeing exactly what it saw before.
+
+_ESCALATING = {"tabard": 0.05, "palette": 0.30, "face": 0.60}
+
+
+def _escalated_receipt(tmp_path):
+    from pcraft.sample import run_mock_loop
+
+    result = run_mock_loop(records_dir=str(tmp_path), verifier_scores=_ESCALATING)
+    assert result.decision == "escalated", result.decision
+    [receipt] = list(Path(tmp_path).glob("*.json"))
+    return receipt
+
+
+def test_resolve_is_registered_and_says_it_does_not_make_the_asset_pass():
+    """UNCERTAINTY_GATED_HUMANS: a resolution is evidence a human decided, never a way to
+    auto-accept. --help has to say that, because exit 0 here means 'recorded'."""
+    import typer as _typer
+
+    commands = _typer.main.get_command(app).commands
+    assert "resolve" in commands, sorted(commands)
+    body = (commands["resolve"].help or "").lower()
+    assert "escalated" in body, body
+    assert "does not" in body and "pass" in body, (
+        f"--help must say that recording a resolution does not make the asset pass: {body!r}"
+    )
+    assert "exit" in body, "a scripted verb names its exit codes in --help"
+    assert "deferred" in body, (
+        "the library knows a third resolution this flag does not offer; --help has to say so "
+        f"rather than leave an operator to find it in the source: {body!r}"
+    )
+    assert "dispositions/" in body, "--help must name where the entry actually lands"
+
+
+def test_resolve_refuses_a_verdict_that_is_neither_approve_nor_reject(tmp_path):
+    receipt = _escalated_receipt(tmp_path)
+    before = receipt.read_bytes()
+    result = runner.invoke(
+        app, ["resolve", str(receipt), "--verdict", "maybe", "--note", "hmm"]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_RESOLVE_VERDICT" in text, text
+    assert receipt.read_bytes() == before
+
+
+def test_resolve_requires_a_note(tmp_path):
+    """A resolution with no reasoning is an auto-accept wearing a verdict. The note is
+    required by the parser, so the refusal costs nothing to produce."""
+    receipt = _escalated_receipt(tmp_path)
+    result = runner.invoke(app, ["resolve", str(receipt), "--verdict", "approve"])
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "note" in text.lower(), text
+
+
+def test_resolve_refuses_a_receipt_that_is_not_escalated(tmp_path):
+    """A bound receipt has nothing to resolve. Decided from the receipt's own `decision`
+    field, before any write is attempted, so it is green ahead of the fold."""
+    bind = runner.invoke(app, ["bind", "--records-dir", str(tmp_path)])
+    assert bind.exit_code == 0, bind.stdout + (bind.stderr or "")
+    [receipt] = list(tmp_path.glob("*.json"))
+    before = receipt.read_bytes()
+
+    result = runner.invoke(
+        app, ["resolve", str(receipt), "--verdict", "approve", "--note", "looks fine"]
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 1, text
+    assert "INPUT_RECEIPT_NOT_ESCALATED" in text, text
+    assert "bound" in text, "the refusal must name the decision it actually found"
+    assert receipt.read_bytes() == before
+
+
+def test_resolve_never_edits_the_receipt_it_is_pointed_at(tmp_path):
+    """The rule the whole feature hangs on, asserted at the only layer that can write:
+    whatever else happens, the receipt's bytes do not move."""
+    receipt = _escalated_receipt(tmp_path)
+    before = receipt.read_bytes()
+    result = runner.invoke(
+        app, ["resolve", str(receipt), "--verdict", "approve", "--note", "ok in context"]
+    )
+    assert receipt.read_bytes() == before, "the receipt was rewritten in place"
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, f"the unclassified backstop: {text!r}"
+    assert result.exit_code == 0, text
+
+
+def test_resolve_wraps_the_decision_capture_entry_point_the_command_calls():
+    """The seam, restated here rather than imported, so a rename goes red in MY file.
+
+    `record_disposition` owns the entry, its subdirectory, the O_EXCL claim and the
+    `disposition-write` compensator gate; the CLI passes exactly these keywords.
+    """
+    import inspect
+
+    from pcraft.core.receipt import disposition as lib
+
+    assert callable(lib.record_disposition)
+    params = set(inspect.signature(lib.record_disposition).parameters)
+    assert {"resolution", "resolved_by", "note"} <= params, sorted(params)
+    # The CLI's two verdict words must map onto values the library will actually accept; a
+    # mapping that drifted would be an INPUT_DISPOSITION_RESOLUTION at the operator's first run.
+    from pcraft.cli import VERDICT_RESOLUTIONS
+
+    assert set(VERDICT_RESOLUTIONS.values()) <= set(lib.RESOLUTIONS), VERDICT_RESOLUTIONS
+    assert "deferred" not in VERDICT_RESOLUTIONS.values(), (
+        "deferred is library-only for now; --help says so and this is what keeps it true"
+    )
+
+
+def test_resolve_records_the_decision_in_the_dispositions_subdir(tmp_path):
+    """The entry lands in `<records-dir>/dispositions/`, and the records dir ITSELF is
+    untouched -- which is the whole safety argument for the subdirectory: `regrade_dir`, the
+    index and any caller globbing *.json non-recursively see exactly what they saw before, so
+    a resolution can never be handed to `load()` as a malformed receipt.
+    """
+    receipt = _escalated_receipt(tmp_path)
+    before = {p.name for p in tmp_path.glob("*.json")}
+
+    result = runner.invoke(
+        app,
+        ["resolve", str(receipt), "--verdict", "approve", "--note", "hand-checked plate"],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert "RUNTIME_UNEXPECTED" not in text, text
+    assert result.exit_code == 0, text
+    assert {p.name for p in tmp_path.glob("*.json")} == before, (
+        "the records dir gained a file; every receipt reader globs it non-recursively"
+    )
+    entries = list((tmp_path / "dispositions").glob("*.json"))
+    assert len(entries) == 1, entries
+    written = json.loads(entries[0].read_text(encoding="utf-8"))
+    assert written["record_id"] == receipt.stem
+    assert written["resolution"] == "accepted", "approve records the library's `accepted`"
+    assert written["note"] == "hand-checked plate"
+    assert str(entries[0]) in text, "the command must name the entry it wrote"
+
+
+def test_resolve_json_names_both_the_typed_verdict_and_the_recorded_resolution(tmp_path):
+    """Two vocabularies, and a caller must not have to guess the mapping: `verdict` is what
+    was typed here, `resolution` is what a downstream reader will filter the entry on."""
+    receipt = _escalated_receipt(tmp_path)
+    result = runner.invoke(
+        app,
+        ["resolve", str(receipt), "--verdict", "reject", "--note", "wrong colours", "--json"],
+    )
+    text = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 0, text
+    data = json.loads(result.stdout)
+    assert (data["verdict"], data["resolution"]) == ("reject", "rejected"), data
+    assert data["decision"] == "escalated", "the receipt's own verdict is echoed unchanged"
+    assert Path(data["resolution_path"]).parent.name == "dispositions", data

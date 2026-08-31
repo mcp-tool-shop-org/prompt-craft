@@ -442,3 +442,174 @@ def test_a_records_dir_is_swept_in_one_read(tmp_path):
     reports = regrade_dir(tmp_path, _retuned(table, vqa=(0.96, 0.40)))
     assert {r.record_id for r in reports} == {first.record.record_id, second.record.record_id}
     assert sum(len(r.blocking_flips) for r in reports) > 0
+
+
+# --------------------------------------------------------------------------------------
+# F-b0e6dde7 -- the receipt index. The provenance data existed and nothing read it in
+# aggregate: persist() writes one file, load() reads one path, replay() checks one record.
+# The only approach was a shell loop over `pcraft replay`, which is all-or-nothing -- the
+# first drifted receipt exits 2 and the loop tells you nothing about the rest.
+# --------------------------------------------------------------------------------------
+
+
+def _two_receipts(tmp_path):
+    bound = run_mock_loop(records_dir=str(tmp_path))
+    escalated = run_mock_loop(records_dir=str(tmp_path), verifier_scores={"weapon": 0.05})
+    return bound, escalated
+
+
+def test_scan_lists_every_receipt_and_keys_on_contents_not_filenames(tmp_path):
+    """The receipt FILENAME is not a covered surface -- _record_id pushes everything through
+    _fs_safe, and its docstring records an NTFS alternate-data-stream near-miss. The index is
+    keyed on record CONTENTS."""
+    from pcraft.core.receipt.index import scan
+
+    bound, escalated = _two_receipts(tmp_path)
+    renamed = tmp_path / "not-the-record-id.json"
+    (tmp_path / f"{bound.record.record_id}.json").rename(renamed)
+
+    index = scan(tmp_path)
+    by_id = {r.record_id: r for r in index.rows}
+    assert set(by_id) == {bound.record.record_id, escalated.record.record_id}
+    assert by_id[bound.record.record_id].path == str(renamed)
+    assert by_id[bound.record.record_id].decision == "bound"
+    assert by_id[escalated.record.record_id].decision == "escalated"
+    assert by_id[bound.record.record_id].contract_hash == bound.record.contract_hash
+    assert by_id[bound.record.record_id].image_path == bound.record.image_path
+
+
+def test_an_unreadable_receipt_is_a_row_not_the_end_of_the_report(tmp_path):
+    """"The first bad file ends the report" is the exact failure the shell-loop workaround has.
+    A damaged receipt is reported AS a row, with its own code, and the scan keeps going."""
+    from pcraft.core.receipt.index import scan
+
+    bound, _escalated = _two_receipts(tmp_path)
+    (tmp_path / "damaged.json").write_text('{"record_id": "only-one-field"}', encoding="utf-8")
+
+    index = scan(tmp_path)
+    assert len(index.rows) == 3
+    assert len(index.readable()) == 2, "two good receipts still reported"
+    bad = index.unreadable()
+    assert len(bad) == 1
+    assert bad[0].code == "IO_RECORD_INVALID"
+    assert bad[0].record_id == "", "an unreadable file has no id; the filename is not one"
+    assert bad[0].path.endswith("damaged.json")
+    assert bound.record.record_id in {r.record_id for r in index.readable()}
+
+
+def test_a_receipt_from_the_future_keeps_its_own_code_in_the_listing(tmp_path):
+    """"Written by a newer prompt-craft" is not "corrupt", and the listing must not merge them."""
+    import json
+
+    from pcraft.core.receipt.index import scan
+
+    bound, _e = _two_receipts(tmp_path)
+    path = tmp_path / f"{bound.record.record_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["schema_version"] = "99"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    codes = {r.code for r in scan(tmp_path).unreadable()}
+    assert codes == {"IO_RECORD_SCHEMA_UNSUPPORTED"}
+
+
+def test_scan_writes_nothing_back_into_the_records_dir(tmp_path):
+    """The index must be a DERIVED read, never a file written back into records_dir where it
+    could collide with a receipt path (persist()'s O_EXCL) or be mistaken for one."""
+    from pcraft.core.receipt.index import scan
+
+    _two_receipts(tmp_path)
+    before = sorted(p.name for p in tmp_path.iterdir())
+    scan(tmp_path)
+    scan(tmp_path).summary()
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+
+
+def test_scan_refuses_a_records_dir_that_does_not_exist(tmp_path):
+    """A typo'd directory must not read as "you have no receipts"."""
+    from pcraft.core.receipt.index import scan
+
+    with pytest.raises(PromptCraftError) as exc:
+        scan(tmp_path / "no-such-dir")
+    assert exc.value.code == "INPUT_RECORDS_DIR"
+    assert exc.value.exit_code == 1
+
+
+def test_an_existing_but_empty_records_dir_is_an_empty_listing_not_a_refusal(tmp_path):
+    from pcraft.core.receipt.index import scan
+
+    index = scan(tmp_path)
+    assert index.rows == []
+    assert index.summary().total == 0
+
+
+def test_the_query_filters_on_fields_that_exist_on_receipts(tmp_path):
+    from pcraft.core.receipt.index import RecordQuery, scan
+
+    bound, escalated = _two_receipts(tmp_path)
+    index = scan(tmp_path)
+
+    only_bound = index.query(RecordQuery(decision="bound"))
+    assert [r.record_id for r in only_bound] == [bound.record.record_id]
+
+    same_contract = index.query(RecordQuery(contract=bound.record.contract_id))
+    assert len(same_contract) == 2
+
+    none = index.query(RecordQuery(contract="char:nobody"))
+    assert none == []
+
+    by_table = index.query(RecordQuery(thresholds_version=bound.record.thresholds_version))
+    assert len(by_table) == 2
+
+    assert index.query(RecordQuery(since="2099-01-01")) == []
+    assert len(index.query(RecordQuery(since="2000-01-01"))) == 2
+    assert escalated.record.record_id in {r.record_id for r in index.rows}
+
+
+def test_stale_is_a_comparison_against_todays_contract_hash(tmp_path):
+    """"Which receipts are now stale against today's contract" had no mechanical answer. The
+    comparison is a pure read against a hash the caller supplies -- the index resolves nothing
+    and re-hashes nothing behind the operator's back."""
+    from pcraft.core.receipt.index import RecordQuery, scan
+
+    bound, _e = _two_receipts(tmp_path)
+    index = scan(tmp_path)
+    cid = bound.record.contract_id
+
+    fresh = index.query(RecordQuery(stale_against={cid: bound.record.contract_hash}))
+    assert fresh == []
+    stale = index.query(RecordQuery(stale_against={cid: "sha256:something-else"}))
+    assert len(stale) == 2
+
+    store, _r, _t, _c = load_sprite_example()
+    resolved = store.resolve(cid)
+    assert contract_hash(resolved) == bound.record.contract_hash, "premise: nothing drifted yet"
+
+
+def test_the_summary_always_reports_what_could_not_be_read(tmp_path):
+    """A filter must never be able to hide the fact that files in this directory did not load."""
+    from pcraft.core.receipt.index import RecordQuery, scan
+
+    _two_receipts(tmp_path)
+    (tmp_path / "damaged.json").write_text("{", encoding="utf-8")
+
+    index = scan(tmp_path)
+    summary = index.summary()
+    assert summary.total == 3
+    assert summary.readable == 2 and summary.unreadable == 1
+    assert summary.codes == {"IO_RECORD_READ": 1}
+    assert summary.by_decision == {"bound": 1, "escalated": 1}
+    assert summary.latest >= summary.earliest != ""
+    assert index.query(RecordQuery(decision="bound")) != index.rows
+    assert index.summary().unreadable == 1, "the summary is of the DIRECTORY, not of the filter"
+
+
+def test_the_index_and_the_regrade_sweep_walk_the_directory_the_same_way(tmp_path):
+    """One walk, owned by the module that writes the files it walks. Two spellings of "every
+    receipt under this directory" would drift the first time either was edited."""
+    from pcraft.core.receipt.asset_record import receipt_paths
+    from pcraft.core.receipt.index import scan
+
+    _two_receipts(tmp_path)
+    (tmp_path / "_stub_images").mkdir(exist_ok=True)
+    assert [str(p) for p in receipt_paths(tmp_path)] == [r.path for r in scan(tmp_path).rows]
