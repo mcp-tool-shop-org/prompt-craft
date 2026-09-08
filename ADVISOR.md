@@ -156,7 +156,7 @@ Still out, only if asked:
 
 ## Memory
 
-The canonical store is `C:\Users\mikey\.claude\projects\F--AI\memory\`; index is
+The canonical store is `~/.claude\projects\F--AI\memory\`; index is
 `MEMORY.md`. This repo's paste-ready brief:
 `memory/prompt-craft-ci-311-audit-kickoff.md`. The consumed widening brief is
 `memory/prompt-craft-ruff-widening-kickoff.md` (banner-stamped, do not re-run).

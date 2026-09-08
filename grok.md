@@ -187,10 +187,10 @@ Two rules that will bite you:
 Write to the store your seat actually reads.
 
 - **Claude seats:** the canonical store is
-  `C:\Users\mikey\.claude\projects\F--AI\memory\`, index `MEMORY.md`. This repo's
+  `~/.claude\projects\F--AI\memory\`, index `MEMORY.md`. This repo's
   paste-ready brief is `memory/prompt-craft-ci-311-audit-kickoff.md`. Any session
   that adds, moves, or deletes a file there must end by running `loadout-os refresh`.
-- **Grok seats:** the database is `C:\Users\mikey\.grok\memory`, index `MEMORY.md`,
+- **Grok seats:** the database is `~/.grok\memory`, index `MEMORY.md`,
   repo topic `topics/prompt-craft-feature-pass.md`.
 - `E:\AI\repo-knowledge` is neither of those.
 
