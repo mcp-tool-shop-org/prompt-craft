@@ -1,0 +1,1732 @@
+{
+  "authorship": {
+    "parts": [],
+    "places": []
+  },
+  "boundaries": [
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": ".github",
+      "qualifyingSourceCommits": 0,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": "docs",
+      "qualifyingSourceCommits": 0,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": "npm",
+      "qualifyingSourceCommits": 2,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [
+          "tests"
+        ],
+        "importsOnly": []
+      },
+      "cohesion": 0,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": "root",
+      "qualifyingSourceCommits": 8,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": [
+          "src",
+          "tests"
+        ]
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": "scripts",
+      "qualifyingSourceCommits": 4,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": null,
+      "cohesionDropped": false,
+      "confidence": "low",
+      "highWater": null,
+      "name": "site",
+      "qualifyingSourceCommits": 6,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [
+          "tests"
+        ],
+        "importsOnly": [
+          "scripts"
+        ]
+      },
+      "cohesion": 0.085168,
+      "cohesionDropped": false,
+      "confidence": "full",
+      "highWater": null,
+      "name": "src",
+      "qualifyingSourceCommits": 43,
+      "rebaseline": null
+    },
+    {
+      "breakage": {
+        "coChangesOnly": [
+          "root",
+          "src"
+        ],
+        "collapsed": false,
+        "confidence": "low",
+        "importsAndCoChanges": [],
+        "importsOnly": []
+      },
+      "cohesion": 0.077656,
+      "cohesionDropped": false,
+      "confidence": "full",
+      "highWater": null,
+      "name": "tests",
+      "qualifyingSourceCommits": 51,
+      "rebaseline": null
+    }
+  ],
+  "churn": {
+    "definition": "commits is how many commits in the window touch the file, including merges and commits dropped from coupling. lines is added plus deleted in those commits.",
+    "files": [
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": ".gitattributes"
+      },
+      {
+        "commits": 8,
+        "lines": 122,
+        "path": ".github/workflows/ci.yml"
+      },
+      {
+        "commits": 2,
+        "lines": 67,
+        "path": ".github/workflows/pages.yml"
+      },
+      {
+        "commits": 7,
+        "lines": 377,
+        "path": ".github/workflows/release.yml"
+      },
+      {
+        "commits": 4,
+        "lines": 37,
+        "path": ".gitignore"
+      },
+      {
+        "commits": 17,
+        "lines": 617,
+        "path": "ADVISOR.md"
+      },
+      {
+        "commits": 8,
+        "lines": 70,
+        "path": "AGENTS.md"
+      },
+      {
+        "commits": 47,
+        "lines": 901,
+        "path": "CHANGELOG.md"
+      },
+      {
+        "commits": 2,
+        "lines": 56,
+        "path": "COMPENSATORS.md"
+      },
+      {
+        "commits": 2,
+        "lines": 9,
+        "path": "CONTRIBUTORS.md"
+      },
+      {
+        "commits": 22,
+        "lines": 1172,
+        "path": "HANDOFF.md"
+      },
+      {
+        "commits": 1,
+        "lines": 21,
+        "path": "LICENSE"
+      },
+      {
+        "commits": 16,
+        "lines": 357,
+        "path": "README.es.md"
+      },
+      {
+        "commits": 16,
+        "lines": 464,
+        "path": "README.fr.md"
+      },
+      {
+        "commits": 16,
+        "lines": 386,
+        "path": "README.hi.md"
+      },
+      {
+        "commits": 16,
+        "lines": 464,
+        "path": "README.it.md"
+      },
+      {
+        "commits": 16,
+        "lines": 433,
+        "path": "README.ja.md"
+      },
+      {
+        "commits": 22,
+        "lines": 667,
+        "path": "README.md"
+      },
+      {
+        "commits": 16,
+        "lines": 355,
+        "path": "README.pt-BR.md"
+      },
+      {
+        "commits": 16,
+        "lines": 206,
+        "path": "README.pypi.md"
+      },
+      {
+        "commits": 16,
+        "lines": 477,
+        "path": "README.zh.md"
+      },
+      {
+        "commits": 1,
+        "lines": 97,
+        "path": "RELEASING.md"
+      },
+      {
+        "commits": 2,
+        "lines": 98,
+        "path": "SCORECARD.md"
+      },
+      {
+        "commits": 1,
+        "lines": 37,
+        "path": "SECURITY.md"
+      },
+      {
+        "commits": 4,
+        "lines": 114,
+        "path": "SHIP_GATE.md"
+      },
+      {
+        "commits": 5,
+        "lines": 177,
+        "path": "STABILITY.md"
+      },
+      {
+        "commits": 5,
+        "lines": 269,
+        "path": "STANDARDS.md"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "docs/assets/logo.png"
+      },
+      {
+        "commits": 21,
+        "lines": 507,
+        "path": "grok.md"
+      },
+      {
+        "commits": 1,
+        "lines": 21,
+        "path": "npm/LICENSE"
+      },
+      {
+        "commits": 15,
+        "lines": 127,
+        "path": "npm/README.md"
+      },
+      {
+        "commits": 3,
+        "lines": 320,
+        "path": "npm/bin/pcraft.mjs"
+      },
+      {
+        "commits": 2,
+        "lines": 23,
+        "path": "npm/package-lock.json"
+      },
+      {
+        "commits": 6,
+        "lines": 52,
+        "path": "npm/package.json"
+      },
+      {
+        "commits": 16,
+        "lines": 349,
+        "path": "pyproject.toml"
+      },
+      {
+        "commits": 1,
+        "lines": 185,
+        "path": "scripts/draw_openpose_plates.py"
+      },
+      {
+        "commits": 2,
+        "lines": 401,
+        "path": "scripts/mutate_predicates.py"
+      },
+      {
+        "commits": 1,
+        "lines": 205,
+        "path": "scripts/sync_rules_from_readouts.py"
+      },
+      {
+        "commits": 1,
+        "lines": 311,
+        "path": "scripts/wheel_smoke.py"
+      },
+      {
+        "commits": 3,
+        "lines": 39,
+        "path": "site/astro.config.mjs"
+      },
+      {
+        "commits": 2,
+        "lines": 13646,
+        "path": "site/package-lock.json"
+      },
+      {
+        "commits": 2,
+        "lines": 24,
+        "path": "site/package.json"
+      },
+      {
+        "commits": 1,
+        "lines": 7,
+        "path": "site/src/content.config.ts"
+      },
+      {
+        "commits": 2,
+        "lines": 75,
+        "path": "site/src/content/docs/handbook/architecture.md"
+      },
+      {
+        "commits": 2,
+        "lines": 107,
+        "path": "site/src/content/docs/handbook/binding-real-canon.md"
+      },
+      {
+        "commits": 6,
+        "lines": 53,
+        "path": "site/src/content/docs/handbook/cli.md"
+      },
+      {
+        "commits": 7,
+        "lines": 88,
+        "path": "site/src/content/docs/handbook/contracts.md"
+      },
+      {
+        "commits": 7,
+        "lines": 196,
+        "path": "site/src/content/docs/handbook/getting-started.md"
+      },
+      {
+        "commits": 14,
+        "lines": 133,
+        "path": "site/src/content/docs/handbook/index.md"
+      },
+      {
+        "commits": 1,
+        "lines": 77,
+        "path": "site/src/content/docs/handbook/security.md"
+      },
+      {
+        "commits": 2,
+        "lines": 95,
+        "path": "site/src/content/docs/handbook/the-gate.md"
+      },
+      {
+        "commits": 1,
+        "lines": 33,
+        "path": "site/src/pages/index.astro"
+      },
+      {
+        "commits": 5,
+        "lines": 101,
+        "path": "site/src/site-config.ts"
+      },
+      {
+        "commits": 1,
+        "lines": 3,
+        "path": "site/src/styles/global.css"
+      },
+      {
+        "commits": 1,
+        "lines": 5,
+        "path": "site/src/styles/starlight-custom.css"
+      },
+      {
+        "commits": 1,
+        "lines": 5,
+        "path": "site/tsconfig.json"
+      },
+      {
+        "commits": 8,
+        "lines": 71,
+        "path": "src/pcraft/__init__.py"
+      },
+      {
+        "commits": 3,
+        "lines": 13,
+        "path": "src/pcraft/__main__.py"
+      },
+      {
+        "commits": 27,
+        "lines": 2766,
+        "path": "src/pcraft/cli/__init__.py"
+      },
+      {
+        "commits": 3,
+        "lines": 12,
+        "path": "src/pcraft/cli/__main__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/__init__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/contract/__init__.py"
+      },
+      {
+        "commits": 7,
+        "lines": 241,
+        "path": "src/pcraft/core/contract/compile_questions.py"
+      },
+      {
+        "commits": 1,
+        "lines": 181,
+        "path": "src/pcraft/core/contract/diff.py"
+      },
+      {
+        "commits": 1,
+        "lines": 128,
+        "path": "src/pcraft/core/contract/explain.py"
+      },
+      {
+        "commits": 2,
+        "lines": 30,
+        "path": "src/pcraft/core/contract/hash.py"
+      },
+      {
+        "commits": 1,
+        "lines": 189,
+        "path": "src/pcraft/core/contract/lint.py"
+      },
+      {
+        "commits": 14,
+        "lines": 889,
+        "path": "src/pcraft/core/contract/loader.py"
+      },
+      {
+        "commits": 1,
+        "lines": 283,
+        "path": "src/pcraft/core/contract/scaffold.py"
+      },
+      {
+        "commits": 12,
+        "lines": 530,
+        "path": "src/pcraft/core/contract/schema.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/gate/__init__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 313,
+        "path": "src/pcraft/core/gate/batch.py"
+      },
+      {
+        "commits": 6,
+        "lines": 347,
+        "path": "src/pcraft/core/gate/checkpoint.py"
+      },
+      {
+        "commits": 8,
+        "lines": 151,
+        "path": "src/pcraft/core/gate/exit_contract.py"
+      },
+      {
+        "commits": 5,
+        "lines": 98,
+        "path": "src/pcraft/core/gate/family_guard.py"
+      },
+      {
+        "commits": 13,
+        "lines": 631,
+        "path": "src/pcraft/core/gate/harness.py"
+      },
+      {
+        "commits": 1,
+        "lines": 571,
+        "path": "src/pcraft/core/gate/holdout.py"
+      },
+      {
+        "commits": 2,
+        "lines": 44,
+        "path": "src/pcraft/core/gate/preflight.py"
+      },
+      {
+        "commits": 2,
+        "lines": 329,
+        "path": "src/pcraft/core/gate/regrade.py"
+      },
+      {
+        "commits": 1,
+        "lines": 273,
+        "path": "src/pcraft/core/gate/table_tools.py"
+      },
+      {
+        "commits": 8,
+        "lines": 303,
+        "path": "src/pcraft/core/gate/thresholds.py"
+      },
+      {
+        "commits": 2,
+        "lines": 79,
+        "path": "src/pcraft/core/gate/verifier_iface.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/loop/__init__.py"
+      },
+      {
+        "commits": 2,
+        "lines": 78,
+        "path": "src/pcraft/core/loop/compensators.py"
+      },
+      {
+        "commits": 1,
+        "lines": 36,
+        "path": "src/pcraft/core/loop/generator_iface.py"
+      },
+      {
+        "commits": 14,
+        "lines": 934,
+        "path": "src/pcraft/core/loop/orchestrate.py"
+      },
+      {
+        "commits": 7,
+        "lines": 244,
+        "path": "src/pcraft/core/loop/retry_policy.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/optimize/__init__.py"
+      },
+      {
+        "commits": 3,
+        "lines": 95,
+        "path": "src/pcraft/core/optimize/artifact.py"
+      },
+      {
+        "commits": 5,
+        "lines": 358,
+        "path": "src/pcraft/core/optimize/compile.py"
+      },
+      {
+        "commits": 3,
+        "lines": 97,
+        "path": "src/pcraft/core/plugin.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/receipt/__init__.py"
+      },
+      {
+        "commits": 7,
+        "lines": 357,
+        "path": "src/pcraft/core/receipt/asset_record.py"
+      },
+      {
+        "commits": 1,
+        "lines": 339,
+        "path": "src/pcraft/core/receipt/disposition.py"
+      },
+      {
+        "commits": 1,
+        "lines": 315,
+        "path": "src/pcraft/core/receipt/index.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/core/synth/__init__.py"
+      },
+      {
+        "commits": 2,
+        "lines": 53,
+        "path": "src/pcraft/core/synth/assert_.py"
+      },
+      {
+        "commits": 8,
+        "lines": 225,
+        "path": "src/pcraft/core/synth/signature.py"
+      },
+      {
+        "commits": 2,
+        "lines": 36,
+        "path": "src/pcraft/core/synth/synthesizer_iface.py"
+      },
+      {
+        "commits": 5,
+        "lines": 179,
+        "path": "src/pcraft/core/synth/visual_inventory.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/__init__.py"
+      },
+      {
+        "commits": 3,
+        "lines": 41,
+        "path": "src/pcraft/domains/image/__init__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 9,
+        "path": "src/pcraft/domains/image/compiled/sprite.synth.v1-gepa.json"
+      },
+      {
+        "commits": 1,
+        "lines": 9,
+        "path": "src/pcraft/domains/image/compiled/sprite.synth.v1.json"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/generator/__init__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 56,
+        "path": "src/pcraft/domains/image/generator/_device.py"
+      },
+      {
+        "commits": 11,
+        "lines": 444,
+        "path": "src/pcraft/domains/image/generator/conditioning.py"
+      },
+      {
+        "commits": 10,
+        "lines": 293,
+        "path": "src/pcraft/domains/image/generator/flux_generator.py"
+      },
+      {
+        "commits": 7,
+        "lines": 616,
+        "path": "src/pcraft/domains/image/generator/kontext_fill.py"
+      },
+      {
+        "commits": 6,
+        "lines": 150,
+        "path": "src/pcraft/domains/image/generator/reference_lock.py"
+      },
+      {
+        "commits": 13,
+        "lines": 553,
+        "path": "src/pcraft/domains/image/generator/sdxl_generator.py"
+      },
+      {
+        "commits": 1,
+        "lines": 1156,
+        "path": "src/pcraft/domains/image/rules/encoder_craft.md"
+      },
+      {
+        "commits": 2,
+        "lines": 706,
+        "path": "src/pcraft/domains/image/scaffold.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/__init__.py"
+      },
+      {
+        "commits": 3,
+        "lines": 58,
+        "path": "src/pcraft/domains/image/subdomains/sprite/__init__.py"
+      },
+      {
+        "commits": 2,
+        "lines": 706,
+        "path": "src/pcraft/domains/image/subdomains/sprite/calibrate.py"
+      },
+      {
+        "commits": 1,
+        "lines": 55,
+        "path": "src/pcraft/domains/image/subdomains/sprite/contracts/characters/example-cloud.character.contract.json"
+      },
+      {
+        "commits": 2,
+        "lines": 65,
+        "path": "src/pcraft/domains/image/subdomains/sprite/contracts/characters/example.character.contract.json"
+      },
+      {
+        "commits": 1,
+        "lines": 64,
+        "path": "src/pcraft/domains/image/subdomains/sprite/contracts/factions/example-cloud.faction.contract.json"
+      },
+      {
+        "commits": 3,
+        "lines": 78,
+        "path": "src/pcraft/domains/image/subdomains/sprite/contracts/factions/example.faction.contract.json"
+      },
+      {
+        "commits": 2,
+        "lines": 89,
+        "path": "src/pcraft/domains/image/subdomains/sprite/identity_subgate.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/plates/ashen-pact-costume.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/plates/ashen-reaver-front.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/back-left.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/back-right.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/back.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/front-left.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/front-right.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/front.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/left.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/right.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "src/pcraft/domains/image/subdomains/sprite/thresholds/sprite.calibration.json"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/domains/image/verifier/__init__.py"
+      },
+      {
+        "commits": 2,
+        "lines": 215,
+        "path": "src/pcraft/domains/image/verifier/dsg_expand.py"
+      },
+      {
+        "commits": 6,
+        "lines": 302,
+        "path": "src/pcraft/domains/image/verifier/dsg_verifier.py"
+      },
+      {
+        "commits": 6,
+        "lines": 924,
+        "path": "src/pcraft/domains/image/verifier/palette_verifier.py"
+      },
+      {
+        "commits": 1,
+        "lines": 131,
+        "path": "src/pcraft/domains/image/verifier/region.py"
+      },
+      {
+        "commits": 3,
+        "lines": 97,
+        "path": "src/pcraft/domains/image/verifier/siglip2_screen.py"
+      },
+      {
+        "commits": 3,
+        "lines": 107,
+        "path": "src/pcraft/domains/image/verifier/vqascore_verifier.py"
+      },
+      {
+        "commits": 22,
+        "lines": 546,
+        "path": "src/pcraft/errors.py"
+      },
+      {
+        "commits": 6,
+        "lines": 222,
+        "path": "src/pcraft/gate_report.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "src/pcraft/py.typed"
+      },
+      {
+        "commits": 10,
+        "lines": 360,
+        "path": "src/pcraft/sample.py"
+      },
+      {
+        "commits": 5,
+        "lines": 153,
+        "path": "src/pcraft/testing.py"
+      },
+      {
+        "commits": 1,
+        "lines": 0,
+        "path": "tests/__init__.py"
+      },
+      {
+        "commits": 1,
+        "lines": 11,
+        "path": "tests/conftest.py"
+      },
+      {
+        "commits": 2,
+        "lines": 73,
+        "path": "tests/test_abstention.py"
+      },
+      {
+        "commits": 16,
+        "lines": 1964,
+        "path": "tests/test_amend_cli.py"
+      },
+      {
+        "commits": 9,
+        "lines": 2382,
+        "path": "tests/test_amend_contract.py"
+      },
+      {
+        "commits": 6,
+        "lines": 954,
+        "path": "tests/test_amend_gate.py"
+      },
+      {
+        "commits": 12,
+        "lines": 1659,
+        "path": "tests/test_amend_image.py"
+      },
+      {
+        "commits": 10,
+        "lines": 921,
+        "path": "tests/test_amend_loop.py"
+      },
+      {
+        "commits": 1,
+        "lines": 28,
+        "path": "tests/test_compensators.py"
+      },
+      {
+        "commits": 8,
+        "lines": 299,
+        "path": "tests/test_compile_questions.py"
+      },
+      {
+        "commits": 5,
+        "lines": 606,
+        "path": "tests/test_contract_loader.py"
+      },
+      {
+        "commits": 6,
+        "lines": 71,
+        "path": "tests/test_core_is_gpu_free.py"
+      },
+      {
+        "commits": 2,
+        "lines": 24,
+        "path": "tests/test_end_to_end_demo.py"
+      },
+      {
+        "commits": 3,
+        "lines": 61,
+        "path": "tests/test_family_guard.py"
+      },
+      {
+        "commits": 6,
+        "lines": 727,
+        "path": "tests/test_feat_checkpoint.py"
+      },
+      {
+        "commits": 11,
+        "lines": 1389,
+        "path": "tests/test_feat_cli.py"
+      },
+      {
+        "commits": 4,
+        "lines": 335,
+        "path": "tests/test_feat_dsg.py"
+      },
+      {
+        "commits": 7,
+        "lines": 804,
+        "path": "tests/test_feat_encoders.py"
+      },
+      {
+        "commits": 5,
+        "lines": 571,
+        "path": "tests/test_feat_gepa.py"
+      },
+      {
+        "commits": 6,
+        "lines": 1017,
+        "path": "tests/test_feat_palette.py"
+      },
+      {
+        "commits": 6,
+        "lines": 892,
+        "path": "tests/test_feat_recipe.py"
+      },
+      {
+        "commits": 7,
+        "lines": 286,
+        "path": "tests/test_gate_exit.py"
+      },
+      {
+        "commits": 8,
+        "lines": 643,
+        "path": "tests/test_gate_harness.py"
+      },
+      {
+        "commits": 2,
+        "lines": 453,
+        "path": "tests/test_identity_subgate.py"
+      },
+      {
+        "commits": 2,
+        "lines": 43,
+        "path": "tests/test_image_plugin.py"
+      },
+      {
+        "commits": 4,
+        "lines": 172,
+        "path": "tests/test_negation_severity.py"
+      },
+      {
+        "commits": 2,
+        "lines": 66,
+        "path": "tests/test_orchestrate_andon.py"
+      },
+      {
+        "commits": 12,
+        "lines": 305,
+        "path": "tests/test_packaging.py"
+      },
+      {
+        "commits": 4,
+        "lines": 297,
+        "path": "tests/test_predicate_fixtures.py"
+      },
+      {
+        "commits": 8,
+        "lines": 621,
+        "path": "tests/test_receipt_replay.py"
+      },
+      {
+        "commits": 2,
+        "lines": 41,
+        "path": "tests/test_retry_identity_line.py"
+      },
+      {
+        "commits": 7,
+        "lines": 567,
+        "path": "tests/test_stability_surface.py"
+      },
+      {
+        "commits": 2,
+        "lines": 212,
+        "path": "tests/test_stability_surface_names_resolve.py"
+      },
+      {
+        "commits": 4,
+        "lines": 253,
+        "path": "tests/test_synth_guards.py"
+      },
+      {
+        "commits": 5,
+        "lines": 777,
+        "path": "tests/test_thresholds.py"
+      },
+      {
+        "commits": 3,
+        "lines": 205,
+        "path": "tests/test_tier_census.py"
+      },
+      {
+        "commits": 1,
+        "lines": 45,
+        "path": "tests/test_unreached.py"
+      },
+      {
+        "commits": 9,
+        "lines": 1160,
+        "path": "tests/test_verify_legs.py"
+      },
+      {
+        "commits": 8,
+        "lines": 586,
+        "path": "verify.py"
+      }
+    ]
+  },
+  "confidence": {
+    "level": "low",
+    "reason": "fewer than 20 source files reach 10 revisions in the window"
+  },
+  "generatedAt": "2026-09-25T02:23:39.532Z",
+  "generatedFrom": {
+    "commit": "cdc0bedcb5fc94cf429b4d217ffc90090739e4fb"
+  },
+  "pairs": [
+    {
+      "a": "ADVISOR.md",
+      "b": "HANDOFF.md",
+      "either": 23,
+      "shared": 14,
+      "strength": 0.608696
+    },
+    {
+      "a": "ADVISOR.md",
+      "b": "grok.md",
+      "either": 21,
+      "shared": 15,
+      "strength": 0.714286
+    },
+    {
+      "a": "HANDOFF.md",
+      "b": "grok.md",
+      "either": 26,
+      "shared": 15,
+      "strength": 0.576923
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.fr.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.hi.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.it.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.ja.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.pt-BR.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.es.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.es.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.es.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.hi.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.it.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.ja.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.pt-BR.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.fr.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.fr.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.fr.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.it.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.ja.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.pt-BR.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.hi.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.hi.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.hi.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.it.md",
+      "b": "README.ja.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.it.md",
+      "b": "README.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.it.md",
+      "b": "README.pt-BR.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.it.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.it.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.it.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.it.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.ja.md",
+      "b": "README.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.ja.md",
+      "b": "README.pt-BR.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.ja.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.ja.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.ja.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.ja.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.md",
+      "b": "README.pt-BR.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.md",
+      "b": "README.pypi.md",
+      "either": 22,
+      "shared": 15,
+      "strength": 0.681818
+    },
+    {
+      "a": "README.md",
+      "b": "README.zh.md",
+      "either": 23,
+      "shared": 15,
+      "strength": 0.652174
+    },
+    {
+      "a": "README.md",
+      "b": "npm/README.md",
+      "either": 22,
+      "shared": 14,
+      "strength": 0.636364
+    },
+    {
+      "a": "README.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 22,
+      "shared": 14,
+      "strength": 0.636364
+    },
+    {
+      "a": "README.pt-BR.md",
+      "b": "README.pypi.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.pt-BR.md",
+      "b": "README.zh.md",
+      "either": 16,
+      "shared": 16,
+      "strength": 1
+    },
+    {
+      "a": "README.pt-BR.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.pt-BR.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.pypi.md",
+      "b": "README.zh.md",
+      "either": 19,
+      "shared": 12,
+      "strength": 0.631579
+    },
+    {
+      "a": "README.pypi.md",
+      "b": "npm/README.md",
+      "either": 16,
+      "shared": 13,
+      "strength": 0.8125
+    },
+    {
+      "a": "README.pypi.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 17,
+      "shared": 12,
+      "strength": 0.705882
+    },
+    {
+      "a": "README.zh.md",
+      "b": "npm/README.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "README.zh.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 19,
+      "shared": 11,
+      "strength": 0.578947
+    },
+    {
+      "a": "npm/README.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 15,
+      "shared": 13,
+      "strength": 0.866667
+    },
+    {
+      "a": "npm/package.json",
+      "b": "site/src/site-config.ts",
+      "either": 7,
+      "shared": 4,
+      "strength": 0.571429
+    },
+    {
+      "a": "site/src/content/docs/handbook/cli.md",
+      "b": "site/src/site-config.ts",
+      "either": 7,
+      "shared": 4,
+      "strength": 0.571429
+    },
+    {
+      "a": "site/src/content/docs/handbook/contracts.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 14,
+      "shared": 7,
+      "strength": 0.5
+    },
+    {
+      "a": "site/src/content/docs/handbook/contracts.md",
+      "b": "tests/test_feat_encoders.py",
+      "either": 9,
+      "shared": 5,
+      "strength": 0.555556
+    },
+    {
+      "a": "site/src/content/docs/handbook/getting-started.md",
+      "b": "site/src/content/docs/handbook/index.md",
+      "either": 14,
+      "shared": 7,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/contract/compile_questions.py",
+      "b": "tests/test_compile_questions.py",
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
+    },
+    {
+      "a": "src/pcraft/core/contract/loader.py",
+      "b": "tests/test_amend_contract.py",
+      "either": 12,
+      "shared": 8,
+      "strength": 0.666667
+    },
+    {
+      "a": "src/pcraft/core/gate/checkpoint.py",
+      "b": "tests/test_amend_gate.py",
+      "either": 7,
+      "shared": 4,
+      "strength": 0.571429
+    },
+    {
+      "a": "src/pcraft/core/gate/checkpoint.py",
+      "b": "tests/test_feat_checkpoint.py",
+      "either": 7,
+      "shared": 5,
+      "strength": 0.714286
+    },
+    {
+      "a": "src/pcraft/core/gate/checkpoint.py",
+      "b": "tests/test_stability_surface.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/gate/exit_contract.py",
+      "b": "tests/test_gate_exit.py",
+      "either": 9,
+      "shared": 6,
+      "strength": 0.666667
+    },
+    {
+      "a": "src/pcraft/core/gate/exit_contract.py",
+      "b": "tests/test_stability_surface.py",
+      "either": 9,
+      "shared": 5,
+      "strength": 0.555556
+    },
+    {
+      "a": "src/pcraft/core/gate/harness.py",
+      "b": "src/pcraft/core/gate/thresholds.py",
+      "either": 12,
+      "shared": 6,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/gate/harness.py",
+      "b": "src/pcraft/core/loop/orchestrate.py",
+      "either": 15,
+      "shared": 8,
+      "strength": 0.533333
+    },
+    {
+      "a": "src/pcraft/core/gate/harness.py",
+      "b": "tests/test_compile_questions.py",
+      "either": 12,
+      "shared": 6,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/gate/harness.py",
+      "b": "tests/test_gate_exit.py",
+      "either": 12,
+      "shared": 6,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/gate/harness.py",
+      "b": "tests/test_gate_harness.py",
+      "either": 12,
+      "shared": 6,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/core/loop/orchestrate.py",
+      "b": "tests/test_amend_loop.py",
+      "either": 13,
+      "shared": 8,
+      "strength": 0.615385
+    },
+    {
+      "a": "src/pcraft/core/receipt/asset_record.py",
+      "b": "tests/test_receipt_replay.py",
+      "either": 7,
+      "shared": 6,
+      "strength": 0.857143
+    },
+    {
+      "a": "src/pcraft/core/synth/signature.py",
+      "b": "tests/test_feat_checkpoint.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/domains/image/generator/kontext_fill.py",
+      "b": "tests/test_feat_recipe.py",
+      "either": 7,
+      "shared": 4,
+      "strength": 0.571429
+    },
+    {
+      "a": "src/pcraft/domains/image/verifier/dsg_verifier.py",
+      "b": "tests/test_gate_harness.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/domains/image/verifier/palette_verifier.py",
+      "b": "tests/test_feat_palette.py",
+      "either": 6,
+      "shared": 4,
+      "strength": 0.666667
+    },
+    {
+      "a": "src/pcraft/domains/image/verifier/palette_verifier.py",
+      "b": "tests/test_gate_harness.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/gate_report.py",
+      "b": "tests/test_gate_exit.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "src/pcraft/gate_report.py",
+      "b": "tests/test_gate_harness.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "tests/test_amend_contract.py",
+      "b": "tests/test_compile_questions.py",
+      "either": 10,
+      "shared": 5,
+      "strength": 0.5
+    },
+    {
+      "a": "tests/test_amend_gate.py",
+      "b": "tests/test_compile_questions.py",
+      "either": 8,
+      "shared": 4,
+      "strength": 0.5
+    },
+    {
+      "a": "tests/test_verify_legs.py",
+      "b": "verify.py",
+      "either": 9,
+      "shared": 7,
+      "strength": 0.777778
+    }
+  ],
+  "parameters": {
+    "appliedChangesetLimit": 45.75,
+    "changeset": 50,
+    "changesetFraction": 0.25,
+    "cohesionDrop": 0.2,
+    "couplingPopulation": "source",
+    "fallenShared": 3,
+    "floor": "fallen",
+    "floorHeld": false,
+    "floorTrigger": "revision-depth",
+    "headDate": "2026-09-17T18:59:46-07:00",
+    "inScopeFiles": 183,
+    "pinnedStart": null,
+    "priorFloor": null,
+    "qualifyingCommits": 77,
+    "qualifyingMinimum": 30,
+    "revisions": 5,
+    "shared": 10,
+    "sharedFloorUsed": 3,
+    "since": "2026-03-22T01:59:46.000Z",
+    "sourceExtensions": [
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".jsx",
+      ".ts",
+      ".tsx",
+      ".mts",
+      ".cts",
+      ".py",
+      ".rs",
+      ".gd"
+    ],
+    "sourceFileReach": 20,
+    "sourceFileRise": 25,
+    "sourceFilesReachingStrongFloor": 12,
+    "strength": 0.5,
+    "windowDays": 180
+  },
+  "strengthDefinition": "strength is the shared qualifying commits divided by either. either is the number of qualifying commits that touch either file."
+}
