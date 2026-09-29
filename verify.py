@@ -407,6 +407,18 @@ def main(argv: list[str] | None = None) -> int:
         _run("lint", [py, "-m", "ruff", "check", "src", "tests", "verify.py"], env, ran)
         _run("typecheck", [py, "-m", "mypy", "src", "verify.py"], env, ran)
         pytest = [py, "-m", "pytest", "-q", f"--basetemp={scratch / 't'}"]
+        # ci.yml sets COVERAGE_LEG to 'true' on the one cell whose reports go to
+        # Codecov. There the suite also measures pcraft's coverage and writes JUnit
+        # results, both at the root, for the workflow to hand on. Coverage is
+        # reported, never held: no --cov-fail-under, and codecov.yml keeps both of
+        # Codecov's statuses informational, so no threshold is invented here.
+        if os.environ.get("COVERAGE_LEG") == "true":
+            pytest += [
+                "--cov=pcraft",
+                "--cov-report=term",
+                f"--cov-report=xml:{ROOT / 'coverage.xml'}",
+                f"--junitxml={ROOT / 'junit.xml'}",
+            ]
         _run("suite", pytest, env, ran)
         env_o = env.copy()
         env_o["PYTHONOPTIMIZE"] = "1"
