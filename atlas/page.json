@@ -7,7 +7,7 @@
   ],
   "breaks": [
     {
-      "doors": 2,
+      "doors": 3,
       "importedBy": [
         "src"
       ],
@@ -19,7 +19,7 @@
       "partLabel": "scripts"
     },
     {
-      "doors": 2,
+      "doors": 3,
       "importedBy": [
         "scripts"
       ],
@@ -33,16 +33,104 @@
     {
       "doors": 2,
       "importedBy": [],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "tests",
+      "partLabel": "tests",
+      "spawnedBy": [
+        "root",
+        "scripts"
+      ]
+    },
+    {
+      "doors": 2,
+      "importedBy": [],
       "importedByTests": [
         "tests"
       ],
       "kind": "part",
       "name": "root",
       "partLabel": "the repository root"
+    },
+    {
+      "doors": 2,
+      "importedBy": [],
+      "importedByTests": [],
+      "kind": "part",
+      "name": "npm",
+      "partLabel": "npm"
     }
   ],
   "changes": {
-    "first": true
+    "fileCounts": {
+      "added": 1,
+      "changed": 3,
+      "moved": 0,
+      "parts": 2,
+      "removed": 0
+    },
+    "items": [
+      {
+        "kind": "door",
+        "sentence": "ci's pull request trigger now also names `codecov.yml`.",
+        "subjects": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "ci's push trigger now also names `codecov.yml`.",
+        "subjects": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "ci now also runs tests/.",
+        "subjects": [
+          ".github/workflows/ci.yml",
+          "tests/"
+        ]
+      },
+      {
+        "kind": "door",
+        "sentence": "And 4 more changes to doors.",
+        "subjects": []
+      },
+      {
+        "kind": "landing",
+        "sentence": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/ is now written by scripts/draw_openpose_plates.py.",
+        "subjects": [
+          "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/",
+          "scripts/draw_openpose_plates.py"
+        ]
+      },
+      {
+        "kind": "landing",
+        "sentence": "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png is now written by scripts/draw_openpose_plates.py.",
+        "subjects": [
+          "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png",
+          "scripts/draw_openpose_plates.py"
+        ]
+      },
+      {
+        "kind": "origin",
+        "sentence": "src was authored and is now mixed.",
+        "subjects": [
+          "src"
+        ]
+      },
+      {
+        "kind": "counts",
+        "sentence": "1 file added and 3 changed content, across 2 parts.",
+        "subjects": []
+      }
+    ],
+    "since": {
+      "commit": "cdc0bedcb5fc94cf429b4d217ffc90090739e4fb",
+      "generatedAt": "2026-09-25T02:23:39.532Z"
+    },
+    "unchanged": false
   },
   "changesTogether": [
     {
@@ -61,21 +149,6 @@
       "shared": 6
     },
     {
-      "a": "tests/test_verify_legs.py",
-      "b": "verify.py",
-      "either": 9,
-      "partLabels": [
-        "tests",
-        "the repository root"
-      ],
-      "parts": [
-        "tests",
-        "root"
-      ],
-      "relation": "a-imports-b",
-      "shared": 7
-    },
-    {
       "a": "src/pcraft/core/gate/checkpoint.py",
       "b": "tests/test_feat_checkpoint.py",
       "either": 7,
@@ -89,6 +162,21 @@
       ],
       "relation": "b-imports-a",
       "shared": 5
+    },
+    {
+      "a": "tests/test_verify_legs.py",
+      "b": "verify.py",
+      "either": 10,
+      "partLabels": [
+        "tests",
+        "the repository root"
+      ],
+      "parts": [
+        "tests",
+        "root"
+      ],
+      "relation": "a-imports-b",
+      "shared": 7
     },
     {
       "a": "src/pcraft/core/contract/loader.py",
@@ -123,17 +211,17 @@
   ],
   "changesTogetherNote": [
     "1 file changed together with its own test, as expected.",
-    "Confidence is low: fewer than 20 source files reach 10 revisions in the window.",
+    "Confidence is low: fewer than 25 source files reach 10 revisions in the window.",
     "Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 1,
-  "commit": "cdc0bedcb5fc94cf429b4d217ffc90090739e4fb",
+  "commit": "43f3cfe48aabc2c12a31954563cfc823abd21295",
   "defaultBranch": "main",
-  "derived": "8 parts, mostly Python (112 files), JavaScript (2) and TypeScript (2). Work enters through 4 doors; the busiest is release, which reaches 4 parts. It publishes to PyPI and @mcptoolshop/prompt-crafter (npm) to npm. People run pcraft.",
+  "derived": "8 parts, mostly Python (112 files), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 5 doors; the busiest is release, which reaches 5 parts. It publishes to PyPI and @mcptoolshop/prompt-crafter to npm. It deploys a site to GitHub Pages. People run pcraft.",
   "doors": [
     {
       "checks": [
-        "src/pcraft/"
+        "src/"
       ],
       "checksCount": 1,
       "checksMore": 0,
@@ -171,18 +259,24 @@
           "files": 69
         },
         {
+          "boundary": "tests",
+          "depth": 0,
+          "files": 38
+        },
+        {
           "boundary": "scripts",
           "depth": 1,
-          "files": 1
+          "files": 3
         }
       ],
       "runs": [
+        "tests/",
         "verify.py"
       ],
-      "runsCount": 1,
+      "runsCount": 2,
       "runsMore": 0,
       "sends": [
-        "publishes to PyPI and @mcptoolshop/prompt-crafter (npm) to npm (on a run by hand, only with dry_run false)"
+        "publishes to PyPI and @mcptoolshop/prompt-crafter to npm (on a run by hand, only with dry_run false)"
       ],
       "stages": [],
       "triggers": [
@@ -191,8 +285,10 @@
       ]
     },
     {
-      "checks": [],
-      "checksCount": 0,
+      "checks": [
+        "src/"
+      ],
+      "checksCount": 1,
       "checksMore": 0,
       "file": ".github/workflows/ci.yml",
       "id": ".github/workflows/ci.yml",
@@ -204,18 +300,36 @@
           "boundary": "root",
           "depth": 0,
           "files": 1
+        },
+        {
+          "boundary": "src",
+          "depth": 0,
+          "files": 69
+        },
+        {
+          "boundary": "tests",
+          "depth": 0,
+          "files": 38
+        },
+        {
+          "boundary": "scripts",
+          "depth": 1,
+          "files": 3
         }
       ],
       "runs": [
+        "tests/",
         "verify.py"
       ],
-      "runsCount": 1,
+      "runsCount": 2,
       "runsMore": 0,
-      "sends": [],
+      "sends": [
+        "uploads coverage to Codecov"
+      ],
       "stages": [],
       "triggers": [
-        "on a pull request touching 9 paths",
-        "on a push touching 9 paths",
+        "on a pull request touching 10 paths",
+        "on a push touching 10 paths",
         "or by hand"
       ]
     },
@@ -232,7 +346,7 @@
         {
           "boundary": "site",
           "depth": 0,
-          "files": 3
+          "files": 5
         }
       ],
       "runs": [
@@ -264,7 +378,7 @@
         {
           "boundary": "src",
           "depth": 0,
-          "files": 48
+          "files": 51
         },
         {
           "boundary": "scripts",
@@ -274,6 +388,32 @@
       ],
       "runs": [
         "src/pcraft/cli/__init__.py"
+      ],
+      "runsCount": 1,
+      "runsMore": 0,
+      "sends": [],
+      "stages": [],
+      "triggers": []
+    },
+    {
+      "checks": [],
+      "checksCount": 0,
+      "checksMore": 0,
+      "file": "npm/package.json",
+      "id": "npm/package.json#pcraft",
+      "kind": "command",
+      "landings": [],
+      "name": "pcraft",
+      "pushes": false,
+      "reach": [
+        {
+          "boundary": "npm",
+          "depth": 0,
+          "files": 1
+        }
+      ],
+      "runs": [
+        "npm/bin/pcraft.mjs"
       ],
       "runsCount": 1,
       "runsMore": 0,
@@ -295,16 +435,46 @@
       "from": "src",
       "fromTests": false,
       "to": "scripts"
+    },
+    {
+      "from": "tests",
+      "fromTests": true,
+      "to": "root"
+    },
+    {
+      "from": "tests",
+      "fromTests": true,
+      "to": "scripts"
+    },
+    {
+      "from": "tests",
+      "fromTests": true,
+      "to": "src"
     }
   ],
-  "generated": [],
-  "generatedAt": "2026-09-25T02:23:39.532Z",
+  "engine": "1.24.0",
+  "generated": [
+    {
+      "place": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/",
+      "writers": [
+        "scripts/draw_openpose_plates.py"
+      ]
+    },
+    {
+      "place": "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png",
+      "writers": [
+        "scripts/draw_openpose_plates.py"
+      ]
+    }
+  ],
+  "generatedAt": "2026-09-30T20:11:43.899Z",
   "limits": [
-    "8 import sites could not be resolved.",
-    "12 writes and 15 reads use paths built at run time and are not named here.",
+    "8 imports could not be resolved: `src/pcraft/domains/image/scaffold.py` imports a path built at run time; `src/pcraft/domains/image/subdomains/sprite/calibrate.py` imports a path built at run time; `tests/test_amend_cli.py` imports a path built at run time; and 5 more.",
+    "5 writes and 4 reads use paths built at run time and are not named here.",
+    "9 writes and 22 reads go to a path their caller passes, not to this repository.",
     "1 read goes to a temporary directory, not to this repository.",
     "2 commands are built at run time and not followed.",
-    "Statistics confidence is low: fewer than 20 source files reach 10 revisions in the window."
+    "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
   ],
   "mainDoor": ".github/workflows/release.yml",
   "partLabels": {
@@ -321,30 +491,43 @@
   "readers": [],
   "repo": "mcp-tool-shop-org/prompt-craft",
   "sequences": [],
-  "startDoor": ".github/workflows/ci.yml",
+  "startDoor": "pyproject.toml#pcraft",
   "startHere": [
-    ".github/workflows/ci.yml",
-    "verify.py"
+    "src/pcraft/cli/__init__.py",
+    "scripts/sync_rules_from_readouts.py"
   ],
+  "startReason": "This path follows pcraft (a command people run, from pyproject.toml) from its entry, since ci runs only tests, scripts that import no code here and checks.",
   "summary": null,
   "summaryFrom": null,
   "testFiles": 38,
   "testedBy": {
-    "npm": 0,
+    "npm": 1,
     "scripts": 9,
     "src": 37
   },
-  "unnamedWrites": 12,
-  "unread": [],
-  "unreadFiles": 0,
-  "unreadNote": [],
-  "untested": [
+  "testedByScript": [
+    "npm"
+  ],
+  "unnamedWrites": 5,
+  "unread": [
     {
-      "part": "npm",
-      "partLabel": "npm",
-      "testedBy": 0
+      "place": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/",
+      "writers": [
+        "scripts/draw_openpose_plates.py"
+      ]
+    },
+    {
+      "place": "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png",
+      "writers": [
+        "scripts/draw_openpose_plates.py"
+      ]
     }
   ],
-  "untestedNote": [],
-  "written": 0
+  "unreadFiles": 0,
+  "unreadNote": [],
+  "untested": [],
+  "untestedNote": [
+    "npm is tested only by its package's own test script, which a workflow runs."
+  ],
+  "written": 2
 }
