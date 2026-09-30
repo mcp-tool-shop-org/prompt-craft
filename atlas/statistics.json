@@ -67,7 +67,7 @@
       "confidence": "low",
       "highWater": null,
       "name": "root",
-      "qualifyingSourceCommits": 8,
+      "qualifyingSourceCommits": 9,
       "rebaseline": null
     },
     {
@@ -128,15 +128,18 @@
     {
       "breakage": {
         "coChangesOnly": [
-          "root",
           "src"
         ],
         "collapsed": false,
         "confidence": "low",
-        "importsAndCoChanges": [],
-        "importsOnly": []
+        "importsAndCoChanges": [
+          "root"
+        ],
+        "importsOnly": [
+          "scripts"
+        ]
       },
-      "cohesion": 0.077656,
+      "cohesion": 0.078128,
       "cohesionDropped": false,
       "confidence": "full",
       "highWater": null,
@@ -154,8 +157,8 @@
         "path": ".gitattributes"
       },
       {
-        "commits": 8,
-        "lines": 122,
+        "commits": 11,
+        "lines": 331,
         "path": ".github/workflows/ci.yml"
       },
       {
@@ -285,6 +288,36 @@
       },
       {
         "commits": 1,
+        "lines": 93,
+        "path": "atlas/README.md"
+      },
+      {
+        "commits": 1,
+        "lines": 34,
+        "path": "atlas/boundaries.yaml"
+      },
+      {
+        "commits": 1,
+        "lines": 350,
+        "path": "atlas/page.json"
+      },
+      {
+        "commits": 1,
+        "lines": 1732,
+        "path": "atlas/statistics.json"
+      },
+      {
+        "commits": 1,
+        "lines": 8373,
+        "path": "atlas/structure.json"
+      },
+      {
+        "commits": 2,
+        "lines": 36,
+        "path": "codecov.yml"
+      },
+      {
+        "commits": 1,
         "lines": 0,
         "path": "docs/assets/logo.png"
       },
@@ -319,8 +352,8 @@
         "path": "npm/package.json"
       },
       {
-        "commits": 16,
-        "lines": 349,
+        "commits": 18,
+        "lines": 379,
         "path": "pyproject.toml"
       },
       {
@@ -1064,19 +1097,19 @@
         "path": "tests/test_verify_legs.py"
       },
       {
-        "commits": 8,
-        "lines": 586,
+        "commits": 10,
+        "lines": 610,
         "path": "verify.py"
       }
     ]
   },
   "confidence": {
     "level": "low",
-    "reason": "fewer than 20 source files reach 10 revisions in the window"
+    "reason": "fewer than 25 source files reach 10 revisions in the window"
   },
-  "generatedAt": "2026-09-25T02:23:39.532Z",
+  "generatedAt": "2026-09-30T20:11:43.899Z",
   "generatedFrom": {
-    "commit": "cdc0bedcb5fc94cf429b4d217ffc90090739e4fb"
+    "commit": "43f3cfe48aabc2c12a31954563cfc823abd21295"
   },
   "pairs": [
     {
@@ -1684,13 +1717,13 @@
     {
       "a": "tests/test_verify_legs.py",
       "b": "verify.py",
-      "either": 9,
+      "either": 10,
       "shared": 7,
-      "strength": 0.777778
+      "strength": 0.7
     }
   ],
   "parameters": {
-    "appliedChangesetLimit": 45.75,
+    "appliedChangesetLimit": 47.25,
     "changeset": 50,
     "changesetFraction": 0.25,
     "cohesionDrop": 0.2,
@@ -1699,16 +1732,16 @@
     "floor": "fallen",
     "floorHeld": false,
     "floorTrigger": "revision-depth",
-    "headDate": "2026-09-17T18:59:46-07:00",
-    "inScopeFiles": 183,
+    "headDate": "2026-09-29T15:25:07-07:00",
+    "inScopeFiles": 189,
     "pinnedStart": null,
-    "priorFloor": null,
-    "qualifyingCommits": 77,
+    "priorFloor": "fallen",
+    "qualifyingCommits": 80,
     "qualifyingMinimum": 30,
     "revisions": 5,
     "shared": 10,
     "sharedFloorUsed": 3,
-    "since": "2026-03-22T01:59:46.000Z",
+    "since": "2026-04-02T22:25:07.000Z",
     "sourceExtensions": [
       ".js",
       ".mjs",
