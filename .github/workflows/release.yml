@@ -275,7 +275,7 @@ jobs:
       # It is a moving tag PyPA maintains rather than a major this repo chose, and its
       # action.yml is `using: composite` -- it carries no Node runtime of its own, so there
       # is no node20 pin here to bump. Checked, not assumed.
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   npm:
     needs: verify
