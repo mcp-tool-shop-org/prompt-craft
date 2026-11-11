@@ -1,21 +1,15 @@
 # prompt-craft: how it works
 
-Mapped at 2026-09-30 from commit 43f3cfe by Atlas 1.24.0.
+Mapped at 2026-11-11 from commit 018f3c9 by Atlas 1.26.0.
 
 ## What this is
 
 8 parts, mostly Python (112 files), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 5 doors; the busiest is release, which reaches 5 parts. It publishes to PyPI and @mcptoolshop/prompt-crafter to npm. It deploys a site to GitHub Pages. People run pcraft.
 
-## What changed since 2026-09-25 (cdc0bed)
+## What changed since 2026-09-30 (43f3cfe)
 
-- ci's pull request trigger now also names `codecov.yml`.
-- ci's push trigger now also names `codecov.yml`.
-- ci now also runs tests/.
-- And 4 more changes to doors.
-- src/pcraft/domains/image/subdomains/sprite/poses/turnaround/ is now written by scripts/draw_openpose_plates.py.
-- src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png is now written by scripts/draw_openpose_plates.py.
-- src was authored and is now mixed.
-- 1 file added and 3 changed content, across 2 parts.
+- src/**/__pycache__ is now read by scripts/mutate_predicates.py.
+- 3 files changed content, across 2 parts.
 
 ## What comes in
 
@@ -102,7 +96,7 @@ Read those in order to follow one run of pcraft end to end. This path follows pc
 
 - 8 imports could not be resolved: `src/pcraft/domains/image/scaffold.py` imports a path built at run time; `src/pcraft/domains/image/subdomains/sprite/calibrate.py` imports a path built at run time; `tests/test_amend_cli.py` imports a path built at run time; and 5 more.
 - 5 writes and 4 reads use paths built at run time and are not named here.
-- 9 writes and 22 reads go to a path their caller passes, not to this repository.
+- 9 writes and 21 reads go to a path their caller passes, not to this repository.
 - 1 read goes to a temporary directory, not to this repository.
 - 2 commands are built at run time and not followed.
 - Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window.

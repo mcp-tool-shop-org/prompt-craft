@@ -63,7 +63,7 @@
   ],
   "changes": {
     "fileCounts": {
-      "added": 1,
+      "added": 0,
       "changed": 3,
       "moved": 0,
       "parts": 2,
@@ -71,64 +71,22 @@
     },
     "items": [
       {
-        "kind": "door",
-        "sentence": "ci's pull request trigger now also names `codecov.yml`.",
-        "subjects": [
-          ".github/workflows/ci.yml"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "ci's push trigger now also names `codecov.yml`.",
-        "subjects": [
-          ".github/workflows/ci.yml"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "ci now also runs tests/.",
-        "subjects": [
-          ".github/workflows/ci.yml",
-          "tests/"
-        ]
-      },
-      {
-        "kind": "door",
-        "sentence": "And 4 more changes to doors.",
-        "subjects": []
-      },
-      {
         "kind": "landing",
-        "sentence": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/ is now written by scripts/draw_openpose_plates.py.",
+        "sentence": "src/**/__pycache__ is now read by scripts/mutate_predicates.py.",
         "subjects": [
-          "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/",
-          "scripts/draw_openpose_plates.py"
-        ]
-      },
-      {
-        "kind": "landing",
-        "sentence": "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png is now written by scripts/draw_openpose_plates.py.",
-        "subjects": [
-          "src/pcraft/domains/image/subdomains/sprite/poses/two-hand-weapon.openpose.png",
-          "scripts/draw_openpose_plates.py"
-        ]
-      },
-      {
-        "kind": "origin",
-        "sentence": "src was authored and is now mixed.",
-        "subjects": [
-          "src"
+          "src/**/__pycache__",
+          "scripts/mutate_predicates.py"
         ]
       },
       {
         "kind": "counts",
-        "sentence": "1 file added and 3 changed content, across 2 parts.",
+        "sentence": "3 files changed content, across 2 parts.",
         "subjects": []
       }
     ],
     "since": {
-      "commit": "cdc0bedcb5fc94cf429b4d217ffc90090739e4fb",
-      "generatedAt": "2026-09-25T02:23:39.532Z"
+      "commit": "43f3cfe48aabc2c12a31954563cfc823abd21295",
+      "generatedAt": "2026-09-30T20:11:43.899Z"
     },
     "unchanged": false
   },
@@ -215,7 +173,7 @@
     "Window: 180 days; a pair counts from 3 shared commits, since 12 source files reach 10 revisions; the floor rises to 10 when 25 do."
   ],
   "changesTogetherWithTests": 1,
-  "commit": "43f3cfe48aabc2c12a31954563cfc823abd21295",
+  "commit": "018f3c92b056198ae80d7b5d4b310a97919d955a",
   "defaultBranch": "main",
   "derived": "8 parts, mostly Python (112 files), CSS (2), JavaScript (2), TypeScript (2) and Astro (1). Work enters through 5 doors; the busiest is release, which reaches 5 parts. It publishes to PyPI and @mcptoolshop/prompt-crafter to npm. It deploys a site to GitHub Pages. People run pcraft.",
   "doors": [
@@ -452,7 +410,7 @@
       "to": "src"
     }
   ],
-  "engine": "1.24.0",
+  "engine": "1.26.0",
   "generated": [
     {
       "place": "src/pcraft/domains/image/subdomains/sprite/poses/turnaround/",
@@ -467,11 +425,11 @@
       ]
     }
   ],
-  "generatedAt": "2026-09-30T20:11:43.899Z",
+  "generatedAt": "2026-11-11T22:29:22.954Z",
   "limits": [
     "8 imports could not be resolved: `src/pcraft/domains/image/scaffold.py` imports a path built at run time; `src/pcraft/domains/image/subdomains/sprite/calibrate.py` imports a path built at run time; `tests/test_amend_cli.py` imports a path built at run time; and 5 more.",
     "5 writes and 4 reads use paths built at run time and are not named here.",
-    "9 writes and 22 reads go to a path their caller passes, not to this repository.",
+    "9 writes and 21 reads go to a path their caller passes, not to this repository.",
     "1 read goes to a temporary directory, not to this repository.",
     "2 commands are built at run time and not followed.",
     "Statistics confidence is low: fewer than 25 source files reach 10 revisions in the window."
@@ -508,6 +466,7 @@
   "testedByScript": [
     "npm"
   ],
+  "testedCodeParts": 3,
   "unnamedWrites": 5,
   "unread": [
     {
