@@ -9,7 +9,7 @@
       "externals": 0,
       "files": [
         {
-          "hash": "2b1bb550ab2f8e83d4c19504ce7519908c977b611b7e66523546b2059c3a7c39",
+          "hash": "76c09365d0d1da2c1aa6ef1ac0870ceff2d6d8e2f90b4d83fcfdb6fc44b5fb7d",
           "path": ".github/workflows/ci.yml"
         },
         {
@@ -17,7 +17,7 @@
           "path": ".github/workflows/pages.yml"
         },
         {
-          "hash": "929c45fd6da8ccb570ce50ed36e5bde7cff6318e96fbc718f9f66dc1463b9ee6",
+          "hash": "92a63f64957a6c057c654745c8000dbb4163d01497ef4f1916d9bcf145a60919",
           "path": ".github/workflows/release.yml"
         }
       ],
@@ -297,7 +297,7 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 2,
+      "dynamicReads": 1,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 3,
@@ -436,7 +436,7 @@
           "path": "site/astro.config.mjs"
         },
         {
-          "hash": "af5d4f54dca60686724d306eb58759fb25b6f5ba4d66559ab84a968112a184e5",
+          "hash": "0607a19c4f60b635244a906c7ad2424359b50e20c4a83bc140f202abce4a941e",
           "path": "site/package-lock.json"
         },
         {
@@ -521,7 +521,7 @@
       "unresolvedSites": 0
     },
     {
-      "dynamicReads": 2,
+      "dynamicReads": 3,
       "dynamicSpawns": 0,
       "dynamicSpawnsInTests": 0,
       "dynamicWrites": 2,
@@ -8107,14 +8107,14 @@
       "origin": "mixed",
       "outsidePlaces": [
         {
-          "reads": 22,
+          "reads": 21,
           "where": [
             "caller"
           ],
           "writes": 8
         }
       ],
-      "outsideReads": 22,
+      "outsideReads": 21,
       "outsideWrites": 8,
       "role": "code",
       "testRunners": [
@@ -11056,9 +11056,9 @@
       "to": "src"
     }
   ],
-  "engine": "1.24.0",
+  "engine": "1.26.0",
   "generatedFrom": {
-    "commit": "43f3cfe48aabc2c12a31954563cfc823abd21295",
+    "commit": "018f3c92b056198ae80d7b5d4b310a97919d955a",
     "tracked": 184
   },
   "landings": [
@@ -11234,6 +11234,17 @@
         }
       ],
       "target": "src",
+      "writers": []
+    },
+    {
+      "readers": [
+        {
+          "by": "scripts/mutate_predicates.py",
+          "call": "glob",
+          "confidence": "ast"
+        }
+      ],
+      "target": "src/**/__pycache__",
       "writers": []
     },
     {
